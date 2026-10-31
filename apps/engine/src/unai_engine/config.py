@@ -27,7 +27,7 @@ class Settings:
     model_timeout_seconds: float = float(os.getenv("UNAI_MODEL_TIMEOUT_SECONDS", "180"))
     cors_origins: tuple[str, ...] = _csv(os.getenv("UNAI_CORS_ORIGINS", "http://localhost:5173"))
     workspace_root: Path = _path_setting("UNAI_WORKSPACE_ROOT", ".workspaces")
-    docker_image: str = os.getenv("UNAI_DOCKER_IMAGE", "python:3.12-slim")
+    docker_image: str = os.getenv("UNAI_DOCKER_IMAGE", "unai-python-test:latest")
     sandbox_timeout_seconds: int = int(os.getenv("UNAI_SANDBOX_TIMEOUT_SECONDS", "120"))
     brain_vault_root: Path = _path_setting("UNAI_BRAIN_VAULT_ROOT", ".brain-vault")
     brain_index_path: Path = _path_setting("UNAI_BRAIN_INDEX_PATH", ".data/brain.sqlite3")
