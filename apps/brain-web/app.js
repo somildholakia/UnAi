@@ -1,5 +1,5 @@
 const params = new URLSearchParams(location.search);
-const API = (params.get("api") || localStorage.getItem("unai-brain-api") || "http://127.0.0.1:8787").replace(/\/$/, "");
+const API = (params.get("api") || localStorage.getItem("unai-brain-api") || location.origin).replace(/\/$/, "");
 const el = id => document.getElementById(id);
 let graphData = {nodes:[],edges:[]};
 
