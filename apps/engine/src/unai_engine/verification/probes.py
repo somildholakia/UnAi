@@ -63,10 +63,6 @@ def _annotation_kind(annotation: str) -> str:
     value = annotation.casefold().replace(" ", "")
     if any(token in value for token in ("str", "string")):
         return "str"
-    if any(token in value for token in ("int", "integer")):
-        return "int"
-    if any(token in value for token in ("float", "decimal")):
-        return "float"
     if "bool" in value:
         return "bool"
     if any(token in value for token in ("list", "sequence", "tuple", "iterable")):
@@ -75,6 +71,10 @@ def _annotation_kind(annotation: str) -> str:
         return "dict"
     if "set" in value:
         return "set"
+    if any(token in value for token in ("int", "integer")):
+        return "int"
+    if any(token in value for token in ("float", "decimal")):
+        return "float"
     return "unknown"
 
 
@@ -225,8 +225,9 @@ class BoundaryProbeGenerator:
             )
 
         matches = _collect_functions(tree)
-        exact = [(name, node) for name, node in matches if name == symbol_name]
-        if not exact and "." not in symbol_name:
+        if "." in symbol_name:
+            exact = [(name, node) for name, node in matches if name == symbol_name]
+        else:
             exact = [(name, node) for name, node in matches if name.rsplit(".", 1)[-1] == symbol_name]
         if len(exact) != 1:
             if not exact:
