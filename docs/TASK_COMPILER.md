@@ -131,3 +131,9 @@ This is a single-file replacement interface, not a general shell or git tool. It
 does not create/delete files or run tests automatically. Run tests through the
 separately confirmed Docker test endpoint. The current hash check is an optimistic
 concurrency guard, not a cryptographic proof against a privileged local attacker.
+
+The HTTP workflow endpoints are not yet exposed as native tool calls to the chat
+model; an external client or UI must call them explicitly. The API currently has
+no request authentication. Keep Uvicorn bound to loopback and do not expose it
+directly to a network until an authentication layer and deployment threat model
+are in place.
