@@ -22,8 +22,8 @@
 
 - GitHub Engine CI: **28 tests passed**.
 - GitHub Python compileall step: passed.
-- Local static UI script syntax was checked with Node earlier.
-- Cloudflare Worker TypeScript/UI CI: added; latest run must be inspected before marking the cloud bundle verified.
+- GitHub Brain Worker CI: dependency install, Wrangler binding type generation + TypeScript check, and browser UI JavaScript syntax check all passed.
+- These CI checks validate code and packaging only; they do not prove an account-specific Cloudflare deployment or runtime behavior against a real D1 database.
 
 ## Not yet verified / not yet done
 
@@ -50,8 +50,8 @@ The Worker serves the static UI and API from the same URL. A read token is optio
 
 ## Next milestone
 
-1. Complete Worker/UI CI and deploy the Brain to a real D1 database with read access protected.
+1. Deploy the Brain to a real D1 database with read access protected.
 2. Connect the selected model through remote MCP using the read token.
 3. Add typed task compiler, persistent code graph and an evidence-producing execution loop.
 4. Build a curated, consented and licensed coding-trajectory dataset; run LoRA/QLoRA on appropriate GPU compute, then DPO only if preference labels are evidence-backed.
-5. Compare base model, adapters and full unAI system on held-out coding tasks under matched budgets, then test quantized inference on physical Android hardware.
+5. Compare base model, adapters and full unAI system on held-out tasks under matched budgets, then test quantized inference on physical Android hardware.
