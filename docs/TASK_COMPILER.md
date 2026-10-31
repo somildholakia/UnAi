@@ -137,3 +137,21 @@ model; an external client or UI must call them explicitly. The API currently has
 no request authentication. Keep Uvicorn bound to loopback and do not expose it
 directly to a network until an authentication layer and deployment threat model
 are in place.
+
+
+## Evidence-sequence summary
+
+    GET /api/tasks/{task_id}/proof
+
+The response joins applied-patch evidence with the latest Docker test event and
+the Python parse-quality result. It distinguishes pending proposals, applied
+patches with no later test, failed/unavailable test runs, and a passing test run
+that occurred after the latest applied patch. A later patch makes an older test
+result stale for this summary.
+
+The status tests_passed_after_patch does not mean the task is fully correct. It
+only means a recorded test run passed after the latest applied patch and the
+recorded parse-quality check did not fail. The response includes generic acceptance
+checks, remaining compiler unknowns, evidence IDs, and limitations. Adversarial
+counterexample generation, independent semantic review, and criterion-specific
+verification remain future work.
