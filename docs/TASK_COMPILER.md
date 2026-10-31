@@ -155,3 +155,48 @@ recorded parse-quality check did not fail. The response includes generic accepta
 checks, remaining compiler unknowns, evidence IDs, and limitations. Adversarial
 counterexample generation, independent semantic review, and criterion-specific
 verification remain future work.
+
+
+## Post-change quality refresh
+
+    POST /api/tasks/{task_id}/quality-check
+
+This endpoint requires explicit workspace_read permission. It rebuilds the bounded
+Python AST graph for the inspected workspace and appends a new parse-quality event.
+After a patch is applied, the old parse-quality event is stale; refresh it before
+the proof summary can describe quality as current.
+
+## AST boundary-probe candidates (M4 prototype)
+
+    POST /api/tasks/{task_id}/probes
+
+    {
+      "file_path": "src/service.py",
+      "symbol_name": "clamp",
+      "limit": 24
+    }
+
+The task must have workspace_read approval. The selected source file is read through
+the task-scoped file snapshot path and its SHA-256 digest is attached to the evidence.
+Function names may be qualified (for example, Client.send); an ambiguous short name
+is rejected. This endpoint currently supports Python only.
+
+The generator considers simple branch conditions in if, while and assert nodes.
+It proposes boundary values around numeric/string/boolean/None comparisons,
+truthy/falsy representatives, list membership literals, and string/collection
+lengths around len(parameter) comparisons. It returns the source condition,
+source line, parameter assignment, and rationale for each candidate.
+
+Every candidate is marked as unverified. The engine does not execute these inputs,
+infer expected outputs, or claim that any candidate is a bug. Complex expressions,
+type compatibility beyond basic annotations, side effects, fixtures, and environment
+state are not modeled. See docs/VERIFICATION.md.
+
+## Proof freshness rule
+
+The proof endpoint requires a test run newer than the latest applied patch.
+It also treats parse-quality evidence as fresh only when a quality-check event
+occurred after the latest patch. Thus a passing test result with stale or missing
+quality evidence is reported as tests_passed_but_quality_check_unknown rather than
+being promoted to a clean status. Even a clean status is not a semantic correctness
+certificate.
