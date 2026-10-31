@@ -4,7 +4,8 @@ const el = id => document.getElementById(id);
 let graphData = {nodes:[],edges:[]};
 
 async function api(path) {
-  const response = await fetch(API + path);
+  const token = sessionStorage.getItem("unai-brain-read-token") || "";
+  const response = await fetch(API + path, { headers: token ? { Authorization: "Bearer " + token } : {} });
   if (!response.ok) throw new Error("Brain API returned " + response.status);
   return response.json();
 }
