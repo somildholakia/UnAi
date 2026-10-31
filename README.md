@@ -1,131 +1,73 @@
 # unAI — Outcome-Lattice Execution Intelligence
 
-**A modular, local-first AI engineering system designed to investigate how much coding capability can be delivered on a 6 GB RAM mobile device.**
+**A modular, local-first coding-agent research project targeting CPU-first Android devices with 6 GB RAM.**
 
-unAI is not another thin chat wrapper. Its research hypothesis is that a compact model can become a much more effective coding system when paired with structured task state, repository graphs, persistent trajectory memory, bounded candidate search, deterministic tools, and adversarial verification.
+unAI investigates whether compact models can deliver stronger coding outcomes when combined with structured task state, repository indexing, durable memory, bounded search, deterministic tools and adversarial verification.
 
-> **Research status:** early engineering prototype. No custom model weights have been trained, mobile budgets have not yet been measured on physical hardware, and no claim of Claude-level equivalence or 100× superiority is made. Capability claims require held-out benchmarks.
+> **Status:** early engineering prototype. No custom model weights have been trained, no Cloudflare deployment has been performed, and the mobile memory/speed targets have not been measured on physical hardware. No Claude-level equivalence or unsupported capability claim is made.
 
-## Design principles
+## The design
 
-- **Architecture-agnostic:** transformers are one optional cognition backend, not a foundational constraint. Symbolic reasoning, program synthesis, graph algorithms, constraint solving, evolutionary search, recurrent/state-space models, and hybrid approaches can be explored behind stable plugin interfaces.
-- **Evidence over plausible output:** a task is not complete just because the model says it is. Patches need test results, static checks, counterexamples, and explicit residual risk.
-- **Local first:** use open-weight runtimes on the user's own hardware; no hosted paid API is required for local operation.
-- **Modular by contract:** swap cognition, memory, indexing, search, verification, and execution independently.
-- **Small resident footprint:** keep working state compact, persist discoveries, load optional specialists on demand, and react to memory pressure.
-- **Safe execution:** arbitrary generated shell commands must never execute directly on the host. Use a constrained sandbox boundary.
+- **Model-agnostic cognition:** neural, symbolic and hybrid backends can be swapped behind plugin contracts.
+- **Outcome-first:** generated patches require evidence; model confidence is not proof.
+- **Memory is separate from inference:** unAI Brain stores and retrieves knowledge without GPU inference or embeddings.
+- **Local-first:** run an open-weight model locally; no hosted model API is required for offline operation.
+- **Safe execution:** generated commands must run inside a constrained sandbox, never through a host-shell fallback.
 
-## Initial mobile acceptance targets
+## unAI Brain — Obsidian-style memory
 
-| Metric | Initial target (unverified) |
+The Brain is a portable Markdown knowledge graph. It supports YAML frontmatter, aliases, tags, wiki links, backlinks, unresolved links, full-text search and graph traversal. Markdown notes are canonical; SQLite FTS is a rebuildable index. The local agent retrieves a small number of relevant excerpts into context automatically.
+
+- Local FastAPI endpoints and read-only MCP server: apps/engine/src/unai_engine/brain
+- Hosted GPU-free API: Cloudflare Worker + D1 in apps/brain-cloud
+- Browser graph explorer: apps/brain-web
+- Design, local setup, remote access and privacy: docs/BRAIN.md
+
+The Cloudflare Worker is a deployment scaffold, not a deployed service. It is public-read by default; do not place private notes there unless an authenticated gateway is placed in front of every read route. A model does not gain access merely because a website exists: connect the API through MCP or an explicit HTTP tool.
+
+## Training and fine-tuning
+
+The training directory contains a provenance/consent/verification-gated data preparation pipeline, LoRA/QLoRA supervised fine-tuning, and a second-stage DPO preference harness. Train on suitable GPU hardware, then evaluate and export an adapter for a compatible local runtime. The phone is an inference target, not a training machine. No training run or adapter is claimed complete.
+
+Read training/README.md before preparing data. Never train on private conversations or repositories without explicit permission and compatible licenses.
+
+## Mobile acceptance targets — unverified
+
+| Metric | Initial target |
 |---|---:|
-| Target device class | 6 GB RAM Android |
+| Device | 6 GB RAM Android |
 | Model + runtime PSS | ≤ 1.2 GB |
-| Whole unAI process peak | ≤ 1.8 GB |
+| Whole app peak | ≤ 1.8 GB |
 | Default context | 2K–4K tokens |
 | Required accelerator | None; CPU-only path |
-| Network | Offline after model assets are installed |
 
-These are test targets, not achieved measurements. The model file size alone is not enough; KV cache, native runtime, tokenizer, indexes, and temporary buffers count toward memory. The device profile and measurement protocol live in [`docs/MOBILE_PROFILE.md`](docs/MOBILE_PROFILE.md).
-
-## System shape
-
-```text
-                    User objective
-                         |
-                  Intent / task compiler
-                         |
-           +-------------+----------------+
-           |                              |
-   Structured task graph           Trajectory memory
-           |                              |
-           +---------------+--------------+
-                           |
-                Pluggable cognition core
-              (symbolic / neural / hybrid)
-                           |
-                Bounded candidate search
-                           |
-                Repository understanding
-                           |
-               Isolated execution tools
-                           |
-               Adversarial verification
-                           |
-                 Evidence ledger / gate
-                           |
-             Verified patch or honest blocker
-```
-
-## Repository structure
-
-```text
-apps/
-  engine/       FastAPI backend, plugin contracts, local model adapter, state/runtime
-  web/          React + Vite browser interface
-benchmarks/     evaluation protocol and result templates
-docs/           architecture, research, roadmap, mobile targets, checkpoints
-tests/          safety, state, API, plugin and indexing tests
-scripts/        developer tooling
-```
-
-## Current modules
-
-| Module | Purpose | Current status |
-|---|---|---|
-| `plugins/contracts.py` | Stable cognition/memory/index/search/verification interfaces | Implemented |
-| `cognition/rule_microcore.py` | Zero-weight task routing and baseline plan generation | Prototype |
-| `memory/trajectory.py` | Bounded SQLite task-event memory | Implemented |
-| `indexing/filesystem.py` | Low-memory streaming workspace index/search | Prototype |
-| `search/portfolio.py` | Bounded, deterministic proposal deduplication | Prototype |
-| `verification/static.py` | Workspace path evidence checks | Prototype |
-| `providers/openai_compat.py` | Pluggable local OpenAI-compatible model endpoint | Implemented |
-| `runtime/sandbox.py` | Docker-only execution boundary | Prototype; execution tool not wired into agent loop |
+These are targets, not results. See docs/MOBILE_PROFILE.md.
 
 ## Run locally
 
-### Engine
+    cd apps/engine
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -e '.[dev,mcp]'
+    cp .env.example .env
+    uvicorn unai_engine.main:app --host 127.0.0.1 --port 8000
 
-```bash
-cd apps/engine
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-pip install -e '.[dev]'
-cp .env.example .env
-uvicorn unai_engine.main:app --reload --host 127.0.0.1 --port 8000
-```
+Start a compatible local model server separately. Then index your Markdown vault:
 
-Start a compatible local model runtime separately (for example Ollama exposing `/v1/chat/completions`) and set `UNAI_MODEL_NAME`. A default model name is only a placeholder; pick a quantized model that fits your actual device.
+    curl -X POST http://127.0.0.1:8000/api/brain/index
 
-### Web UI
+Run the web UI in apps/web with npm install && npm run dev.
 
-```bash
-cd apps/web
-npm install
-npm run dev
-```
+Tests:
 
-Set `VITE_API_BASE_URL` when the engine is not available at `http://localhost:8000`.
+    PYTHONPATH=apps/engine/src pytest -q tests
 
-### Tests
+## Current research hypothesis
 
-```bash
-cd apps/engine
-pytest ../../tests -q
-```
+The working concept is **Outcome-Lattice Execution Intelligence (OLEI)**: maintain explicit task-state transitions, retrieve a small repository/knowledge graph slice, explore bounded candidate approaches, and challenge each candidate with targeted verification before accepting work.
 
-## Research direction
-
-The working research name is **Outcome-Lattice Execution Intelligence (OLEI)**. The system stores task evolution as structured state transitions, explores a small portfolio of candidate approaches, and tries to falsify each candidate using cheap and targeted checks before expensive evaluation.
-
-This is a hypothesis, not a claim of unprecedented novelty. Related ideas already exist in graph-based code understanding, agentic training, search, self-refinement, and execution-guided verification. unAI must demonstrate that its specific combination and resource allocation outperform baselines.
-
-Read [`docs/RESEARCH.md`](docs/RESEARCH.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), and [`benchmarks/README.md`](benchmarks/README.md).
-
-## Development continuity
-
-Before continuing in a different chat, read [`docs/CONTINUITY.md`](docs/CONTINUITY.md) and [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md). Update the checkpoint after every meaningful milestone. Canonical public repository: https://github.com/somildholakia/UnAi (default branch: `main`). The complete source tree, documentation, tests, and local web interface are maintained there.
+This is a hypothesis, not a claim of unprecedented novelty. Each contribution must beat a matched baseline on held-out tasks under the same compute and time budgets. See docs/ARCHITECTURE.md, docs/RESEARCH.md, docs/ROADMAP.md and benchmarks/README.md.
 
 ## License
 
-No license has been selected. Until one is added, standard copyright applies; do not assume the code is licensed for reuse.
+No license has been selected. Standard copyright applies until the owner adds one.
