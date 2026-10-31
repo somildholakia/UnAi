@@ -5,11 +5,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from unai_engine.agent.orchestrator import AgentOrchestrator
 from unai_engine.config import settings
-from unai_engine.models import BrainNoteCreate, ChatRequest, ChatResponse, HealthResponse, TaskCompileRequest, TaskContract
+from unai_engine.models import (
+    BrainNoteCreate, ChatRequest, ChatResponse, HealthResponse,
+    TaskCompileRequest, TaskContract, TaskInspectRequest,
+    TaskInspectionResponse, TaskEvidenceSnapshot,
+  )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
 from unai_engine.brain.vault import BrainError, MarkdownVault
 from unai_engine.cognition.task_compiler import compile_task
+from unai_engine.agent.inspection import TaskInspector
+from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 
 provider = OpenAICompatibleProvider(
@@ -21,6 +27,8 @@ provider = OpenAICompatibleProvider(
 plugins = build_registry()
 brain = MarkdownVault(settings.brain_vault_root, settings.brain_index_path)
 agent = AgentOrchestrator(provider, context_search=brain.search)
+evidence_ledger = EvidenceLedger(settings.evidence_db_path)
+task_inspector = TaskInspector(plugins.indexing["python-code-graph"], evidence_ledger)
 
 app = FastAPI(
     title="unAI Engine",
@@ -73,6 +81,20 @@ async def repository_search(
     root = _repository_workspace(workspace)
     results = await plugins.indexing["python-code-graph"].query(str(root), q, limit)
     return {"workspace": workspace, "query": q, "results": results}
+
+
+@app.post("/api/tasks/inspect", response_model=TaskInspectionResponse)
+async def inspect_task(request: TaskInspectRequest) -> TaskInspectionResponse:
+    """Compile, inspect a workspace read-only, and persist an evidence snapshot."""
+    return await task_inspector.inspect(request, settings.workspace_root)
+
+
+@app.get("/api/tasks/{task_id}/evidence", response_model=TaskEvidenceSnapshot)
+def task_evidence(task_id: str) -> TaskEvidenceSnapshot:
+    snapshot = evidence_ledger.get_snapshot(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Task evidence not found.")
+    return snapshot
 
 
 @app.get("/api/plugins")
