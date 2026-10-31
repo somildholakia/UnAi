@@ -14,7 +14,11 @@ unAI investigates whether compact models can deliver stronger coding outcomes wh
 - **Local-first:** run an open-weight model locally; no hosted model API is required for offline operation.
 - **Safe execution:** generated commands must run inside a constrained sandbox, never through a host-shell fallback.
 
-## Task compiler — deterministic planning\n\n`POST /api/tasks/compile` converts a request into a provisional typed contract: task category, explicit constraints, assumptions, unknowns, acceptance checks, bounded plan steps, required permissions, and separately supplied approvals. It uses deterministic rules and does not call a model or execute tools. The compiler is a planning baseline, not a guarantee of semantic understanding; review contracts before acting. A required permission missing from the caller's explicit approval list remains missing.\n\n## unAI Brain — Obsidian-style memory
+## Task compiler — deterministic planning\n\n`POST /api/tasks/compile` converts a request into a provisional typed contract: task category, explicit constraints, assumptions, unknowns, acceptance checks, bounded plan steps, required permissions, and separately supplied approvals. It uses deterministic rules and does not call a model or execute tools. The compiler is a planning baseline, not a guarantee of semantic understanding; review contracts before acting. A required permission missing from the caller's explicit approval list remains missing.\n\n## Repository code graph — Python AST prototype
+
+The indexing subsystem now includes a bounded Python AST graph for files, classes, functions, methods, internal imports, and heuristic test-to-source links. Graph entries point to line ranges instead of storing source bodies. It skips generated/hidden directories, symlinks, and oversized files; it reports parse errors and truncation. This first version is Python-only and does not yet persist or incrementally refresh the graph. See docs/CODE_GRAPH.md.
+
+## unAI Brain — Obsidian-style memory
 
 The Brain is a portable Markdown knowledge graph. It supports YAML frontmatter, aliases, tags, wiki links, backlinks, unresolved links, full-text search and graph traversal. Markdown notes are canonical; SQLite FTS is a rebuildable index. The local agent retrieves a small number of relevant excerpts into context automatically.
 
