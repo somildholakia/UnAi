@@ -60,15 +60,20 @@ class PatchManager:
 
     @staticmethod
     def _target(workspace_root: Path, workspace: str, file_path: str) -> Path:
-        if not file_path or "\x00" in file_path or "\\" in file_path:
+        if not file_path or len(file_path) > 512 or "\x00" in file_path or "\\" in file_path:
             raise PatchConflict("File path must be a clean workspace-relative path.")
         relative = PurePosixPath(file_path)
-        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        if (
+            relative.is_absolute()
+            or len(relative.parts) > 32
+            or any(part in {"", ".", ".."} for part in relative.parts)
+        ):
             raise PatchConflict("Absolute paths, dot segments, and parent traversal are not allowed.")
         candidate_text = relative.as_posix()
         if (
             relative.name.casefold() in SENSITIVE_NAMES
-            or relative.name.casefold().startswith(".env")
+            or any(part.casefold().startswith(".env") for part in relative.parts)
+            or any(part.startswith(".") for part in relative.parts[:-1])
             or any(
                 marker in part.casefold()
                 for part in relative.parts
