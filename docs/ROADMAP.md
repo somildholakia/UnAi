@@ -12,6 +12,7 @@
 - Verified data preparation, LoRA/QLoRA SFT and DPO harness.
 
 ## M2 — Task compiler and code graph
+- [x] Bounded Python AST graph for file/symbol/import/test relationships with source ranges.
 - Parse goals into typed acceptance checks, constraints and permissions.
 - Persist file/symbol/import/test graph with source-range references.
 - Retrieve bounded, task-specific code slices rather than whole repositories.
