@@ -102,7 +102,7 @@ class EvidenceRecord(BaseModel):
 class TaskInspectionResponse(BaseModel):
     task_id: str
     status: Literal["inspection_complete", "awaiting_workspace_read", "workspace_unavailable"]
-    next_gate: Literal["approval_required", "execution_not_implemented", "workspace_access_required"]
+    next_gate: Literal["approval_required", "execution_not_implemented", "workspace_access_required", "workspace_correction_required"]
     contract: TaskContract
     workspace: str
     graph_summary: dict = Field(default_factory=dict)
