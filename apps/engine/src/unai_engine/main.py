@@ -12,6 +12,7 @@ from unai_engine.models import (
     TaskCompileRequest, TaskContract, TaskInspectRequest,
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
+    WorkspaceFileSnapshot,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
@@ -113,6 +114,22 @@ async def run_task_tests(task_id: str, request: TaskRunApprovalRequest) -> TaskT
         raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
     except TaskRunRejected as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/tasks/{task_id}/files/{file_path:path}",
+    response_model=WorkspaceFileSnapshot,
+)
+def read_task_file(task_id: str, file_path: str) -> WorkspaceFileSnapshot:
+    """Read one bounded UTF-8 workspace file after explicit workspace-read approval."""
+    try:
+        return patch_manager.read_file(task_id, file_path, settings.workspace_root)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+    except PatchRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/tasks/{task_id}/patch-proposals", response_model=PatchProposalResponse)
