@@ -22,11 +22,13 @@
 - [x] Separately confirmed fixed pytest runner in Docker, using a filtered temporary copy and appended execution evidence.
 - [x] Task-scoped source snapshots and SHA-256-bound, one-file patch proposals with a separate apply confirmation.
 - [x] Evidence summary that requires a passing test event newer than the latest applied patch.
+- [x] Post-patch Python parse-quality refresh; the proof summary treats pre-patch quality events as stale.
 - Typed tool calls and isolated workspaces.
 - Regression evidence after a patch; arbitrary commands and multi-file patch application remain disabled.
 - Explicit approval for risky or irreversible actions.
 
 ## M4 — Adversarial verification
+- [x] Conservative Python AST boundary-probe candidate generation for simple branch conditions (unverified only).
 - Generate targeted counterexamples and discriminating tests.
 - Verify claims against execution traces and independent checks.
 - Return proof bundles with unresolved risks, never just a confidence score.
