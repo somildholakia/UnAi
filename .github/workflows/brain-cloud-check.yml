@@ -1,0 +1,33 @@
+name: Brain Worker checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/brain-cloud/**"
+      - "apps/brain-web/**"
+      - ".github/workflows/brain-cloud-check.yml"
+  pull_request:
+    paths:
+      - "apps/brain-cloud/**"
+      - "apps/brain-web/**"
+      - ".github/workflows/brain-cloud-check.yml"
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/brain-cloud/package-lock.json
+      - name: Install worker dependencies
+        working-directory: apps/brain-cloud
+        run: npm install --no-audit --no-fund
+      - name: Generate Cloudflare binding types and check Worker
+        working-directory: apps/brain-cloud
+        run: npm run typecheck
+      - name: Check browser UI JavaScript syntax
+        run: node --check apps/brain-web/app.js
