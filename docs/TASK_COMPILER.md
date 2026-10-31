@@ -32,3 +32,33 @@ install packages, access the network, or run shell commands.
 - Unknowns are heuristic warnings, not an exhaustive ambiguity detector.
 - A future execution layer must enforce permissions itself. The contract is not an
   authorization token and cannot replace sandbox or policy checks.
+
+
+## Inspection API
+
+Request:
+
+    POST /api/tasks/inspect
+
+Example:
+
+    {
+      "request": "Fix calculate_total and add a regression test",
+      "workspace": "my-project",
+      "permissions": ["workspace_read"]
+    }
+
+The route returns a task contract, selected graph summary, ranked symbol references
+with line ranges, parse diagnostics, evidence records, and a next-gate status.
+Workspace reads are skipped unless workspace_read is explicitly approved. The API
+persists a snapshot in the SQLite evidence ledger; fetch it later with:
+
+    GET /api/tasks/{task_id}/evidence
+
+Set UNAI_EVIDENCE_DB_PATH to move the ledger. Evidence rows are append-only through
+database triggers. The ledger is an audit aid, not a cryptographic tamper-proof log.
+
+This stage does not edit files, run tests, install packages, access the network, or
+execute shell commands. Approving workspace_read is not approval for any of those
+operations. Even when all generated permissions are approved, execution remains
+unimplemented in this milestone.
