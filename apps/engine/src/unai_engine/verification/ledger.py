@@ -29,6 +29,21 @@ CREATE TABLE IF NOT EXISTS task_evidence (
     metadata_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS patch_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE RESTRICT,
+    workspace TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    expected_sha256 TEXT NOT NULL,
+    proposed_sha256 TEXT NOT NULL,
+    proposed_content TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'applied')),
+    created_at TEXT NOT NULL,
+    applied_at TEXT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_patch_proposals_task
+    ON patch_proposals(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_evidence_task_time
     ON task_evidence(task_id, created_at, evidence_id);
 CREATE TRIGGER IF NOT EXISTS task_evidence_no_update
@@ -125,6 +140,115 @@ class EvidenceLedger:
         finally:
             connection.close()
 
+
+
+    def store_patch_proposal(
+        self,
+        proposal: dict[str, str],
+        evidence: EvidenceRecord,
+    ) -> None:
+        if evidence.task_id != proposal["task_id"]:
+            raise EvidenceLedgerError("Patch evidence must belong to the proposal task.")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO patch_proposals(
+                    proposal_id, task_id, workspace, file_path, expected_sha256,
+                    proposed_sha256, proposed_content, description, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    proposal["proposal_id"],
+                    proposal["task_id"],
+                    proposal["workspace"],
+                    proposal["file_path"],
+                    proposal["expected_sha256"],
+                    proposal["proposed_sha256"],
+                    proposal["proposed_content"],
+                    proposal["description"],
+                    proposal["created_at"],
+                ),
+            )
+            self._insert_evidence(connection, evidence)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def get_patch_proposal(self, task_id: str, proposal_id: str) -> dict[str, str] | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT proposal_id, task_id, workspace, file_path, expected_sha256,
+                       proposed_sha256, proposed_content, description, status, created_at,
+                       applied_at
+                FROM patch_proposals
+                WHERE task_id = ? AND proposal_id = ?
+                """,
+                (task_id, proposal_id),
+            ).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            connection.close()
+
+    def finalize_patch_proposal(
+        self,
+        task_id: str,
+        proposal_id: str,
+        new_sha256: str,
+        applied_at: str,
+        evidence: EvidenceRecord,
+    ) -> None:
+        if evidence.task_id != task_id:
+            raise EvidenceLedgerError("Patch evidence must belong to the proposal task.")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """
+                UPDATE patch_proposals
+                SET status = 'applied', applied_at = ?
+                WHERE task_id = ? AND proposal_id = ? AND status = 'pending'
+                  AND proposed_sha256 = ?
+                """,
+                (applied_at, task_id, proposal_id, new_sha256),
+            )
+            if cursor.rowcount != 1:
+                raise EvidenceLedgerError("Patch proposal is no longer pending or hash does not match.")
+            self._insert_evidence(connection, evidence)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _insert_evidence(connection: sqlite3.Connection, evidence: EvidenceRecord) -> None:
+        connection.execute(
+            """
+            INSERT INTO task_evidence(
+                evidence_id, task_id, kind, source, claim, passed,
+                artifact_ref, metadata_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                evidence.evidence_id,
+                evidence.task_id,
+                evidence.kind,
+                evidence.source,
+                evidence.claim,
+                None if evidence.passed is None else int(evidence.passed),
+                evidence.artifact_ref,
+                json.dumps(evidence.metadata, ensure_ascii=False),
+                evidence.created_at,
+            ),
+        )
 
     def append_evidence(self, evidence: EvidenceRecord) -> None:
         """Append one execution/verification event to an existing task."""
