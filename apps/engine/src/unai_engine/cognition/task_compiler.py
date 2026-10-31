@@ -19,12 +19,13 @@ from unai_engine.models import (
 )
 
 
+_FIX_ACTION = re.compile(r"\b(fix(?:es|ed)?|repair|troubleshoot|debug|resolve)\b", re.I)
 _CODE_CHANGE = re.compile(
-    r"\b(fix|bug|bugfix|repair|implement|build|create|add|develop|refactor|change|modify|remove|delete|drop)\b",
+    r"\b(implement|build|create|add|develop|refactor|change|modify|remove|delete|drop)\b",
     re.I,
 )
-_BUG = re.compile(
-    r"\b(bug|fix|broken|crash|error|exception|fail(?:ed|s|ure)?|regression|troubleshoot)\b",
+_RESEARCH_INTENT = re.compile(
+    r"^\s*(?:please\s+)?(research|compare|investigate|explain|analyse|analyze)\b",
     re.I,
 )
 _REVIEW = re.compile(r"\b(review|audit|security review|code review|assess the code)\b", re.I)
@@ -55,7 +56,9 @@ _STACK_HINT = re.compile(
 def _classify(request: str) -> TaskKind:
     if _REVIEW.search(request):
         return "review"
-    if _BUG.search(request):
+    if _RESEARCH_INTENT.search(request):
+        return "research"
+    if _FIX_ACTION.search(request):
         return "bugfix"
     if _CODE_CHANGE.search(request):
         return "feature"
