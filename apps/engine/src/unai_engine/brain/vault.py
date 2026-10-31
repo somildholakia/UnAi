@@ -118,7 +118,7 @@ class MarkdownVault:
         return title, body, meta, sorted(set(tags))
 
     @staticmethod
-    def _resolve(source: str, raw: str, paths: dict[str, str], stems: dict[str, str]):
+    def _resolve(source: str, raw: str, paths: dict[str, str], stems: dict[str, str], aliases: dict[str, str]):
         target, _, alias = raw.strip().partition("|")
         target, _, anchor = target.partition("#")
         target = target.strip().replace("\\", "/")
@@ -131,13 +131,15 @@ class MarkdownVault:
             key = Path(option).as_posix().lstrip("./").casefold()
             if key in paths:
                 return paths[key], alias or None, anchor or None
-        return stems.get(Path(target).stem.casefold()), alias or None, anchor or None
+        resolved = stems.get(Path(target).stem.casefold()) or aliases.get(target.removesuffix(".md").casefold())
+        return resolved, alias or None, anchor or None
 
     def index(self) -> dict[str, Any]:
         """Index one Markdown file at a time; only paths/stems remain in memory."""
         paths: dict[str, str] = {}
         stems: dict[str, str] = {}
-        seen: set[str] = set()
+        aliases: dict[str, str] = {}
+        seen: set[str] = {}
         counts = {"notes": 0, "links": 0, "tags": 0}
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -179,13 +181,20 @@ class MarkdownVault:
                                    (relative, target, None, alias or None, anchor or None))
                     paths[relative.casefold()] = relative
                     stems.setdefault(Path(relative).stem.casefold(), relative)
+                    note_aliases = meta.get("aliases", meta.get("alias", []))
+                    if isinstance(note_aliases, str):
+                        note_aliases = [note_aliases]
+                    if isinstance(note_aliases, list):
+                        for note_alias in note_aliases:
+                            if isinstance(note_alias, str) and note_alias.strip():
+                                aliases.setdefault(note_alias.strip().casefold(), relative)
                     seen.add(relative)
                     counts["notes"] += 1
                     counts["links"] += len(targets)
                     counts["tags"] += len(tags)
             # Resolve links after the complete path index exists, including forward links.
             for row in db.execute("SELECT source_path,target_ref,alias,anchor FROM links").fetchall():
-                resolved, alias, anchor = self._resolve(row["source_path"], row["target_ref"], paths, stems)
+                resolved, alias, anchor = self._resolve(row["source_path"], row["target_ref"], paths, stems, aliases)
                 db.execute("UPDATE links SET target_path=?,alias=?,anchor=? WHERE source_path=? AND target_ref=?",
                            (resolved, alias, anchor, row["source_path"], row["target_ref"]))
             existing = {row[0] for row in db.execute("SELECT path FROM notes")}
