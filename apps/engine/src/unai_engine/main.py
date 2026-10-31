@@ -12,7 +12,7 @@ from unai_engine.models import (
     TaskCompileRequest, TaskContract, TaskInspectRequest,
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
-    WorkspaceFileSnapshot,
+    WorkspaceFileSnapshot, TaskProofResponse,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
@@ -24,6 +24,7 @@ from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, TaskRunRejected
 from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchRejected
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
+from unai_engine.verification.proof import summarize_proof
 
 provider = OpenAICompatibleProvider(
     base_url=settings.model_base_url,
@@ -165,6 +166,15 @@ def apply_patch_proposal(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except PatchConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/tasks/{task_id}/proof", response_model=TaskProofResponse)
+def task_proof(task_id: str) -> TaskProofResponse:
+    """Summarize the latest patch/test sequence without claiming semantic correctness."""
+    snapshot = evidence_ledger.get_snapshot(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Task evidence not found.")
+    return summarize_proof(snapshot)
 
 
 @app.get("/api/tasks/{task_id}/evidence", response_model=TaskEvidenceSnapshot)
