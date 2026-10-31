@@ -97,6 +97,18 @@ class PatchManager:
         return target
 
 
+    @staticmethod
+    def _read_bounded(target: Path) -> bytes:
+        try:
+            descriptor = os.open(target, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as handle:
+                raw = handle.read(MAX_SOURCE_BYTES + 1)
+        except OSError as exc:
+            raise PatchConflict("Patch target could not be read safely.") from exc
+        if len(raw) > MAX_SOURCE_BYTES:
+            raise PatchConflict("Patch target exceeds the 1 MB source limit.")
+        return raw
+
     def read_file(
         self,
         task_id: str,
@@ -113,7 +125,7 @@ class PatchManager:
 
         target = self._target(workspace_root, snapshot.workspace, file_path)
         try:
-            raw = target.read_bytes()
+            raw = self._read_bounded(target)
             content = raw.decode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise PatchConflict("File must be readable UTF-8 text.") from exc
@@ -153,7 +165,7 @@ class PatchManager:
         target = self._target(workspace_root, snapshot.workspace, request.file_path)
 
         try:
-            original_bytes = target.read_bytes()
+            original_bytes = self._read_bounded(target)
             original = original_bytes.decode("utf-8")
         except (OSError, UnicodeError) as exc:
             raise PatchConflict("Patch target must be readable UTF-8 text.") from exc
@@ -165,6 +177,8 @@ class PatchManager:
             raise PatchConflict("Patch content must not contain NUL bytes.")
 
         proposed_bytes = request.proposed_content.encode("utf-8")
+        if len(proposed_bytes) > MAX_SOURCE_BYTES:
+            raise PatchConflict("Proposed content exceeds the 1 MB source limit.")
         proposed_sha = hashlib.sha256(proposed_bytes).hexdigest()
         if proposed_sha == actual_sha:
             raise PatchConflict("Proposed content is identical to the current file.")
@@ -240,7 +254,7 @@ class PatchManager:
             raise PatchConflict("Proposal workspace no longer matches the task snapshot.")
 
         target = self._target(workspace_root, snapshot.workspace, proposal["file_path"])
-        current_bytes = target.read_bytes()
+        current_bytes = self._read_bounded(target)
         current_sha = hashlib.sha256(current_bytes).hexdigest()
         expected_sha = proposal["expected_sha256"]
         proposed_sha = proposal["proposed_sha256"]
@@ -267,7 +281,7 @@ class PatchManager:
 
                 # Re-check immediately before replacement to avoid silently
                 # overwriting a concurrent user edit.
-                before_replace = target.read_bytes()
+                before_replace = self._read_bounded(target)
                 if hashlib.sha256(before_replace).hexdigest() != expected_sha:
                     raise PatchConflict("Target file changed while the patch was being prepared.")
                 os.replace(temporary_path, target)
@@ -289,7 +303,7 @@ class PatchManager:
                     except OSError:
                         pass
 
-            current_bytes = target.read_bytes()
+            current_bytes = self._read_bounded(target)
             current_sha = hashlib.sha256(current_bytes).hexdigest()
             if current_sha != proposed_sha:
                 raise PatchConflict("Applied file hash differs from the proposed content hash.")
