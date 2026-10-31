@@ -46,6 +46,7 @@ class _SymbolVisitor(ast.NodeVisitor):
         self.edges = edges
         self.limit = max(0, limit)
         self.scope: list[str] = []
+        self.scope_kinds: list[str] = []
         self.symbol_count = 0
 
     def _record(self, node: ast.AST, name: str, kind: str) -> None:
@@ -77,10 +78,12 @@ class _SymbolVisitor(ast.NodeVisitor):
         self._scope_lines = parent_lines
         self._record(node, node.name, "class")
         self.scope.append(node.name)
+        self.scope_kinds.append("class")
         self._scope_lines.append(int(getattr(node, "lineno", 1)))
         for child in node.body:
             self.visit(child)
         self.scope = parent_scope
+        self.scope_kinds.pop()
         self._scope_lines = parent_lines
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -90,20 +93,17 @@ class _SymbolVisitor(ast.NodeVisitor):
         self._visit_function(node)
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        kind = "method" if self.scope and self.scope[-1] and any(
-            item.get("type") == "class"
-            and item.get("path") == self.path
-            and item.get("qualified_name") == ".".join(self.scope)
-            for item in self.nodes[-min(len(self.nodes), MAX_SYMBOLS):]
-        ) else "function"
+        kind = "method" if self.scope_kinds and self.scope_kinds[-1] == "class" else "function"
         parent_scope = list(self.scope)
         parent_lines = list(getattr(self, "_scope_lines", []))
         self._record(node, node.name, kind)
         self.scope.append(node.name)
+        self.scope_kinds.append("function")
         self._scope_lines = parent_lines + [int(getattr(node, "lineno", 1))]
         for child in node.body:
             self.visit(child)
         self.scope = parent_scope
+        self.scope_kinds.pop()
         self._scope_lines = parent_lines
 
 
