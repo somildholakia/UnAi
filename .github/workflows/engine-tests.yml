@@ -1,0 +1,36 @@
+name: Engine tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/engine/**"
+      - "training/**"
+      - "tests/**"
+      - ".github/workflows/engine-tests.yml"
+  pull_request:
+    paths:
+      - "apps/engine/**"
+      - "training/**"
+      - "tests/**"
+      - ".github/workflows/engine-tests.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install engine and development extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "./apps/engine[dev,mcp]"
+      - name: Run tests
+        env:
+          PYTHONPATH: apps/engine/src
+        run: pytest -q tests
+      - name: Compile Python sources
+        run: python -m compileall -q apps/engine/src training
