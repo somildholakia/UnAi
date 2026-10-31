@@ -198,7 +198,14 @@ class PythonCodeGraphIndexer:
             file_id = file_by_path[rel]
             full_path = base / relative
             try:
-                source = full_path.read_text(encoding="utf-8")
+                if full_path.is_symlink():
+                    continue
+                with full_path.open("rb") as handle:
+                    raw_source = handle.read(MAX_FILE_BYTES + 1)
+                if len(raw_source) > MAX_FILE_BYTES:
+                    skipped_large += 1
+                    continue
+                source = raw_source.decode("utf-8")
                 tree = ast.parse(source, filename=rel)
                 parsed_files += 1
             except (OSError, UnicodeError, SyntaxError) as exc:
