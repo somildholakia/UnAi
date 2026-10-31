@@ -55,4 +55,11 @@ async function boot() {
 el("query").addEventListener("keydown",e=>{if(e.key==="Enter")search(e.currentTarget.value).catch(err=>{el("results").textContent=err.message;});});
 el("allNotes").addEventListener("click",()=>renderResults(graphData.nodes||[],"All notes"));
 el("orphans").addEventListener("click",()=>renderResults((graphData.nodes||[]).filter(n=>!(graphData.edges||[]).some(edge=>edge.source===n.id)), "Unlinked notes"));
+el("access").addEventListener("click",()=>{
+  const value = window.prompt("Enter your Brain read token. It is kept only in this browser tab.");
+  if (value === null) return;
+  if (value.trim()) sessionStorage.setItem("unai-brain-read-token", value.trim());
+  else sessionStorage.removeItem("unai-brain-read-token");
+  boot();
+});
 boot();
