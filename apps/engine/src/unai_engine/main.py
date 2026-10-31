@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +15,7 @@ from unai_engine.models import (
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
     WorkspaceFileSnapshot, TaskProofResponse, ProbeRequest, ProbeResponse,
+    TaskQualityCheckResponse, EvidenceRecord,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
@@ -193,6 +196,54 @@ def generate_task_probes(task_id: str, request: ProbeRequest) -> ProbeResponse:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProbeTargetError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/tasks/{task_id}/quality-check", response_model=TaskQualityCheckResponse)
+async def refresh_task_quality(task_id: str) -> TaskQualityCheckResponse:
+    """Re-index the approved workspace after changes and append fresh parse evidence."""
+    snapshot = evidence_ledger.get_snapshot(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Task evidence not found.")
+    if snapshot.status != "inspection_complete":
+        raise HTTPException(status_code=409, detail="Task must complete inspection before quality checks.")
+    if "workspace_read" not in snapshot.contract.permissions:
+        raise HTTPException(status_code=403, detail="This task has not explicitly approved workspace_read.")
+    try:
+        root = resolve_workspace_path(settings.workspace_root, snapshot.workspace)
+    except WorkspaceError as exc:
+        raise HTTPException(status_code=400, detail="Workspace path is no longer valid.") from exc
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Inspected workspace no longer exists.")
+
+    graph = await plugins.indexing["python-code-graph"].index(str(root))
+    summary = dict(graph.get("summary", {}))
+    parse_errors = int(summary.get("parse_errors", 0))
+    passed = parse_errors == 0
+    evidence = EvidenceRecord(
+        evidence_id=uuid4().hex,
+        task_id=task_id,
+        kind="quality",
+        source="python-ast-parser",
+        claim=f"Python source parse errors after refresh: {parse_errors}",
+        passed=passed,
+        artifact_ref=f"workspace:{snapshot.workspace}",
+        metadata={
+            **summary,
+            "errors": graph.get("errors", [])[:10],
+            "checked_after_inspection": True,
+        },
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    evidence_ledger.append_evidence(evidence)
+    return TaskQualityCheckResponse(
+        task_id=task_id,
+        workspace=snapshot.workspace,
+        files_discovered=int(summary.get("files_discovered", 0)),
+        files_parsed=int(summary.get("files_parsed", 0)),
+        parse_errors=parse_errors,
+        passed=passed,
+        evidence=evidence,
+    )
 
 
 @app.get("/api/tasks/{task_id}/proof", response_model=TaskProofResponse)
