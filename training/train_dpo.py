@@ -44,7 +44,7 @@ def main() -> None:
         gradient_accumulation_steps=args.grad_accum, learning_rate=args.learning_rate,
         max_length=args.max_length, max_prompt_length=max(128,args.max_length//2),
         beta=0.1, logging_steps=10, save_strategy="epoch",
-        evaluation_strategy="epoch" if args.eval_file else "no", report_to="none",
+        eval_strategy="epoch" if args.eval_file else "no", report_to="none",
         bf16=bf16, fp16=not bf16, gradient_checkpointing=True, remove_unused_columns=False,
     )
     trainer=DPOTrainer(
