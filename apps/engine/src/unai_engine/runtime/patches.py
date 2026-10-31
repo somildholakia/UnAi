@@ -4,7 +4,6 @@ from __future__ import annotations
 import difflib
 import hashlib
 import os
-import re
 import stat
 import tempfile
 from datetime import datetime, timezone
@@ -39,6 +38,10 @@ class PatchConflict(RuntimeError):
     pass
 
 
+class PatchRejected(PermissionError):
+    pass
+
+
 class PatchManager:
     def __init__(self, ledger: EvidenceLedger) -> None:
         self.ledger = ledger
@@ -46,7 +49,7 @@ class PatchManager:
     @staticmethod
     def _require_permissions(snapshot: TaskEvidenceSnapshot) -> None:
         if snapshot.status != "inspection_complete":
-            raise TaskRunRejected("Task must complete inspection before patch operations.")
+            raise PatchRejected("Task must complete inspection before patch operations.")
         permissions = set(snapshot.contract.permissions)
         required = {"workspace_read", "workspace_write"}
         if not required.issubset(permissions):
@@ -276,6 +279,3 @@ class PatchManager:
             evidence=evidence,
         )
 
-
-# Imported late to keep the permission exception shared with the test-run workflow.
-from unai_engine.runtime.test_runner import TaskRunRejected
