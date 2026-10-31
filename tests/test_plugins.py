@@ -14,7 +14,7 @@ async def test_registry_exposes_modular_categories() -> None:
     manifest = build_registry().manifest()
     assert manifest["cognition"] == ["rule-microcore"]
     assert manifest["memory"] == ["sqlite-trajectory"]
-    assert manifest["indexing"] == ["filesystem-index"]
+    assert manifest["indexing"] == ["filesystem-index", "python-code-graph"]
     assert manifest["verification"] == ["static-evidence"]
     assert manifest["search"] == ["bounded-portfolio"]
 
