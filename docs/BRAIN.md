@@ -50,7 +50,7 @@ The MCP tools expose search, note read and graph inspection. Keep writes behind 
 
 ## Hosted GPU-free brain
 
-apps/brain-cloud contains a Cloudflare Worker + D1 API; apps/brain-web contains a static browser explorer. The Worker executes SQL and small JSON transforms. It does not host an LLM or perform inference.
+apps/brain-cloud contains a Cloudflare Worker + D1 API; apps/brain-web contains the static browser explorer. Wrangler deploys both together as one Worker site. The Worker runs SQL and small JSON transforms; it does not host an LLM or perform inference.
 
 Deployment outline:
 
@@ -61,13 +61,22 @@ Deployment outline:
 Copy the created database ID into wrangler.toml, then:
 
     npx wrangler d1 migrations apply unai-brain --remote
+    npx wrangler secret put BRAIN_READ_TOKEN
     npx wrangler secret put BRAIN_WRITE_TOKEN
     npm run deploy
 
-Deploy apps/brain-web as a static site (no build step) and configure its API base URL. These are deployment instructions only; the repository does not claim that a Cloudflare account, database or live URL has been configured.
+The resulting Worker URL serves the browser app at / and the API under /api/*. The UI uses the same origin by default. To connect the remote MCP bridge, set UNAI_BRAIN_API_URL to that Worker URL and UNAI_BRAIN_API_TOKEN to the read token. On the website, choose "Unlock private brain" and enter the read token; it is retained only in sessionStorage for that browser tab.
+
+These commands are deployment instructions only. No Cloudflare account, D1 database, secrets or live URL have been configured in this repository yet.
+
+## Free-tier limits
+
+This is GPU-free, not unlimited compute. As of the current Cloudflare documentation, Workers Free includes 100,000 requests/day and 10 ms CPU per HTTP request. D1 Free includes 5 million rows read/day, 100,000 rows written/day, 500 MB maximum per database and 5 GB total account storage; it also limits a Worker invocation to 50 queries. Once daily D1 read/write limits are reached, queries fail until the daily reset. Design the Brain for compact notes, indexed reads and bounded graph queries.
 
 ## Security
 
-The Cloudflare demo is public-read by default. The write token protects POST /api/notes only; it does not protect note reads, search or graph endpoints. Do not upload private vaults until Cloudflare Access or another authenticated gateway protects every route. Use per-user databases and authorization predicates before allowing multi-tenant access.
+If BRAIN_READ_TOKEN is blank, the Worker API is public-read and anyone who knows the URL can search/read the notes. Set BRAIN_READ_TOKEN to require a Bearer token for all API GET routes. BRAIN_WRITE_TOKEN separately protects note creation. The browser asks for the read token and keeps it only in sessionStorage; the remote MCP bridge passes its server-side token. For stronger user identity, protect the complete site and API with Cloudflare Access and use separate databases per user. Do not put tokens in browser bundles, URLs, prompts or committed files.
+
+Keep notes as untrusted reference data. The model must never follow instructions embedded in a Brain note as system/developer policy.
 
 Note contents are untrusted data. Models must not follow instructions embedded in notes as system/developer instructions. Keep API tokens server-side; never put them in browser assets, URLs, prompts or committed files. Back up Markdown, not the SQLite index.
