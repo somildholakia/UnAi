@@ -1,52 +1,39 @@
-# Roadmap
+# unAI roadmap
 
-## M0 — Foundation (current)
-- Establish product constraints and research hypothesis.
-- Build web shell and model-agnostic engine API.
-- Add local OpenAI-compatible inference adapter.
-- Add explicit state machine and workspace path safety tests.
-- Publish repository and create durable checkpoint trail.
+## M0 — Modular foundation
+- Local-first FastAPI engine and browser shell.
+- Provider adapter, task state, plugin contracts and safe execution boundary.
+- Initial tests and architecture/research documentation.
 
-## M1 — Task compiler and repository map
-- Parse user request into typed goals, constraints, acceptance checks, and permissions.
-- Index files, symbols, imports, tests, and dependencies.
-- Retrieve code slices based on graph traversal and semantic search.
-- Return a plan that separates facts, hypotheses, and unknowns.
+## M1 — Brain and training foundation
+- Obsidian-compatible Markdown vault, backlinks, graph and low-memory search.
+- Local chat retrieval plus MCP read tools.
+- Cloudflare Worker/D1 scaffold and static graph explorer.
+- Verified data preparation, LoRA/QLoRA SFT and DPO harness.
 
-## M2 — Execution loop
-- Add Docker-only command runner with strict resource and network controls.
-- Add patch proposals and isolated Git worktrees.
-- Capture deterministic evidence for each command.
-- Make the agent ask before privileged, destructive, networked, or irreversible operations.
+## M2 — Task compiler and code graph
+- Parse goals into typed acceptance checks, constraints and permissions.
+- Persist file/symbol/import/test graph with source-range references.
+- Retrieve bounded, task-specific code slices rather than whole repositories.
 
-## M3 — Adversarial verification
-- Generate targeted tests and counterexamples.
-- Detect candidate disagreement and target the distinguishing conditions.
-- Run regression suites and static checks.
-- Implement evidence-gated delivery and proof bundles.
+## M3 — Evidence-producing agent loop
+- Typed tool calls and isolated workspaces.
+- Patch proposals, controlled test execution and regression evidence.
+- Explicit approval for risky or irreversible actions.
 
-## M4 — Research-grade benchmarks
-- Build a small held-out repository task set.
-- Add baseline harness and reproducible run metadata.
-- Run ablations and publish results, including negative results.
+## M4 — Adversarial verification
+- Generate targeted counterexamples and discriminating tests.
+- Verify claims against execution traces and independent checks.
+- Return proof bundles with unresolved risks, never just a confidence score.
 
-## M5 — Learning system
-- Collect opt-in, sanitized, reproducible trajectories.
-- Train a small next-action / verifier policy from outcomes.
-- Compare against rule-based selection and the teacher model.
-- Distill only after evidence of a useful quality/latency trade-off.
+## M5 — Specialist training
+- Collect consented, licensed and verified trajectories.
+- Train separate next-action, planner and verifier adapters.
+- Compare base, adapter and tool-augmented systems on held-out tasks.
+- Export only adapters that improve verified outcomes without exceeding mobile budgets.
 
-## M6 — Website and deployment
-- Improve chat/task UX, live status, diff review, and evidence viewer.
-- Add local model setup guide and model compatibility checks.
-- Add optional browser inference where model/runtime support permits.
-- Add optional self-hosted deployment templates. Shared hosted service only with explicit capacity and quota controls.
-
-
-## M0.5 — 6 GB mobile feasibility (must precede model expansion)
-- [ ] Select a 6 GB RAM Android reference device and record chipset, Android version, free RAM, and thermal state.
-- [ ] Benchmark small quantized model baselines with LiteRT-LM and llama.cpp.
-- [ ] Record model load time, peak PSS/RSS, TTFT, decode tokens/sec, energy, and sustained thermal performance.
-- [ ] Add adaptive context/KV-cache limits and memory-pressure eviction.
-- [ ] Prove CPU-only offline inference works before treating GPU/NPU acceleration as available.
-- [ ] Set final model size and context based on these measurements.
+## M6 — Mobile and deployment validation
+- Benchmark on physical 6 GB Android hardware.
+- Record peak PSS/RSS, load time, TTFT, tokens/sec, power and sustained thermals.
+- Deploy optional hosted Brain services with authentication, quotas and tenant isolation.
+- Keep local/offline inference functional without hosted model credits.
