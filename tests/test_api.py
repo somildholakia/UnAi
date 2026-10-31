@@ -235,7 +235,6 @@ def test_patch_proposal_requires_second_confirmation_and_records_evidence(tmp_pa
     workspace_root = _configure_inspection(tmp_path, monkeypatch)
     target = workspace_root / "demo" / "service.py"
     original = target.read_text(encoding="utf-8")
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
     client = TestClient(app)
 
     inspected = client.post(
@@ -248,6 +247,10 @@ def test_patch_proposal_requires_second_confirmation_and_records_evidence(tmp_pa
     )
     assert inspected.status_code == 200
     task_id = inspected.json()["task_id"]
+    file_snapshot = client.get(f"/api/tasks/{task_id}/files/service.py")
+    assert file_snapshot.status_code == 200
+    assert file_snapshot.json()["content"] == original
+    digest = file_snapshot.json()["sha256"]
 
     proposed = "def calculate_total(items):\n    return sum(items) + 1\n"
     proposal_response = client.post(
@@ -342,3 +345,38 @@ def test_patch_apply_requires_exact_confirmation(tmp_path, monkeypatch) -> None:
         json={"confirm": "yes"},
     )
     assert response.status_code == 422
+
+
+def test_task_file_snapshot_requires_workspace_read_permission(tmp_path, monkeypatch) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Implement a profile display feature",
+            "workspace": "demo",
+            "permissions": [],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    response = client.get(f"/api/tasks/{task_id}/files/service.py")
+    assert response.status_code == 403
+
+
+def test_task_file_snapshot_rejects_sensitive_and_traversal_paths(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Implement a profile display feature",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+
+    assert client.get(f"/api/tasks/{task_id}/files/../outside.py").status_code in {400, 404, 409}
+    assert client.get(f"/api/tasks/{task_id}/files/.env").status_code == 409
