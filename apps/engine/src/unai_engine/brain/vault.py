@@ -139,7 +139,7 @@ class MarkdownVault:
         paths: dict[str, str] = {}
         stems: dict[str, str] = {}
         aliases: dict[str, str] = {}
-        seen: set[str] = {}
+        seen: set[str] = set()
         counts = {"notes": 0, "links": 0, "tags": 0}
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
