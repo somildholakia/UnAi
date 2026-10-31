@@ -23,7 +23,7 @@ The Brain is a portable Markdown knowledge graph. It supports YAML frontmatter, 
 - Browser graph explorer: apps/brain-web
 - Design, local setup, remote access and privacy: docs/BRAIN.md
 
-The Cloudflare Worker is a deployment scaffold, not a deployed service. It is public-read by default; do not place private notes there unless an authenticated gateway is placed in front of every read route. A model does not gain access merely because a website exists: connect the API through MCP or an explicit HTTP tool.
+The Cloudflare Worker is a deployment scaffold, not a deployed service. It is public-read if BRAIN_READ_TOKEN is unset; configure it to protect note reads, and configure BRAIN_WRITE_TOKEN separately for note creation. Cloudflare's Free plan has daily request, CPU, D1 read/write and storage limits; see docs/BRAIN.md. A model does not gain access merely because a website exists: connect the API through the remote MCP bridge or an explicit HTTP tool.
 
 ## Training and fine-tuning
 
