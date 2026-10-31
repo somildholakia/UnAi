@@ -25,6 +25,9 @@ class HealthResponse(BaseModel):
     provider_configured: bool
     model: str
     execution: Literal["docker-isolated-only"] = "docker-isolated-only"
+    notes: int = 0
+    inference: Literal[False] = False
+    gpu_required: Literal[False] = False
 
 
 class PlanStep(BaseModel):
@@ -40,3 +43,10 @@ class TaskContract(BaseModel):
     acceptance_checks: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     steps: list[PlanStep] = Field(default_factory=list)
+
+
+class BrainNoteCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    body: str = Field(default="", max_length=900_000)
+    tags: list[str] = Field(default_factory=list, max_length=40)
+    source: str = Field(default="user", max_length=120)
