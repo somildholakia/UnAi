@@ -19,15 +19,37 @@ from unai_engine.models import (
 )
 
 
-_CODE_CHANGE = re.compile(r"\b(fix|bug|bugfix|repair|implement|build|create|add|develop|refactor|change|modify)\b", re.I)
-_BUG = re.compile(r"\b(bug|fix|broken|crash|error|exception|fails?|failure|regression)\b", re.I)
-_REVIEW = re.compile(r"\b(review|audit|inspect|assess|security review|code review)\b", re.I)
-_RESEARCH = re.compile(r"\b(research|compare|investigate|explain|analyse|analyze|latest|current|today|internet|web)\b", re.I)
-_TEST_REQUEST = re.compile(r"\b(test|tests|pytest|unittest|vitest|jest|playwright|cypress)\b", re.I)
-_NETWORK_REQUEST = re.compile(r"\b(web|internet|online|latest|current|today|browse|search the web)\b", re.I)
-_INSTALL_REQUEST = re.compile(r"\b(install|add dependency|upgrade dependency|npm install|pip install|pnpm add)\b", re.I)
-_DESTRUCTIVE_REQUEST = re.compile(r"\b(delete|remove|drop|wipe|reset|overwrite|purge|destroy)\b", re.I)
-_STACK_HINT = re.compile(r"\b(python|javascript|typescript|react|node|java|c\+\+|rust|go|swift|kotlin|flutter|fastapi|django|express)\b", re.I)
+_CODE_CHANGE = re.compile(
+    r"\b(fix|bug|bugfix|repair|implement|build|create|add|develop|refactor|change|modify)\b",
+    re.I,
+)
+_BUG = re.compile(
+    r"\b(bug|fix|broken|crash|error|exception|fail(?:ed|s|ure)?|regression|troubleshoot)\b",
+    re.I,
+)
+_REVIEW = re.compile(r"\b(review|audit|security review|code review|assess the code)\b", re.I)
+_RESEARCH = re.compile(
+    r"\b(research|compare|investigate|explain|analyse|analyze|latest|current|today|internet|web search)\b",
+    re.I,
+)
+_TEST_REQUEST = re.compile(
+    r"\b(test|tests|pytest|unittest|vitest|jest|playwright|cypress)\b", re.I
+)
+_NETWORK_REQUEST = re.compile(
+    r"\b(internet|online|latest|current|today|browse|search(?:ing)? the web|web search|visit (?:a )?website)\b",
+    re.I,
+)
+_INSTALL_REQUEST = re.compile(
+    r"\b(install(?: dependencies| packages)?|add dependency|upgrade dependency|npm install|pip install|pnpm add)\b",
+    re.I,
+)
+_DESTRUCTIVE_REQUEST = re.compile(
+    r"\b(delete|remove|drop|wipe|reset|overwrite|purge|destroy)\b", re.I
+)
+_STACK_HINT = re.compile(
+    r"\b(python|javascript|typescript|react|node|java|c\+\+|rust|go|swift|kotlin|flutter|fastapi|django|express)\b",
+    re.I,
+)
 
 
 def _classify(request: str) -> TaskKind:
@@ -66,7 +88,6 @@ def _required_permissions(kind: TaskKind, request: str) -> list[TaskPermission]:
     if _DESTRUCTIVE_REQUEST.search(request):
         required.append("destructive_changes")
 
-    # Keep stable order while removing duplicates.
     return list(dict.fromkeys(required))
 
 
@@ -115,6 +136,9 @@ def _steps(kind: TaskKind) -> list[PlanStep]:
 
 def compile_task(payload: TaskCompileRequest) -> TaskContract:
     request = " ".join(payload.request.split())
+    if not request:
+        raise ValueError("Task request cannot be blank")
+
     kind = _classify(request)
     required = _required_permissions(kind, request)
     approved = list(dict.fromkeys(payload.permissions))
@@ -150,13 +174,20 @@ def compile_task(payload: TaskCompileRequest) -> TaskContract:
             "State assumptions and unresolved unknowns rather than inventing details.",
         ],
     }
+
     unknowns: list[str] = []
     if kind in {"bugfix", "feature"} and not _TEST_REQUEST.search(request):
-        unknowns.append("The request does not specify a test command or framework; discover repository conventions before verification.")
+        unknowns.append(
+            "The request does not specify a test command or framework; discover repository conventions before verification."
+        )
     if kind == "feature" and not _STACK_HINT.search(request):
-        unknowns.append("The implementation stack is not named; follow the existing repository stack instead of introducing a new one.")
+        unknowns.append(
+            "The implementation stack is not named; follow the existing repository stack instead of introducing a new one."
+        )
     if kind in {"bugfix", "feature"} and len(request) < 80:
-        unknowns.append("The exact acceptance criteria may need confirmation from repository context or the requester.")
+        unknowns.append(
+            "The exact acceptance criteria may need confirmation from repository context or the requester."
+        )
 
     assumptions = [
         "Task classification and generated checks are heuristic and provisional.",
