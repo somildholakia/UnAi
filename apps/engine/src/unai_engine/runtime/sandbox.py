@@ -22,7 +22,7 @@ class ExecutionResult:
 class DockerSandbox:
     """A deliberately narrow Docker runner. There is no host-shell fallback."""
 
-    def __init__(self, image: str = "python:3.12-slim", timeout_seconds: int = 120) -> None:
+    def __init__(self, image: str = "unai-python-test:latest", timeout_seconds: int = 120) -> None:
         self.image = image
         self.timeout_seconds = timeout_seconds
 
