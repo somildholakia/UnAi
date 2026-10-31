@@ -47,7 +47,7 @@ def _workspace(root: Path) -> tuple[Path, str, str]:
     return project, content, digest
 
 
-def _proposal(file_path: str, expected_sha256: str, proposed: str = "def greeting(name):\n    return f'Welcome {name}'\n'):
+def _proposal(file_path: str, expected_sha256: str, proposed: str = "def greeting(name): return f'Welcome {name}'"):
     return PatchProposalRequest(
         file_path=file_path,
         expected_sha256=expected_sha256,
