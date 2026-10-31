@@ -14,7 +14,11 @@ unAI investigates whether compact models can deliver stronger coding outcomes wh
 - **Local-first:** run an open-weight model locally; no hosted model API is required for offline operation.
 - **Safe execution:** generated commands must run inside a constrained sandbox, never through a host-shell fallback.
 
-## Task compiler — deterministic planning\n\n`POST /api/tasks/compile` converts a request into a provisional typed contract: task category, explicit constraints, assumptions, unknowns, acceptance checks, bounded plan steps, required permissions, and separately supplied approvals. It uses deterministic rules and does not call a model or execute tools. The compiler is a planning baseline, not a guarantee of semantic understanding; review contracts before acting. A required permission missing from the caller's explicit approval list remains missing.\n\n## Repository code graph — Python AST prototype
+## Task compiler — deterministic planning\n\n`POST /api/tasks/compile` converts a request into a provisional typed contract: task category, explicit constraints, assumptions, unknowns, acceptance checks, bounded plan steps, required permissions, and separately supplied approvals. It uses deterministic rules and does not call a model or execute tools. The compiler is a planning baseline, not a guarantee of semantic understanding; review contracts before acting. A required permission missing from the caller's explicit approval list remains missing.\n\n## M3 inspection and evidence ledger
+
+The read-only task inspection flow is now available through `POST /api/tasks/inspect`. It requires an explicit `workspace_read` approval, compiles a typed task contract, builds a bounded Python graph, ranks candidate symbols and records parse/discovery evidence in SQLite. Retrieve the persisted snapshot through `GET /api/tasks/{task_id}/evidence`. Configure storage with `UNAI_EVIDENCE_DB_PATH`. This stage never edits files or executes commands; missing write/test permissions remain visible as the next gate.
+
+## Repository code graph — Python AST prototype
 
 The indexing subsystem now includes a bounded Python AST graph for files, classes, functions, methods, internal imports, and heuristic test-to-source links. Graph entries point to line ranges instead of storing source bodies. It skips generated/hidden directories, symlinks, and oversized files; it reports parse errors and truncation. This first version is Python-only and does not yet persist or incrementally refresh the graph. See docs/CODE_GRAPH.md.
 
