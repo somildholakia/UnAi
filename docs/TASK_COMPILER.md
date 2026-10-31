@@ -86,3 +86,48 @@ UNAI_DOCKER_IMAGE to that image. If Docker or pytest is unavailable, the result 
 unavailable; it is never treated as a passing test. Project-specific dependencies
 must be baked into a reviewed sandbox image before running tests. The original
 workspace is not mounted into the test container.
+
+
+## Read-only source snapshots and approved patch replacement
+
+After inspection, read one eligible UTF-8 source file:
+
+    GET /api/tasks/{task_id}/files/{file_path}
+
+The task must have explicit workspace_read approval. The response returns the file
+content, byte length and SHA-256 digest. File reads append a discovery record with
+the digest to the task evidence ledger.
+
+Create a single-file replacement proposal:
+
+    POST /api/tasks/{task_id}/patch-proposals
+
+    {
+      "file_path": "src/service.py",
+      "expected_sha256": "<sha256-from-file-snapshot>",
+      "proposed_content": "<complete new file content>",
+      "description": "Explain the intended change"
+    }
+
+The inspected task must explicitly approve workspace_read and workspace_write.
+Tasks classified as requiring destructive_changes also need that permission.
+The proposal is saved in SQLite and a unified diff preview is returned; no file is
+changed during proposal creation. Patch targets must already exist, be eligible
+text files, not be symlinks or sensitive paths, and be at most 1 MB.
+
+Apply only after a separate approval action:
+
+    POST /api/tasks/{task_id}/patch-proposals/{proposal_id}/apply
+
+    {"confirm": "apply-patch"}
+
+Before replacement, the engine re-checks that the live file still matches the
+proposal's base SHA-256 and that the stored proposal content matches its recorded
+digest. A changed base returns HTTP 409 instead of overwriting the user's edit.
+The accepted replacement is made through a temporary file in the same directory
+and an atomic rename. Apply evidence is appended to the ledger.
+
+This is a single-file replacement interface, not a general shell or git tool. It
+does not create/delete files or run tests automatically. Run tests through the
+separately confirmed Docker test endpoint. The current hash check is an optimistic
+concurrency guard, not a cryptographic proof against a privileged local attacker.
