@@ -185,6 +185,7 @@ class IsolatedPythonTestRunner:
         stdout: str = "",
         stderr: str = "",
         error: str | None = None,
+        sandboxed: bool = False,
     ) -> TaskTestRunResponse:
         now = datetime.now(timezone.utc).isoformat()
         stdout_bytes = stdout.encode("utf-8", errors="replace")
@@ -219,7 +220,7 @@ class IsolatedPythonTestRunner:
             command=COMMAND,
             exit_code=exit_code,
             timed_out=timed_out,
-            sandboxed=True,
+            sandboxed=sandboxed,
             staged_files=staged.files if staged else 0,
             staged_bytes=staged.bytes_copied if staged else 0,
             skipped_files=staged.skipped_files if staged else 0,
@@ -275,6 +276,24 @@ class IsolatedPythonTestRunner:
                         stdout=stdout,
                         stderr=stderr,
                         error="pytest_missing_from_sandbox_image",
+                        sandboxed=True,
+                    )
+                if result.exit_code == 125 and any(
+                    marker in stderr.casefold()
+                    for marker in ("cannot connect to the docker daemon", "unable to find image", "error during connect")
+                ):
+                    return self._response(
+                        snapshot,
+                        "unavailable",
+                        None,
+                        "Docker could not start the requested sandbox container.",
+                        exit_code=result.exit_code,
+                        timed_out=result.timed_out,
+                        staged=staged,
+                        stdout=stdout,
+                        stderr=stderr,
+                        error="docker_container_unavailable",
+                        sandboxed=False,
                     )
                 status = "passed" if result.exit_code == 0 and not result.timed_out else "failed"
                 return self._response(
@@ -287,6 +306,7 @@ class IsolatedPythonTestRunner:
                     staged=staged,
                     stdout=stdout,
                     stderr=stderr,
+                    sandboxed=True,
                 )
         except (SandboxUnavailable, WorkspaceStagingError, OSError) as exc:
             return self._response(
