@@ -169,6 +169,8 @@ def test_destructive_contract_requires_separate_destructive_approval(tmp_path: P
         "service.py/../../outside.py",
         ".env",
         ".env.local.py",
+        ".envdir/settings.py",
+        ".git/config.toml",
         "secrets/config.py",
         "credentials.json",
         "id_rsa",
