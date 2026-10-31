@@ -30,7 +30,7 @@ jobs:
           python -m pip install -e "./apps/engine[dev,mcp]"
       - name: Run tests
         env:
-          PYTHONPATH: apps/engine/src
+          PYTHONPATH: apps/engine/src:.
         run: pytest -q tests
       - name: Compile Python sources
         run: python -m compileall -q apps/engine/src training
