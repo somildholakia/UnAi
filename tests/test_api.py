@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import hashlib
 
 from fastapi.testclient import TestClient
 
@@ -7,6 +8,7 @@ from unai_engine.agent.inspection import TaskInspector
 from unai_engine.main import app
 from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
+from unai_engine.runtime.patches import PatchManager
 from unai_engine.verification.ledger import EvidenceLedger
 
 
@@ -35,6 +37,7 @@ def _configure_inspection(tmp_path, monkeypatch):
         "task_test_runner",
         IsolatedPythonTestRunner(ledger, DockerSandbox()),
     )
+    monkeypatch.setattr(main_module, "patch_manager", PatchManager(ledger))
     return workspace_root
 
 
@@ -223,6 +226,119 @@ def test_test_run_endpoint_requires_explicit_run_tests_permission(tmp_path, monk
 def test_test_run_endpoint_requires_separate_confirmation() -> None:
     response = TestClient(app).post(
         "/api/tasks/nonexistent/run-tests",
+        json={"confirm": "yes"},
+    )
+    assert response.status_code == 422
+
+
+def test_patch_proposal_requires_second_confirmation_and_records_evidence(tmp_path, monkeypatch) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    target = workspace_root / "demo" / "service.py"
+    original = target.read_text(encoding="utf-8")
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    client = TestClient(app)
+
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Implement a profile display feature",
+            "workspace": "demo",
+            "permissions": ["workspace_read", "workspace_write"],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    proposed = "def calculate_total(items):\n    return sum(items) + 1\n"
+    proposal_response = client.post(
+        f"/api/tasks/{task_id}/patch-proposals",
+        json={
+            "file_path": "service.py",
+            "expected_sha256": digest,
+            "proposed_content": proposed,
+            "description": "Adjust the total calculation",
+        },
+    )
+    assert proposal_response.status_code == 200
+    proposal = proposal_response.json()
+    assert proposal["status"] == "pending"
+    assert (workspace_root / "demo" / "service.py").read_text(encoding="utf-8") == original
+
+    applied = client.post(
+        f"/api/tasks/{task_id}/patch-proposals/{proposal['proposal_id']}/apply",
+        json={"confirm": "apply-patch"},
+    )
+    assert applied.status_code == 200
+    assert applied.json()["status"] == "applied"
+    assert target.read_text(encoding="utf-8") == proposed
+
+    snapshot = client.get(f"/api/tasks/{task_id}/evidence")
+    assert snapshot.status_code == 200
+    assert [item["source"] for item in snapshot.json()["evidence"]][-2:] == [
+        "patch-proposal", "patch-applier"
+    ]
+
+
+def test_patch_api_rejects_missing_write_approval(tmp_path, monkeypatch) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    digest = hashlib.sha256((workspace_root / "demo" / "service.py").read_bytes()).hexdigest()
+    client = TestClient(app)
+
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Implement a profile display feature",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    response = client.post(
+        f"/api/tasks/{task_id}/patch-proposals",
+        json={
+            "file_path": "service.py",
+            "expected_sha256": digest,
+            "proposed_content": "def changed():\n    return True\n",
+            "description": "Test missing approval",
+        },
+    )
+    assert response.status_code == 403
+
+
+def test_patch_api_rejects_stale_file_hash(tmp_path, monkeypatch) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    target = workspace_root / "demo" / "service.py"
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    client = TestClient(app)
+
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Implement a profile display feature",
+            "workspace": "demo",
+            "permissions": ["workspace_read", "workspace_write"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    target.write_text("def concurrent_change():\n    return 'external'\n", encoding="utf-8")
+
+    response = client.post(
+        f"/api/tasks/{task_id}/patch-proposals",
+        json={
+            "file_path": "service.py",
+            "expected_sha256": digest,
+            "proposed_content": "def unsafe_overwrite():\n    return False\n",
+            "description": "Should conflict",
+        },
+    )
+    assert response.status_code == 409
+    assert "concurrent_change" in target.read_text(encoding="utf-8")
+
+
+def test_patch_apply_requires_exact_confirmation(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    response = TestClient(app).post(
+        "/api/tasks/task-id/patch-proposals/proposal-id/apply",
         json={"confirm": "yes"},
     )
     assert response.status_code == 422
