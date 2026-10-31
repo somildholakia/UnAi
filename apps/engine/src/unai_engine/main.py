@@ -11,6 +11,7 @@ from unai_engine.models import (
     BrainNoteCreate, ChatRequest, ChatResponse, HealthResponse,
     TaskCompileRequest, TaskContract, TaskInspectRequest,
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
+    PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
@@ -20,6 +21,7 @@ from unai_engine.agent.inspection import TaskInspector
 from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, TaskRunRejected
+from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchRejected
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 
 provider = OpenAICompatibleProvider(
@@ -39,6 +41,7 @@ task_test_runner = IsolatedPythonTestRunner(
     max_files=settings.test_max_files,
     max_bytes=settings.test_max_bytes,
 )
+patch_manager = PatchManager(evidence_ledger)
 
 app = FastAPI(
     title="unAI Engine",
@@ -110,6 +113,41 @@ async def run_task_tests(task_id: str, request: TaskRunApprovalRequest) -> TaskT
         raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
     except TaskRunRejected as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.post("/api/tasks/{task_id}/patch-proposals", response_model=PatchProposalResponse)
+def create_patch_proposal(task_id: str, request: PatchProposalRequest) -> PatchProposalResponse:
+    """Store a candidate one-file replacement; the workspace is not changed yet."""
+    try:
+        return patch_manager.propose(task_id, request, settings.workspace_root)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+    except PatchRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/tasks/{task_id}/patch-proposals/{proposal_id}/apply",
+    response_model=PatchApplyResponse,
+)
+def apply_patch_proposal(
+    task_id: str,
+    proposal_id: str,
+    request: PatchApplyApprovalRequest,
+) -> PatchApplyResponse:
+    """Apply a pending patch only after the separate apply-patch confirmation."""
+    if request.confirm != "apply-patch":
+        raise HTTPException(status_code=422, detail="Explicit patch-application confirmation is required.")
+    try:
+        return patch_manager.apply(task_id, proposal_id, settings.workspace_root)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task or patch proposal not found.") from exc
+    except PatchRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/tasks/{task_id}/evidence", response_model=TaskEvidenceSnapshot)
