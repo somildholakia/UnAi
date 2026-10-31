@@ -4,7 +4,12 @@ Build this image once on a machine with Docker and image-build network access:
 
     docker build -f apps/engine/Dockerfile.sandbox -t unai-python-test:latest .
 
-Then configure:
+The engine and `.env.example` default to `unai-python-test:latest`. Build the image
+before enabling test execution:
+
+    docker build -f apps/engine/Dockerfile.sandbox -t unai-python-test:latest .
+
+To use a different reviewed image, configure:
 
     UNAI_DOCKER_IMAGE=unai-python-test:latest
 
