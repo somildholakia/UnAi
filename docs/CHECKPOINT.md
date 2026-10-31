@@ -1,40 +1,57 @@
 # Development checkpoint
 
-**Checkpoint:** M1 foundation — Brain memory and training scaffold
+**Checkpoint:** M1 — Obsidian-style Brain and fine-tuning foundation
 **Date:** 2026-11-01
 **Repository:** https://github.com/somildholakia/UnAi (main)
 
 ## Implemented and published
 
-- Modular Engine with model adapter, typed task-state primitives and plugin contracts.
-- Obsidian-compatible Markdown Brain with YAML metadata, wikilinks, tags, aliases, backlinks, unresolved references and graph/search indexing.
-- SQLite FTS index is rebuildable; Markdown remains the canonical data.
-- Local chat retrieves up to four bounded Brain excerpts into model context; notes are labelled untrusted reference data.
-- Read-only local and remote MCP bridges.
-- Brain API with local loopback write boundary and server-side write-token option.
-- Packaging declares PyYAML and optional MCP/training dependency groups.
-- Initial Cloudflare Worker/D1 and static graph UI scaffolds are being prepared separately from the local Engine.
-- Training harness is separated from inference: verified dataset preparation, LoRA/QLoRA SFT and DPO preference stage.
+- Modular local-first Engine with model adapter, typed task-state primitives and cognition/memory/index/search/verification plugin interfaces.
+- Obsidian-compatible Markdown Brain with YAML frontmatter, tags, aliases, wikilinks, headings, backlinks and unresolved-link detection.
+- SQLite FTS and graph index is rebuildable; Markdown remains the canonical portable source.
+- Local chat automatically retrieves up to four relevant Brain excerpts and labels them as untrusted reference data.
+- Local and remote read-only MCP bridges for model access.
+- Local Brain FastAPI endpoints with loopback-only tokenless note writes; remote write calls require a server-side token.
+- Cloudflare Worker + D1 API and static browser graph explorer can be deployed together as one site.
+- Optional read and write secrets protect remote access; the web UI keeps the read token only in session storage.
+- Cloudflare Worker supports a public-read demo mode when no read token is configured. Do not put private notes there without a read token or Cloudflare Access.
+- Fine-tuning scaffold: consent/license/provenance/verification-gated data preparation, LoRA/QLoRA SFT and DPO preference training.
+- GitHub Actions workflows for engine tests and Cloudflare Worker/UI checks.
 
-## Local verification
+## Verification
 
-- Engine test suite: 28 passed.
-- Python compileall for engine and training: passed.
-- Static Brain UI JavaScript syntax check: passed.
+- GitHub Engine CI: **28 tests passed**.
+- GitHub Python compileall step: passed.
+- Local static UI script syntax was checked with Node earlier.
+- Cloudflare Worker TypeScript/UI CI: added; latest run must be inspected before marking the cloud bundle verified.
 
-## Not yet verified
+## Not yet verified / not yet done
 
-- Cloudflare account/database deployment or production URL.
-- Worker typecheck/build against a real D1 binding.
-- Browser UI visual/functional integration test.
-- MCP handshake in a live compatible client.
-- Fine-tuning execution or trained adapter weights.
-- 6 GB Android RAM, latency, energy or thermal benchmark.
+- No Cloudflare D1 database, secret, account binding or live URL has been configured. The D1 ID in wrangler.toml is still a placeholder.
+- No trained adapter/model weights exist. Fine-tuning scripts are a scaffold; no dataset has been supplied or training job run.
+- No physical 6 GB Android RAM, latency, energy or sustained-thermal measurements have been completed.
+- No claim of Claude-level equivalence or frontier-level capability is made.
+
+## Deployment
+
+From apps/brain-cloud:
+
+    npm install
+    npx wrangler d1 create unai-brain
+
+Replace database_id in wrangler.toml with the returned ID, then:
+
+    npx wrangler d1 migrations apply unai-brain --remote
+    npx wrangler secret put BRAIN_READ_TOKEN
+    npx wrangler secret put BRAIN_WRITE_TOKEN
+    npm run deploy
+
+The Worker serves the static UI and API from the same URL. A read token is optional for a public demo but recommended for private notes. The write token is required for note creation.
 
 ## Next milestone
 
-1. Finish and deploy the read-only hosted Brain with Access controls for private data.
-2. Connect an actual model to the API using MCP or registered HTTP tools.
-3. Add a typed task compiler, persistent repository/symbol graph and evidence-producing execution loop.
-4. Collect only consented, licensed and verified trajectories; train a small specialist LoRA adapter on suitable GPU compute.
-5. Compare base model, adapter and tool-augmented system on held-out tasks with matched budgets.
+1. Complete Worker/UI CI and deploy the Brain to a real D1 database with read access protected.
+2. Connect the selected model through remote MCP using the read token.
+3. Add typed task compiler, persistent code graph and an evidence-producing execution loop.
+4. Build a curated, consented and licensed coding-trajectory dataset; run LoRA/QLoRA on appropriate GPU compute, then DPO only if preference labels are evidence-backed.
+5. Compare base model, adapters and full unAI system on held-out coding tasks under matched budgets, then test quantized inference on physical Android hardware.
