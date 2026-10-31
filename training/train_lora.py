@@ -88,7 +88,7 @@ def main() -> None:
         per_device_train_batch_size=args.batch_size, per_device_eval_batch_size=1,
         gradient_accumulation_steps=args.grad_accum, gradient_checkpointing=True,
         logging_steps=10, save_strategy="epoch",
-        evaluation_strategy="epoch" if eval_rows is not None else "no",
+        eval_strategy="epoch" if eval_rows is not None else "no",
         report_to="none", bf16=bf16, fp16=bool(torch.cuda.is_available() and not bf16),
         optim="paged_adamw_8bit" if args.qlora else "adamw_torch", remove_unused_columns=False,
     )
