@@ -3,7 +3,32 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import unai_engine.main as main_module
+from unai_engine.agent.inspection import TaskInspector
 from unai_engine.main import app
+from unai_engine.verification.ledger import EvidenceLedger
+
+
+def _configure_inspection(tmp_path, monkeypatch):
+    workspace_root = tmp_path / "workspaces"
+    project = workspace_root / "demo"
+    project.mkdir(parents=True)
+    (project / "service.py").write_text(
+        "def calculate_total(items):\n    return sum(items)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        SimpleNamespace(workspace_root=workspace_root),
+    )
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    monkeypatch.setattr(main_module, "evidence_ledger", ledger)
+    monkeypatch.setattr(
+        main_module,
+        "task_inspector",
+        TaskInspector(main_module.plugins.indexing["python-code-graph"], ledger),
+    )
+    return workspace_root
 
 
 def test_health_endpoint_does_not_expose_provider_secret() -> None:
@@ -91,4 +116,76 @@ def test_repository_graph_returns_404_for_missing_workspace(tmp_path, monkeypatc
     monkeypatch.setattr(main_module, "settings", SimpleNamespace(workspace_root=workspace_root))
 
     response = TestClient(app).get("/api/repository/graph?workspace=missing")
+    assert response.status_code == 404
+
+
+def test_task_inspection_requires_explicit_workspace_read_and_persists_blocker(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    response = client.post(
+        "/api/tasks/inspect",
+        json={"request": "Fix calculate_total bug", "workspace": "demo"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "awaiting_workspace_read"
+    assert body["next_gate"] == "workspace_access_required"
+    assert body["execution_started"] is False
+    assert body["graph_summary"] == {}
+    assert body["evidence"][0]["passed"] is False
+
+    snapshot = client.get(f"/api/tasks/{body['task_id']}/evidence")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["status"] == "awaiting_workspace_read"
+    assert len(snapshot.json()["evidence"]) == 1
+
+
+def test_task_inspection_builds_read_only_graph_and_records_evidence(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    response = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total bug and add a regression test",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "inspection_complete"
+    assert body["next_gate"] == "approval_required"
+    assert body["execution_started"] is False
+    assert body["graph_summary"]["files_parsed"] == 1
+    assert body["symbol_matches"][0]["name"] == "calculate_total"
+    assert any(item["kind"] == "repository" for item in body["evidence"])
+    assert any(item["kind"] == "quality" and item["passed"] is True for item in body["evidence"])
+    assert "workspace_write" in body["contract"]["missing_permissions"]
+
+    snapshot = client.get(f"/api/tasks/{body['task_id']}/evidence")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["contract"]["task_id"] == body["task_id"]
+    assert len(snapshot.json()["evidence"]) == len(body["evidence"])
+
+
+def test_task_inspection_never_reads_outside_workspace(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    response = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review repository",
+            "workspace": "../outside",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "workspace_unavailable"
+    assert body["graph_summary"] == {}
+    assert body["evidence"][0]["passed"] is False
+
+
+def test_task_evidence_endpoint_returns_404_for_unknown_task() -> None:
+    response = TestClient(app).get("/api/tasks/unknown-task/evidence")
     assert response.status_code == 404
