@@ -380,3 +380,22 @@ def test_task_file_snapshot_rejects_sensitive_and_traversal_paths(tmp_path, monk
 
     assert client.get(f"/api/tasks/{task_id}/files/../outside.py").status_code in {400, 404, 409}
     assert client.get(f"/api/tasks/{task_id}/files/.env").status_code == 409
+
+
+def test_task_proof_endpoint_summarizes_inspection_and_missing_task(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    assert client.get("/api/tasks/not-found/proof").status_code == 404
+
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review the service implementation",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert inspected.status_code == 200
+    proof = client.get(f"/api/tasks/{inspected.json()['task_id']}/proof")
+    assert proof.status_code == 200
+    assert proof.json()["status"] == "inspection_only"
