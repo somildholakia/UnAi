@@ -37,7 +37,7 @@ def _snapshot(events):
     )
 
 
-def _patch_events(passed=True, test_minutes=3, quality_passed=True):
+def _patch_events(passed=True, test_minutes=3, quality_passed=True, quality_minutes=0):
     proposal = _event(
         "placeholder", "proposal", "patch-proposal", "patch", True,
         artifact_ref="proposal:p1", minutes=1,
@@ -55,7 +55,7 @@ def _patch_events(passed=True, test_minutes=3, quality_passed=True):
     )
     quality = _event(
         "placeholder", "quality", "python-ast-parser", "quality", quality_passed,
-        minutes=0,
+        minutes=quality_minutes,
     )
     return [quality, proposal, apply, test]
 
@@ -86,14 +86,23 @@ def test_applied_patch_requires_a_later_test_run() -> None:
     assert result.tests_after_latest_patch is False
 
 
-def test_successful_tests_after_patch_are_reported_with_limits() -> None:
+def test_pre_patch_quality_result_is_reported_as_stale() -> None:
     result = summarize_proof(_snapshot(_patch_events(passed=True, test_minutes=3)))
-    assert result.status == "tests_passed_after_patch"
+    assert result.status == "tests_passed_but_quality_check_unknown"
     assert result.latest_test_passed is True
     assert result.tests_after_latest_patch is True
+    assert result.quality_check_passed is None
+    assert result.quality_check_fresh is False
+    assert any("acceptance criteria" in item.lower() for item in result.limitations)
+
+
+def test_fresh_quality_and_test_results_after_patch_are_reported() -> None:
+    result = summarize_proof(
+        _snapshot(_patch_events(passed=True, test_minutes=4, quality_passed=True, quality_minutes=3))
+    )
+    assert result.status == "tests_passed_after_patch"
     assert result.quality_check_passed is True
-    assert any("not a correctness" in item.lower() or "acceptance criteria" in item.lower()
-               for item in result.limitations)
+    assert result.quality_check_fresh is True
 
 
 def test_failed_and_unavailable_test_results_are_not_collapsed() -> None:
@@ -105,8 +114,9 @@ def test_failed_and_unavailable_test_results_are_not_collapsed() -> None:
     assert unavailable.status == "tests_unavailable"
 
 
-def test_failed_quality_check_blocks_clean_test_summary() -> None:
+def test_fresh_failed_quality_check_blocks_clean_test_summary() -> None:
     result = summarize_proof(
-        _snapshot(_patch_events(passed=True, test_minutes=3, quality_passed=False))
+        _snapshot(_patch_events(passed=True, test_minutes=4, quality_passed=False, quality_minutes=3))
     )
     assert result.status == "tests_passed_but_quality_check_failed"
+    assert result.quality_check_fresh is True
