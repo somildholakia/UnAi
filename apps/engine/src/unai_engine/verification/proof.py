@@ -51,6 +51,10 @@ def summarize_proof(snapshot: TaskEvidenceSnapshot) -> TaskProofResponse:
     if latest_patch is None:
         if pending_count:
             status = "patch_pending"
+        elif latest_test is not None and latest_test.passed is False:
+            status = "tests_failed"
+        elif latest_test is not None and latest_test.passed is None:
+            status = "tests_unavailable"
         elif latest_test is not None:
             status = "tests_run_no_patch"
         else:
