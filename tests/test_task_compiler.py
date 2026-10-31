@@ -46,7 +46,8 @@ def test_explicit_approvals_are_separate_from_destructive_permission_request() -
             permissions=["workspace_read"],
         )
     )
-    assert contract.task_type == "general"
+    assert contract.task_type == "feature"
+    assert "workspace_write" in contract.required_permissions
     assert "destructive_changes" in contract.required_permissions
     assert "destructive_changes" in contract.missing_permissions
     assert "workspace_read" in contract.permissions
@@ -70,6 +71,11 @@ def test_latest_research_requires_explicit_network_approval() -> None:
     assert contract.task_type == "research"
     assert "network_access" in contract.required_permissions
     assert "network_access" in contract.missing_permissions
+
+
+def test_whitespace_request_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        TaskCompileRequest(request="   ")
 
 
 def test_unknown_permission_is_rejected_at_schema_boundary() -> None:
