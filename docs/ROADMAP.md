@@ -18,6 +18,7 @@
 - Retrieve bounded, task-specific code slices rather than whole repositories.
 
 ## M3 — Evidence-producing agent loop
+- [x] Read-only inspection workflow with explicit workspace-read approval and append-only evidence snapshots.
 - Typed tool calls and isolated workspaces.
 - Patch proposals, controlled test execution and regression evidence.
 - Explicit approval for risky or irreversible actions.
