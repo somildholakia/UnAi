@@ -189,3 +189,33 @@ def test_task_inspection_never_reads_outside_workspace(tmp_path, monkeypatch) ->
 def test_task_evidence_endpoint_returns_404_for_unknown_task() -> None:
     response = TestClient(app).get("/api/tasks/unknown-task/evidence")
     assert response.status_code == 404
+
+
+def test_test_run_endpoint_requires_explicit_run_tests_permission(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total and run regression tests",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    response = client.post(
+        f"/api/tasks/{task_id}/run-tests",
+        json={"confirm": "run-python-tests"},
+    )
+    assert response.status_code == 403
+    assert "run_tests" in response.json()["detail"]
+
+
+def test_test_run_endpoint_requires_separate_confirmation() -> None:
+    response = TestClient(app).post(
+        "/api/tasks/nonexistent/run-tests",
+        json={"confirm": "yes"},
+    )
+    assert response.status_code == 422
