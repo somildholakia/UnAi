@@ -19,6 +19,7 @@
 
 ## M3 — Evidence-producing agent loop
 - [x] Read-only inspection workflow with explicit workspace-read approval and append-only evidence snapshots.
+- [x] Separately confirmed fixed pytest runner in Docker, using a filtered temporary copy and appended execution evidence.
 - Typed tool calls and isolated workspaces.
 - Patch proposals, controlled test execution and regression evidence.
 - Explicit approval for risky or irreversible actions.
