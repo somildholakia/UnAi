@@ -43,6 +43,12 @@ async def test_graph_indexes_symbols_relative_imports_and_test_links(tmp_path: P
         for edge in edges
     )
     assert any(
+        edge["type"] == "imports"
+        and edge["source"] == "file:tests/test_core.py"
+        and edge["target"] == "file:src/pkg/core.py"
+        for edge in edges
+    )
+    assert any(
         edge["type"] == "tests"
         and edge["source"] == "file:tests/test_core.py"
         and edge["target"] == "file:src/pkg/core.py"
