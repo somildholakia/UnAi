@@ -90,7 +90,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe"]
     source: str
     claim: str
     passed: bool | None = None
@@ -179,6 +179,32 @@ class TaskTestRunResponse(BaseModel):
     stdout_preview: str = ""
     stderr_preview: str = ""
     evidence: EvidenceRecord
+
+
+class ProbeRequest(BaseModel):
+    file_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
+    symbol_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
+    limit: int = Field(default=24, ge=1, le=60)
+
+
+class ProbeCandidate(BaseModel):
+    candidate_id: str
+    function_name: str
+    source_line: int = Field(ge=1)
+    condition: str
+    parameter_values: dict
+    rationale: str
+
+
+class ProbeResponse(BaseModel):
+    task_id: str
+    file_path: str
+    symbol_name: str
+    source_sha256: str
+    status: Literal["generated", "no_supported_conditions", "parse_error"]
+    candidates: list[ProbeCandidate] = Field(default_factory=list)
+    evidence: EvidenceRecord
+    limitations: list[str] = Field(default_factory=list)
 
 
 class TaskProofResponse(BaseModel):
