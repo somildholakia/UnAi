@@ -130,7 +130,7 @@ class TaskTestRunResponse(BaseModel):
     command: Literal["python -m pytest -q"] = "python -m pytest -q"
     exit_code: int | None = None
     timed_out: bool = False
-    sandboxed: Literal[True] = True
+    sandboxed: bool = False
     staged_files: int = 0
     staged_bytes: int = 0
     skipped_files: int = 0
