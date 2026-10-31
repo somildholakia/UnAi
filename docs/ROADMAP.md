@@ -14,8 +14,8 @@
 ## M2 — Task compiler and code graph
 - [x] Bounded Python AST graph for file/symbol/import/test relationships with source ranges.
 - [x] Parse goals into typed acceptance checks, constraints and approval-aware permissions.
-- Persist file/symbol/import/test graph with source-range references.
-- Retrieve bounded, task-specific code slices rather than whole repositories.
+- [ ] Persist file/symbol/import/test graph with source-range references.
+- [ ] Retrieve bounded, task-specific code slices rather than whole repositories.
 
 ## M3 — Evidence-producing agent loop
 - [x] Read-only inspection workflow with explicit workspace-read approval and append-only evidence snapshots.
@@ -23,13 +23,14 @@
 - [x] Task-scoped source snapshots and SHA-256-bound, one-file patch proposals with a separate apply confirmation.
 - [x] Evidence summary that requires a passing test event newer than the latest applied patch.
 - [x] Post-patch Python parse-quality refresh; the proof summary treats pre-patch quality events as stale.
-- Typed tool calls and isolated workspaces.
-- Regression evidence after a patch; arbitrary commands and multi-file patch application remain disabled.
-- Explicit approval for risky or irreversible actions.
+- [ ] Typed model-tool/client bridge; HTTP workflow endpoints currently require an external caller.
+- [x] Isolated temporary Docker test workspace for fixed Python pytest invocation.
+- [x] Append-only patch and test evidence with explicit approval gates; arbitrary commands and multi-file patch application remain disabled.
+- [x] Explicit read/write/test permissions and a second confirmation for patch apply/test run.
 
 ## M4 — Adversarial verification
 - [x] Conservative Python AST boundary-probe candidate generation for simple branch conditions (unverified only).
-- Generate targeted counterexamples and discriminating tests.
+- [ ] Turn unverified AST boundary candidates into grounded tests and targeted counterexamples.
 - Verify claims against execution traces and independent checks.
 - Return proof bundles with unresolved risks, never just a confidence score.
 
