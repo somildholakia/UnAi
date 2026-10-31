@@ -62,3 +62,27 @@ This stage does not edit files, run tests, install packages, access the network,
 execute shell commands. Approving workspace_read is not approval for any of those
 operations. Even when all generated permissions are approved, execution remains
 unimplemented in this milestone.
+
+
+## Explicitly confirmed Python tests
+
+The inspection contract must contain both workspace_read and run_tests in its
+explicit permissions list. Then call:
+
+    POST /api/tasks/{task_id}/run-tests
+    Content-Type: application/json
+
+    {"confirm": "run-python-tests"}
+
+The route exposes one fixed command: python -m pytest -q. There is no free-form
+shell command parameter. The engine stages a temporary copy of selected Python
+source/config files, excludes common secret and generated directories/files, and
+runs only that copy inside Docker with networking disabled and resource limits.
+It appends an execution evidence record containing the exit code, timeout flag,
+staging summary, and stdout/stderr hashes. Output previews are redacted.
+
+Build the pytest-enabled image as described in apps/engine/SANDBOX.md and set
+UNAI_DOCKER_IMAGE to that image. If Docker or pytest is unavailable, the result is
+unavailable; it is never treated as a passing test. Project-specific dependencies
+must be baked into a reviewed sandbox image before running tests. The original
+workspace is not mounted into the test container.
