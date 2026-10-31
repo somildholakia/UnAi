@@ -1,1 +1,1 @@
-"""Model provider adapters.""
+"""Model provider adapters."""
