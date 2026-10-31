@@ -1,0 +1,11 @@
+# Build once; runtime test containers are always started with --network=none.
+# docker build -f apps/engine/Dockerfile.sandbox -t unai-python-test:latest .
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN pip install --no-cache-dir "pytest>=8,<10"
+
+WORKDIR /workspace
