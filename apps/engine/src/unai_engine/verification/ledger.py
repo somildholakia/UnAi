@@ -44,6 +44,30 @@ CREATE TABLE IF NOT EXISTS patch_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_patch_proposals_task
     ON patch_proposals(task_id, created_at);
+CREATE TRIGGER IF NOT EXISTS patch_proposals_guard_update
+BEFORE UPDATE ON patch_proposals
+WHEN
+    NEW.proposal_id != OLD.proposal_id
+    OR NEW.task_id != OLD.task_id
+    OR NEW.workspace != OLD.workspace
+    OR NEW.file_path != OLD.file_path
+    OR NEW.expected_sha256 != OLD.expected_sha256
+    OR NEW.proposed_sha256 != OLD.proposed_sha256
+    OR NEW.proposed_content != OLD.proposed_content
+    OR NEW.description != OLD.description
+    OR NEW.created_at != OLD.created_at
+    OR OLD.status != 'pending'
+    OR NEW.status != 'applied'
+    OR OLD.applied_at IS NOT NULL
+    OR NEW.applied_at IS NULL
+BEGIN
+    SELECT RAISE(ABORT, 'patch proposal is immutable except pending-to-applied finalization');
+END;
+CREATE TRIGGER IF NOT EXISTS patch_proposals_no_delete
+BEFORE DELETE ON patch_proposals
+BEGIN
+    SELECT RAISE(ABORT, 'patch proposals cannot be deleted');
+END;
 CREATE INDEX IF NOT EXISTS idx_task_evidence_task_time
     ON task_evidence(task_id, created_at, evidence_id);
 CREATE TRIGGER IF NOT EXISTS task_evidence_no_update
