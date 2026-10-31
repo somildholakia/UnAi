@@ -181,6 +181,16 @@ class TaskTestRunResponse(BaseModel):
     evidence: EvidenceRecord
 
 
+class TaskQualityCheckResponse(BaseModel):
+    task_id: str
+    workspace: str
+    files_discovered: int = Field(ge=0)
+    files_parsed: int = Field(ge=0)
+    parse_errors: int = Field(ge=0)
+    passed: bool
+    evidence: EvidenceRecord
+
+
 class ProbeRequest(BaseModel):
     file_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
     symbol_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
@@ -218,6 +228,7 @@ class TaskProofResponse(BaseModel):
         "tests_unavailable",
         "tests_passed_after_patch",
         "tests_passed_but_quality_check_failed",
+        "tests_passed_but_quality_check_unknown",
     ]
     patch_count: int = Field(ge=0)
     pending_patch_count: int = Field(ge=0)
@@ -227,6 +238,7 @@ class TaskProofResponse(BaseModel):
     latest_test_at: str | None = None
     tests_after_latest_patch: bool = False
     quality_check_passed: bool | None = None
+    quality_check_fresh: bool = False
     acceptance_checks: list[str] = Field(default_factory=list)
     remaining_unknowns: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
