@@ -10,3 +10,8 @@ def test_sandbox_refuses_host_execution_when_docker_is_missing(tmp_path: Path, m
     runner = DockerSandbox()
     with pytest.raises(SandboxUnavailable, match="will not execute commands on the host"):
         runner.run(tmp_path, "echo should-not-run")
+
+
+def test_sandbox_defaults_to_unai_pytest_image() -> None:
+    runner = DockerSandbox()
+    assert runner.image == "unai-python-test:latest"
