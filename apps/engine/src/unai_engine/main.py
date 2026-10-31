@@ -5,10 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from unai_engine.agent.orchestrator import AgentOrchestrator
 from unai_engine.config import settings
-from unai_engine.models import BrainNoteCreate, ChatRequest, ChatResponse, HealthResponse
+from unai_engine.models import BrainNoteCreate, ChatRequest, ChatResponse, HealthResponse, TaskCompileRequest, TaskContract
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
-from unai_engine.brain.vault import BrainError, MarkdownVault
+from unai_engine.brain.vault import BrainError, MarkdownVault\nfrom unai_engine.cognition.task_compiler import compile_task
 
 provider = OpenAICompatibleProvider(
     base_url=settings.model_base_url,
@@ -34,7 +34,7 @@ app.add_middleware(
 )
 
 
-@app.get("/api/plugins")
+@app.post("/api/tasks/compile", response_model=TaskContract)\ndef task_compile(request: TaskCompileRequest) -> TaskContract:\n    """Compile a request into a provisional contract without running tools."""\n    return compile_task(request)\n\n\n@app.get("/api/plugins")
 async def plugin_manifest() -> dict[str, list[str]]:
     return plugins.manifest()
 
