@@ -227,7 +227,7 @@ class PythonCodeGraphIndexer:
                         if not add_import(file_id, alias.name):
                             external_imports += 1
                 elif isinstance(item, ast.ImportFrom):
-                    base_parts = list(current_package)
+                    base_parts = list(current_package) if item.level else []
                     for _ in range(max(0, item.level - 1)):
                         if base_parts:
                             base_parts.pop()
