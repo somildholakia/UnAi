@@ -1,1 +1,1 @@
-"""Constrained local runtime components.""
+"""Constrained local runtime components."""
