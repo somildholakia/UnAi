@@ -4,6 +4,7 @@
 **Date:** 2026-11-01
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** main
+**Latest main before this checkpoint update:** 07293168a55bc053bf42d21468a4bed1dfa98390 (documentation-only changes after the verified code commit)
 **Code verification commit:** 002814b23a1668995afbace56ad30dadd381f31d
 
 ## What is implemented
@@ -91,3 +92,12 @@ Build the pytest-enabled image before enabling the isolated test endpoint:
     docker build -f apps/engine/Dockerfile.sandbox -t unai-python-test:latest .
 
 The Engine defaults to UNAI_DOCKER_IMAGE=unai-python-test:latest. Configure the workspace and evidence paths in apps/engine/.env; use the example file as a starting point. Keep the service loopback-only until authentication is implemented.
+
+
+## Stop point
+
+This is the requested stopping checkpoint. The repository is left on `main` with
+the M3 evidence workflow and M4 unverified boundary-probe prototype documented
+above. No long-running agent, deployment, training job, or mobile benchmark is
+running. Resume from the "Next work after this checkpoint" list; do not treat
+the unchecked items as completed.
