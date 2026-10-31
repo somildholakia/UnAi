@@ -16,4 +16,5 @@ not_found_handling = "single-page-application"
 
 [vars]
 BRAIN_ALLOWED_ORIGIN = "*"
-# Set BRAIN_WRITE_TOKEN with: npx wrangler secret put BRAIN_WRITE_TOKEN
+# Set private read access with: npx wrangler secret put BRAIN_READ_TOKEN
+# Set write access with: npx wrangler secret put BRAIN_WRITE_TOKEN
