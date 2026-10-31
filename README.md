@@ -14,7 +14,7 @@ unAI investigates whether compact models can deliver stronger coding outcomes wh
 - **Local-first:** run an open-weight model locally; no hosted model API is required for offline operation.
 - **Safe execution:** generated commands must run inside a constrained sandbox, never through a host-shell fallback.
 
-## unAI Brain — Obsidian-style memory
+## Task compiler — deterministic planning\n\n`POST /api/tasks/compile` converts a request into a provisional typed contract: task category, explicit constraints, assumptions, unknowns, acceptance checks, bounded plan steps, required permissions, and separately supplied approvals. It uses deterministic rules and does not call a model or execute tools. The compiler is a planning baseline, not a guarantee of semantic understanding; review contracts before acting. A required permission missing from the caller's explicit approval list remains missing.\n\n## unAI Brain — Obsidian-style memory
 
 The Brain is a portable Markdown knowledge graph. It supports YAML frontmatter, aliases, tags, wiki links, backlinks, unresolved links, full-text search and graph traversal. Markdown notes are canonical; SQLite FTS is a rebuildable index. The local agent retrieves a small number of relevant excerpts into context automatically.
 
