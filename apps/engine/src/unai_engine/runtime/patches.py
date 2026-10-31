@@ -53,9 +53,9 @@ class PatchManager:
         permissions = set(snapshot.contract.permissions)
         required = {"workspace_read", "workspace_write"}
         if not required.issubset(permissions):
-            raise TaskRunRejected("This task has not explicitly approved workspace_read and workspace_write.")
+            raise PatchRejected("This task has not explicitly approved workspace_read and workspace_write.")
         if "destructive_changes" in snapshot.contract.required_permissions and "destructive_changes" not in permissions:
-            raise TaskRunRejected("This task also requires explicit destructive_changes approval.")
+            raise PatchRejected("This task also requires explicit destructive_changes approval.")
 
     @staticmethod
     def _target(workspace_root: Path, workspace: str, file_path: str) -> Path:
@@ -65,8 +65,14 @@ class PatchManager:
         if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
             raise PatchConflict("Absolute paths, dot segments, and parent traversal are not allowed.")
         candidate_text = relative.as_posix()
-        if relative.name.casefold() in SENSITIVE_NAMES or any(
-            marker in relative.name.casefold() for marker in SENSITIVE_MARKERS
+        if (
+            relative.name.casefold() in SENSITIVE_NAMES
+            or relative.name.casefold().startswith(".env")
+            or any(
+                marker in part.casefold()
+                for part in relative.parts
+                for marker in SENSITIVE_MARKERS
+            )
         ):
             raise PatchConflict("Sensitive files cannot be patch targets.")
         if Path(candidate_text).suffix.casefold() not in PATCHABLE_SUFFIXES:
