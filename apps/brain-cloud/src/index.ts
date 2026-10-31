@@ -1,6 +1,7 @@
 interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  BRAIN_READ_TOKEN: string;
   BRAIN_WRITE_TOKEN: string;
   BRAIN_ALLOWED_ORIGIN?: string;
 }
@@ -26,7 +27,12 @@ function slugify(value: string): string {
     .replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 90);
 }
 
-function authorised(request: Request, env: Env): boolean {
+function readAuthorised(request: Request, env: Env): boolean {
+  return !env.BRAIN_READ_TOKEN ||
+    request.headers.get("authorization") === "Bearer " + env.BRAIN_READ_TOKEN;
+}
+
+function writeAuthorised(request: Request, env: Env): boolean {
   return Boolean(env.BRAIN_WRITE_TOKEN) &&
     request.headers.get("authorization") === "Bearer " + env.BRAIN_WRITE_TOKEN;
 }
@@ -95,7 +101,7 @@ async function graph(env: Env, origin: string): Promise<Response> {
 }
 
 async function createNote(request: Request, env: Env, origin: string): Promise<Response> {
-  if (!authorised(request, env)) {
+  if (!writeAuthorised(request, env)) {
     return json({ error: "A valid BRAIN_WRITE_TOKEN is required" }, 401, origin);
   }
   let input: Record<string, unknown>;
