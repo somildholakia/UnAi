@@ -200,6 +200,8 @@ class BoundaryProbeGenerator:
         source_sha256: str,
         limit: int = 24,
     ) -> ProbeResponse:
+        if not file_path.casefold().endswith(".py"):
+            raise ProbeTargetError("AST boundary probes currently support Python files only.")
         try:
             tree = ast.parse(source, filename=file_path)
         except SyntaxError as exc:
