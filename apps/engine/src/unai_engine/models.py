@@ -90,7 +90,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery", "execution"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch"]
     source: str
     claim: str
     passed: bool | None = None
@@ -118,6 +118,39 @@ class TaskEvidenceSnapshot(BaseModel):
     contract: TaskContract
     created_at: str
     evidence: list[EvidenceRecord] = Field(default_factory=list)
+
+
+class PatchProposalRequest(BaseModel):
+    file_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
+    expected_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    proposed_content: Annotated[str, StringConstraints(min_length=1, max_length=500_000)]
+    description: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1_000)]
+
+
+class PatchProposalResponse(BaseModel):
+    proposal_id: str
+    task_id: str
+    file_path: str
+    expected_sha256: str
+    proposed_sha256: str
+    status: Literal["pending"] = "pending"
+    diff_preview: str = ""
+    created_at: str
+
+
+class PatchApplyApprovalRequest(BaseModel):
+    confirm: Literal["apply-patch"]
+
+
+class PatchApplyResponse(BaseModel):
+    proposal_id: str
+    task_id: str
+    file_path: str
+    status: Literal["applied"] = "applied"
+    old_sha256: str
+    new_sha256: str
+    applied_at: str
+    evidence: EvidenceRecord
 
 
 class TaskRunApprovalRequest(BaseModel):
