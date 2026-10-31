@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from unai_engine.agent.orchestrator import AgentOrchestrator
@@ -10,6 +10,7 @@ from unai_engine.providers.openai_compat import OpenAICompatibleProvider, Provid
 from unai_engine.plugins.builtin import build_registry
 from unai_engine.brain.vault import BrainError, MarkdownVault
 from unai_engine.cognition.task_compiler import compile_task
+from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 
 provider = OpenAICompatibleProvider(
     base_url=settings.model_base_url,
@@ -39,6 +40,39 @@ app.add_middleware(
 def task_compile(request: TaskCompileRequest) -> TaskContract:
     """Compile a request into a provisional contract without running tools."""
     return compile_task(request)
+
+
+def _repository_workspace(workspace: str):
+    try:
+        root = resolve_workspace_path(settings.workspace_root, workspace)
+    except WorkspaceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not root.exists():
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    if not root.is_dir():
+        raise HTTPException(status_code=400, detail="Workspace path must be a directory.")
+    return root
+
+
+@app.get("/api/repository/graph")
+async def repository_graph(workspace: str = ".") -> dict:
+    """Return a bounded Python symbol/import/test graph for a workspace subdirectory."""
+    root = _repository_workspace(workspace)
+    graph = await plugins.indexing["python-code-graph"].index(str(root))
+    graph["root"] = workspace
+    return graph
+
+
+@app.get("/api/repository/search")
+async def repository_search(
+    q: str = Query(min_length=1, max_length=200),
+    workspace: str = ".",
+    limit: int = Query(default=12, ge=1, le=100),
+) -> dict:
+    """Search Python symbols and return source line ranges, not source bodies."""
+    root = _repository_workspace(workspace)
+    results = await plugins.indexing["python-code-graph"].query(str(root), q, limit)
+    return {"workspace": workspace, "query": q, "results": results}
 
 
 @app.get("/api/plugins")
