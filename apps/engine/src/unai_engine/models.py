@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 
@@ -49,8 +49,10 @@ class PlanStep(BaseModel):
 
 
 class TaskCompileRequest(BaseModel):
-    request: str = Field(min_length=1, max_length=20_000)
-    constraints: list[str] = Field(default_factory=list, max_length=40)
+    request: str = Field(min_length=1, max_length=20_000, strip_whitespace=True)
+    constraints: list[Annotated[str, Field(min_length=1, max_length=2_000)]] = Field(
+        default_factory=list, max_length=40
+    )
     # These are explicit approvals supplied by the caller. The compiler never grants
     # permissions merely because the task appears to need them.
     permissions: list[TaskPermission] = Field(default_factory=list, max_length=6)
