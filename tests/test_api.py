@@ -399,3 +399,59 @@ def test_task_proof_endpoint_summarizes_inspection_and_missing_task(tmp_path, mo
     proof = client.get(f"/api/tasks/{inspected.json()['task_id']}/proof")
     assert proof.status_code == 200
     assert proof.json()["status"] == "inspection_only"
+
+
+def test_probe_api_requires_workspace_read_and_records_unverified_candidates(tmp_path, monkeypatch) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    (workspace_root / "demo" / "branching.py").write_text(
+        "def clamp(value: int):\n"
+        "    if value < 10:\n"
+        "        return 0\n"
+        "    return value\n",
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review the service and test edge cases",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    response = client.post(
+        f"/api/tasks/{task_id}/probes",
+        json={"file_path": "branching.py", "symbol_name": "clamp", "limit": 10},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "generated"
+    assert [item["parameter_values"]["value"] for item in body["candidates"]] == [9, 10, 11]
+    assert body["evidence"]["passed"] is None
+    assert body["evidence"]["metadata"]["executed"] is False
+
+    snapshot = client.get(f"/api/tasks/{task_id}/evidence")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["evidence"][-1]["kind"] == "probe"
+
+
+def test_probe_api_rejects_unknown_function(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review the service",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    response = client.post(
+        f"/api/tasks/{task_id}/probes",
+        json={"file_path": "service.py", "symbol_name": "missing_function"},
+    )
+    assert response.status_code == 404
