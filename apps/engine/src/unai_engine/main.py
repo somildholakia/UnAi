@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,7 +10,7 @@ from unai_engine.config import settings
 from unai_engine.models import (
     BrainNoteCreate, ChatRequest, ChatResponse, HealthResponse,
     TaskCompileRequest, TaskContract, TaskInspectRequest,
-    TaskInspectionResponse, TaskEvidenceSnapshot,
+    TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
@@ -16,6 +18,8 @@ from unai_engine.brain.vault import BrainError, MarkdownVault
 from unai_engine.cognition.task_compiler import compile_task
 from unai_engine.agent.inspection import TaskInspector
 from unai_engine.verification.ledger import EvidenceLedger
+from unai_engine.runtime.sandbox import DockerSandbox
+from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, TaskRunRejected
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 
 provider = OpenAICompatibleProvider(
@@ -29,6 +33,12 @@ brain = MarkdownVault(settings.brain_vault_root, settings.brain_index_path)
 agent = AgentOrchestrator(provider, context_search=brain.search)
 evidence_ledger = EvidenceLedger(settings.evidence_db_path)
 task_inspector = TaskInspector(plugins.indexing["python-code-graph"], evidence_ledger)
+task_test_runner = IsolatedPythonTestRunner(
+    evidence_ledger,
+    DockerSandbox(settings.docker_image, settings.test_timeout_seconds),
+    max_files=settings.test_max_files,
+    max_bytes=settings.test_max_bytes,
+)
 
 app = FastAPI(
     title="unAI Engine",
@@ -87,6 +97,19 @@ async def repository_search(
 async def inspect_task(request: TaskInspectRequest) -> TaskInspectionResponse:
     """Compile, inspect a workspace read-only, and persist an evidence snapshot."""
     return await task_inspector.inspect(request, settings.workspace_root)
+
+
+@app.post("/api/tasks/{task_id}/run-tests", response_model=TaskTestRunResponse)
+async def run_task_tests(task_id: str, request: TaskRunApprovalRequest) -> TaskTestRunResponse:
+    """Run only the fixed pytest command after a separate explicit confirmation."""
+    if request.confirm != "run-python-tests":
+        raise HTTPException(status_code=422, detail="Explicit Python test confirmation is required.")
+    try:
+        return await asyncio.to_thread(task_test_runner.run, task_id, settings.workspace_root)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+    except TaskRunRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.get("/api/tasks/{task_id}/evidence", response_model=TaskEvidenceSnapshot)
