@@ -71,7 +71,7 @@ These commands are deployment instructions only. No Cloudflare account, D1 datab
 
 ## Free-tier limits
 
-This is GPU-free, not unlimited compute. As of the current Cloudflare documentation, Workers Free includes 100,000 requests/day and 10 ms CPU per HTTP request. D1 Free includes 5 million rows read/day, 100,000 rows written/day, 500 MB maximum per database and 5 GB total account storage; it also limits a Worker invocation to 50 queries. Once daily D1 read/write limits are reached, queries fail until the daily reset. Design the Brain for compact notes, indexed reads and bounded graph queries.
+This is GPU-free, not unlimited compute. Current Cloudflare documentation lists the Workers Free plan at 100,000 requests/day, 10 ms CPU per HTTP request, 128 MB memory, and 50 subrequests per request. D1 Free includes 5 million rows read/day, 100,000 rows written/day, 10 databases per account, 500 MB per database, 5 GB total account storage, and 50 queries per Worker invocation. Exceeding the daily D1 read/write quota causes query errors until the daily reset. These limits are suitable for a small prototype with indexed, bounded reads—not an unlimited public knowledge service. See the official [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) and [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/).
 
 ## Security
 
