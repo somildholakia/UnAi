@@ -58,10 +58,10 @@ persists a snapshot in the SQLite evidence ledger; fetch it later with:
 Set UNAI_EVIDENCE_DB_PATH to move the ledger. Evidence rows are append-only through
 database triggers. The ledger is an audit aid, not a cryptographic tamper-proof log.
 
-This stage does not edit files, run tests, install packages, access the network, or
-execute shell commands. Approving workspace_read is not approval for any of those
-operations. Even when all generated permissions are approved, execution remains
-unimplemented in this milestone.
+This inspection stage does not edit files, run tests, install packages, access the
+network, or execute shell commands. Approving workspace_read is not approval for
+those operations. Separately confirmed Python test execution is described below;
+file editing, package installation and arbitrary command execution remain disabled.
 
 
 ## Explicitly confirmed Python tests
