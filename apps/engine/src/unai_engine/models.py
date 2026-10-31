@@ -181,6 +181,32 @@ class TaskTestRunResponse(BaseModel):
     evidence: EvidenceRecord
 
 
+class TaskProofResponse(BaseModel):
+    task_id: str
+    status: Literal[
+        "inspection_only",
+        "patch_pending",
+        "tests_run_no_patch",
+        "awaiting_tests",
+        "tests_failed",
+        "tests_unavailable",
+        "tests_passed_after_patch",
+        "tests_passed_but_quality_check_failed",
+    ]
+    patch_count: int = Field(ge=0)
+    pending_patch_count: int = Field(ge=0)
+    latest_patch_sha256: str | None = None
+    latest_patch_at: str | None = None
+    latest_test_passed: bool | None = None
+    latest_test_at: str | None = None
+    tests_after_latest_patch: bool = False
+    quality_check_passed: bool | None = None
+    acceptance_checks: list[str] = Field(default_factory=list)
+    remaining_unknowns: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+
 class BrainNoteCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(default="", max_length=900_000)
