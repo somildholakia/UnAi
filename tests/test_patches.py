@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import sqlite3
 import hashlib
 from pathlib import Path
 
@@ -233,3 +234,44 @@ def test_read_file_rejects_task_without_workspace_read(tmp_path: Path) -> None:
 
     with pytest.raises(PatchRejected, match="workspace_read"):
         manager.read_file(task_id, "service.py", root)
+
+
+def test_patch_proposal_content_is_immutable_except_pending_to_applied(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _, _, digest = _workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _task(ledger)
+    manager = PatchManager(ledger)
+    proposal = manager.propose(task_id, _proposal("service.py", digest), root)
+
+    connection = sqlite3.connect(ledger.path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute(
+                "UPDATE patch_proposals SET proposed_content = ? WHERE proposal_id = ?",
+                ("tampered", proposal.proposal_id),
+            )
+        connection.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="cannot be deleted"):
+            connection.execute(
+                "DELETE FROM patch_proposals WHERE proposal_id = ?",
+                (proposal.proposal_id,),
+            )
+        connection.rollback()
+    finally:
+        connection.close()
+
+    applied = manager.apply(task_id, proposal.proposal_id, root)
+    assert applied.status == "applied"
+
+
+def test_proposed_utf8_bytes_cannot_exceed_source_limit(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _, _, digest = _workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _task(ledger)
+    manager = PatchManager(ledger)
+
+    oversized = _proposal("service.py", digest, proposed="😀" * 300_000)
+    with pytest.raises(PatchConflict, match="Proposed content exceeds"):
+        manager.propose(task_id, oversized, root)
