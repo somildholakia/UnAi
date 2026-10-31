@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 import unai_engine.main as main_module
 from unai_engine.agent.inspection import TaskInspector
 from unai_engine.main import app
+from unai_engine.runtime.sandbox import DockerSandbox
+from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
 from unai_engine.verification.ledger import EvidenceLedger
 
 
@@ -27,6 +29,11 @@ def _configure_inspection(tmp_path, monkeypatch):
         main_module,
         "task_inspector",
         TaskInspector(main_module.plugins.indexing["python-code-graph"], ledger),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "task_test_runner",
+        IsolatedPythonTestRunner(ledger, DockerSandbox()),
     )
     return workspace_root
 
