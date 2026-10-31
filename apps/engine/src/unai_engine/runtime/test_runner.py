@@ -40,6 +40,7 @@ SAFE_NAMES = {
 SECRET_NAMES = {
     "credentials", "credentials.json", "secrets", "secrets.json",
     "id_rsa", "id_ed25519", "known_hosts", ".netrc",
+    "service-account.json", "service_account.json", "google-services.json",
 }
 SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".sqlite", ".db"}
 _REDACT_ASSIGNMENT = re.compile(
@@ -69,8 +70,7 @@ def _is_secret_file(path: Path) -> bool:
         name in SECRET_NAMES
         or name.startswith(".env")
         or path.suffix.casefold() in SECRET_SUFFIXES
-        or "secret" in name
-        or "credential" in name
+        or any(marker in name for marker in ("secret", "credential", "password", "token", "private"))
     )
 
 
@@ -126,7 +126,9 @@ def stage_python_workspace(
             target.parent.mkdir(parents=True, exist_ok=True)
 
             try:
-                with source_file.open("rb") as reader, target.open("xb") as writer:
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                source_fd = os.open(source_file, flags)
+                with os.fdopen(source_fd, "rb") as reader, target.open("xb") as writer:
                     copied = 0
                     while True:
                         chunk = reader.read(64 * 1024)
@@ -278,10 +280,7 @@ class IsolatedPythonTestRunner:
                         error="pytest_missing_from_sandbox_image",
                         sandboxed=True,
                     )
-                if result.exit_code == 125 and any(
-                    marker in stderr.casefold()
-                    for marker in ("cannot connect to the docker daemon", "unable to find image", "error during connect")
-                ):
+                if result.exit_code == 125:
                     return self._response(
                         snapshot,
                         "unavailable",
