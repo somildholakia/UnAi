@@ -12,4 +12,6 @@ Safety and resource controls:
 - Captures parse errors per file and continues indexing other files.
 - Reports whether the result was truncated.
 
+Create a project directory under the configured workspace root (default: .workspaces), then use GET /api/repository/graph?workspace=project-name to return the graph or GET /api/repository/search?workspace=project-name&q=class-name to find symbol ranges. The workspace argument is a relative path and traversal outside the configured root is rejected. The API does not return source bodies.
+
 The current version is Python-only, rebuilds on each request, and does not infer call graphs or guarantee test-to-source mappings. It is a navigation index, not a complete semantic model. A future version can add incremental SQLite persistence and additional language frontends.
