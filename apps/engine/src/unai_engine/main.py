@@ -172,7 +172,9 @@ def apply_patch_proposal(
 
 @app.post("/api/tasks/{task_id}/probes", response_model=ProbeResponse)
 def generate_task_probes(task_id: str, request: ProbeRequest) -> ProbeResponse:
-    """Generate unverified AST boundary inputs for an approved workspace file."""
+    """Generate unverified AST boundary inputs for an approved Python workspace file."""
+    if not request.file_path.casefold().endswith(".py"):
+        raise HTTPException(status_code=415, detail="AST boundary probes currently support Python files only.")
     try:
         source = patch_manager.read_file(task_id, request.file_path, settings.workspace_root)
         return probe_generator.generate(
