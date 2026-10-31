@@ -15,6 +15,8 @@ async def test_graph_indexes_symbols_relative_imports_and_test_links(tmp_path: P
         "from .helpers import clean\n\n"
         "class Client:\n"
         "    async def send(self, value):\n"
+        "        def nested():\n"
+        "            return value\n"
         "        return clean(value)\n\n"
         "def normalize(value):\n"
         "    return clean(value)\n",
@@ -36,6 +38,8 @@ async def test_graph_indexes_symbols_relative_imports_and_test_links(tmp_path: P
     assert client["type"] == "class"
     assert send["type"] == "method"
     assert send["start_line"] == 4
+    nested = next(node for node in nodes if node.get("qualified_name") == "Client.send.nested")
+    assert nested["type"] == "function"
     assert any(
         edge["type"] == "imports"
         and edge["source"] == "file:src/pkg/core.py"
