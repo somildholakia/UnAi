@@ -120,6 +120,15 @@ class TaskEvidenceSnapshot(BaseModel):
     evidence: list[EvidenceRecord] = Field(default_factory=list)
 
 
+class WorkspaceFileSnapshot(BaseModel):
+    task_id: str
+    file_path: str
+    sha256: str
+    size_bytes: int = Field(ge=0)
+    encoding: Literal["utf-8"] = "utf-8"
+    content: str
+
+
 class PatchProposalRequest(BaseModel):
     file_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
     expected_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
