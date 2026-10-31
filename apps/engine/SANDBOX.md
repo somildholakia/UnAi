@@ -22,3 +22,26 @@ or production secrets into the image. Runtime package installation is not enable
 Only the fixed command python -m pytest -q is exposed. There is no user-supplied
 shell command field. Container resource limits are configured in DockerSandbox;
 timeout, file-count and staged-byte limits are configurable through the engine env.
+
+
+## Test-run API
+
+A task must first be inspected with both workspace_read and run_tests explicitly
+approved. The user then makes a separate confirmation call:
+
+    POST /api/tasks/{task_id}/run-tests
+
+    {"confirm": "run-python-tests"}
+
+The engine runs only python -m pytest -q; it never accepts an arbitrary command
+from the model or API caller. It copies eligible Python/configuration files into a
+temporary staging directory, omits secrets and generated content, and mounts only
+that copy into Docker. The container has no network, a read-only root filesystem,
+dropped capabilities, no-new-privileges, one CPU, 1 GB memory, bounded PIDs, and
+a timeout. Tests may mutate the staging copy but not the original workspace.
+
+Build the provided pytest-enabled image and configure UNAI_DOCKER_IMAGE as above.
+Project-specific test dependencies must be deliberately added to that image.
+No dependency installation happens at test runtime. If the image cannot start or
+pytest is missing, the API reports unavailable rather than claiming tests passed.
+The evidence ledger stores output hashes and redacted previews, not raw full logs.
