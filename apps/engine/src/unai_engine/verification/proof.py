@@ -47,6 +47,14 @@ def summarize_proof(snapshot: TaskEvidenceSnapshot) -> TaskProofResponse:
         and latest_test is not None
         and latest_test.created_at > latest_patch.created_at
     )
+    quality_fresh = bool(
+        latest_quality is not None
+        and (
+            latest_patch is None
+            or latest_quality.created_at > latest_patch.created_at
+        )
+    )
+    current_quality_passed = latest_quality.passed if quality_fresh and latest_quality else None
 
     if latest_patch is None:
         if pending_count:
@@ -65,8 +73,10 @@ def summarize_proof(snapshot: TaskEvidenceSnapshot) -> TaskProofResponse:
         status = "tests_failed"
     elif latest_test is not None and latest_test.passed is None:
         status = "tests_unavailable"
-    elif latest_quality is not None and latest_quality.passed is False:
+    elif quality_fresh and current_quality_passed is False:
         status = "tests_passed_but_quality_check_failed"
+    elif not quality_fresh:
+        status = "tests_passed_but_quality_check_unknown"
     else:
         status = "tests_passed_after_patch"
 
@@ -84,7 +94,8 @@ def summarize_proof(snapshot: TaskEvidenceSnapshot) -> TaskProofResponse:
         latest_test_passed=latest_test.passed if latest_test else None,
         latest_test_at=latest_test.created_at if latest_test else None,
         tests_after_latest_patch=tests_after_patch,
-        quality_check_passed=latest_quality.passed if latest_quality else None,
+        quality_check_passed=current_quality_passed,
+        quality_check_fresh=quality_fresh,
         acceptance_checks=list(snapshot.contract.acceptance_checks),
         remaining_unknowns=list(snapshot.contract.unknowns),
         evidence_ids=[item.evidence_id for item in events],
