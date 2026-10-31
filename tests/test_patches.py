@@ -204,3 +204,32 @@ def test_wrong_base_hash_is_rejected_before_storing_proposal(tmp_path: Path) -> 
 
     with pytest.raises(PatchConflict, match="changed since"):
         manager.propose(task_id, _proposal("service.py", "0" * 64), root)
+
+
+def test_read_file_returns_content_hash_and_appends_discovery_evidence(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    workspace, original, digest = _workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _task(ledger, permissions=["workspace_read"])
+    manager = PatchManager(ledger)
+
+    snapshot = manager.read_file(task_id, "service.py", root)
+
+    assert snapshot.content == original
+    assert snapshot.sha256 == digest
+    assert snapshot.size_bytes == len(original.encode("utf-8"))
+    evidence = ledger.get_snapshot(task_id)
+    assert evidence is not None
+    assert evidence.evidence[-1].source == "workspace-file-snapshot"
+    assert evidence.evidence[-1].metadata["sha256"] == digest
+
+
+def test_read_file_rejects_task_without_workspace_read(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _task(ledger, permissions=["workspace_write"])
+    manager = PatchManager(ledger)
+
+    with pytest.raises(PatchRejected, match="workspace_read"):
+        manager.read_file(task_id, "service.py", root)
