@@ -14,6 +14,7 @@ from unai_engine.models import (
     EvidenceRecord,
     PatchApplyResponse,
     PatchProposalRequest,
+    WorkspaceFileSnapshot,
     PatchProposalResponse,
     TaskEvidenceSnapshot,
 )
@@ -94,6 +95,50 @@ class PatchManager:
         if target.stat().st_size > MAX_SOURCE_BYTES:
             raise PatchConflict("Patch target exceeds the 1 MB source limit.")
         return target
+
+
+    def read_file(
+        self,
+        task_id: str,
+        file_path: str,
+        workspace_root: Path,
+    ) -> WorkspaceFileSnapshot:
+        snapshot = self.ledger.get_snapshot(task_id)
+        if snapshot is None:
+            raise KeyError(task_id)
+        if snapshot.status != "inspection_complete":
+            raise PatchRejected("Task must complete inspection before file reads.")
+        if "workspace_read" not in snapshot.contract.permissions:
+            raise PatchRejected("This task has not explicitly approved workspace_read.")
+
+        target = self._target(workspace_root, snapshot.workspace, file_path)
+        try:
+            raw = target.read_bytes()
+            content = raw.decode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise PatchConflict("File must be readable UTF-8 text.") from exc
+
+        digest = hashlib.sha256(raw).hexdigest()
+        evidence = EvidenceRecord(
+            evidence_id=uuid4().hex,
+            task_id=task_id,
+            kind="discovery",
+            source="workspace-file-snapshot",
+            claim=f"Read approved workspace file {file_path}.",
+            passed=True,
+            artifact_ref=f"workspace:{snapshot.workspace}/{file_path}",
+            metadata={"sha256": digest, "size_bytes": len(raw), "encoding": "utf-8"},
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self.ledger.append_evidence(evidence)
+        return WorkspaceFileSnapshot(
+            task_id=task_id,
+            file_path=file_path,
+            sha256=digest,
+            size_bytes=len(raw),
+            encoding="utf-8",
+            content=content,
+        )
 
     def propose(
         self,
