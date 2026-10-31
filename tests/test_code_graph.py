@@ -85,3 +85,23 @@ async def test_graph_query_returns_symbol_ranges(tmp_path: Path) -> None:
             "end_line": 2,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_graph_skips_oversized_python_files(tmp_path: Path) -> None:
+    (tmp_path / "small.py").write_text("def keep():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "large.py").write_bytes(b"#" + (b"x" * 300_000))
+
+    graph = await PythonCodeGraphIndexer().index(str(tmp_path))
+    assert graph["summary"]["files_discovered"] == 1
+    assert graph["summary"]["skipped_large_files"] == 1
+
+
+@pytest.mark.asyncio
+async def test_symbol_limit_is_global_and_reported_as_truncated(tmp_path: Path) -> None:
+    declarations = "".join(f"def function_{index}():\n    return {index}\n" for index in range(12_005))
+    (tmp_path / "many_symbols.py").write_text(declarations, encoding="utf-8")
+
+    graph = await PythonCodeGraphIndexer().index(str(tmp_path))
+    assert graph["summary"]["symbols"] == 12_000
+    assert graph["summary"]["truncated"] is True
