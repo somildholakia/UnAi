@@ -40,7 +40,7 @@ def test_task_compile_api_returns_provisional_contract() -> None:
     assert len(contract["steps"]) >= 5
 
 
-def test_task_compile_api_rejects_empty_request() -> None:
+def test_task_compile_api_rejects_empty_or_whitespace_request() -> None:
     client = TestClient(app)
-    response = client.post("/api/tasks/compile", json={"request": ""})
-    assert response.status_code == 422
+    assert client.post("/api/tasks/compile", json={"request": ""}).status_code == 422
+    assert client.post("/api/tasks/compile", json={"request": "   "}).status_code == 422
