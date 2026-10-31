@@ -13,6 +13,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
     task_id TEXT PRIMARY KEY,
     status TEXT NOT NULL,
+    workspace TEXT NOT NULL DEFAULT '.',
     objective TEXT NOT NULL,
     contract_json TEXT NOT NULL,
     created_at TEXT NOT NULL
@@ -60,6 +61,11 @@ class EvidenceLedger:
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
         connection.executescript(_SCHEMA)
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        if "workspace" not in columns:
+            connection.execute("ALTER TABLE tasks ADD COLUMN workspace TEXT NOT NULL DEFAULT '.'")
         return connection
 
     def record_inspection(
@@ -67,6 +73,7 @@ class EvidenceLedger:
         contract: TaskContract,
         status: str,
         evidence: list[EvidenceRecord],
+        workspace: str = ".",
     ) -> None:
         if any(item.task_id != contract.task_id for item in evidence):
             raise EvidenceLedgerError("Every evidence item must belong to the inspected task.")
@@ -77,12 +84,13 @@ class EvidenceLedger:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
-                INSERT INTO tasks(task_id, status, objective, contract_json, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO tasks(task_id, status, workspace, objective, contract_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     contract.task_id,
                     status,
+                    workspace,
                     contract.objective,
                     json.dumps(contract.model_dump(mode="json"), ensure_ascii=False),
                     created_at,
@@ -117,11 +125,48 @@ class EvidenceLedger:
         finally:
             connection.close()
 
+
+    def append_evidence(self, evidence: EvidenceRecord) -> None:
+        """Append one execution/verification event to an existing task."""
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            exists = connection.execute(
+                "SELECT 1 FROM tasks WHERE task_id = ?", (evidence.task_id,)
+            ).fetchone()
+            if exists is None:
+                raise EvidenceLedgerError("Cannot append evidence to an unknown task.")
+            connection.execute(
+                """
+                INSERT INTO task_evidence(
+                    evidence_id, task_id, kind, source, claim, passed,
+                    artifact_ref, metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    evidence.evidence_id,
+                    evidence.task_id,
+                    evidence.kind,
+                    evidence.source,
+                    evidence.claim,
+                    None if evidence.passed is None else int(evidence.passed),
+                    evidence.artifact_ref,
+                    json.dumps(evidence.metadata, ensure_ascii=False),
+                    evidence.created_at,
+                ),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def get_snapshot(self, task_id: str) -> TaskEvidenceSnapshot | None:
         connection = self._connect()
         try:
             task = connection.execute(
-                "SELECT task_id, status, contract_json, created_at FROM tasks WHERE task_id = ?",
+                "SELECT task_id, status, workspace, contract_json, created_at FROM tasks WHERE task_id = ?",
                 (task_id,),
             ).fetchone()
             if task is None:
@@ -154,6 +199,7 @@ class EvidenceLedger:
             return TaskEvidenceSnapshot(
                 task_id=task["task_id"],
                 status=task["status"],
+                workspace=task["workspace"],
                 contract=TaskContract.model_validate(json.loads(task["contract_json"])),
                 created_at=task["created_at"],
                 evidence=evidence,
