@@ -20,7 +20,7 @@ from unai_engine.models import (
 
 
 _CODE_CHANGE = re.compile(
-    r"\b(fix|bug|bugfix|repair|implement|build|create|add|develop|refactor|change|modify)\b",
+    r"\b(fix|bug|bugfix|repair|implement|build|create|add|develop|refactor|change|modify|remove|delete|drop)\b",
     re.I,
 )
 _BUG = re.compile(
