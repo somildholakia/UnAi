@@ -32,16 +32,24 @@ def _module_name(relative: Path) -> str:
 
 
 class _SymbolVisitor(ast.NodeVisitor):
-    def __init__(self, path: str, file_id: str, nodes: list[dict[str, Any]], edges: list[dict[str, str]]) -> None:
+    def __init__(
+        self,
+        path: str,
+        file_id: str,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, str]],
+        limit: int = MAX_SYMBOLS,
+    ) -> None:
         self.path = path
         self.file_id = file_id
         self.nodes = nodes
         self.edges = edges
+        self.limit = max(0, limit)
         self.scope: list[str] = []
         self.symbol_count = 0
 
     def _record(self, node: ast.AST, name: str, kind: str) -> None:
-        if self.symbol_count >= MAX_SYMBOLS:
+        if self.symbol_count >= self.limit:
             return
         line = int(getattr(node, "lineno", 1))
         end_line = int(getattr(node, "end_lineno", line) or line)
@@ -167,13 +175,22 @@ class PythonCodeGraphIndexer:
         def add_import(source_id: str, module: str) -> bool:
             target_path = module_paths.get(module)
             if not target_path:
+                suffix_matches = {
+                    path for name, path in module_paths.items()
+                    if name.endswith("." + module)
+                }
+                if len(suffix_matches) == 1:
+                    target_path = next(iter(suffix_matches))
+            if not target_path:
                 return False
             if len(edges) < MAX_EDGES:
-                edges.append({
+                edge = {
                     "source": source_id,
                     "target": file_by_path.get(target_path, f"file:{target_path}"),
                     "type": "imports",
-                })
+                }
+                if edge not in edges:
+                    edges.append(edge)
             return True
 
         for relative in candidates:
@@ -193,7 +210,11 @@ class PythonCodeGraphIndexer:
                 })
                 continue
 
-            visitor = _SymbolVisitor(rel, file_id, nodes, edges)
+            if symbol_count >= MAX_SYMBOLS:
+                break
+            visitor = _SymbolVisitor(
+                rel, file_id, nodes, edges, limit=MAX_SYMBOLS - symbol_count
+            )
             visitor.visit(tree)
             symbol_count += visitor.symbol_count
 
@@ -214,14 +235,15 @@ class PythonCodeGraphIndexer:
                         base_parts.extend(item.module.split("."))
                     full_module = ".".join(base_parts)
                     resolved = add_import(file_id, full_module) if full_module else False
-                    if not resolved:
-                        imported_child = False
-                        for alias in item.names:
-                            candidate = ".".join([part for part in (full_module, alias.name) if part])
-                            if candidate and add_import(file_id, candidate):
-                                imported_child = True
-                        if not imported_child:
-                            external_imports += 1
+                    imported_child = False
+                    for alias in item.names:
+                        if alias.name == "*":
+                            continue
+                        candidate = ".".join([part for part in (full_module, alias.name) if part])
+                        if candidate and add_import(file_id, candidate):
+                            imported_child = True
+                    if not resolved and not imported_child:
+                        external_imports += 1
 
             if len(edges) >= MAX_EDGES:
                 break
