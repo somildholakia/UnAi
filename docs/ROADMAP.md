@@ -21,6 +21,7 @@
 - [x] Read-only inspection workflow with explicit workspace-read approval and append-only evidence snapshots.
 - [x] Separately confirmed fixed pytest runner in Docker, using a filtered temporary copy and appended execution evidence.
 - [x] Task-scoped source snapshots and SHA-256-bound, one-file patch proposals with a separate apply confirmation.
+- [x] Evidence summary that requires a passing test event newer than the latest applied patch.
 - Typed tool calls and isolated workspaces.
 - Regression evidence after a patch; arbitrary commands and multi-file patch application remain disabled.
 - Explicit approval for risky or irreversible actions.
