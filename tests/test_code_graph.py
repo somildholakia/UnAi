@@ -99,7 +99,7 @@ async def test_graph_skips_oversized_python_files(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_symbol_limit_is_global_and_reported_as_truncated(tmp_path: Path) -> None:
-    declarations = "def f():\\n    pass\\n" * 12_005
+    declarations = "def f():\n    pass\n" * 12_005
     (tmp_path / "many_symbols.py").write_text(declarations, encoding="utf-8")
 
     graph = await PythonCodeGraphIndexer().index(str(tmp_path))
