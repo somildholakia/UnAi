@@ -1,5 +1,6 @@
 interface Env {
   DB: D1Database;
+  ASSETS: Fetcher;
   BRAIN_WRITE_TOKEN: string;
   BRAIN_ALLOWED_ORIGIN?: string;
 }
@@ -34,7 +35,7 @@ function tagsFrom(value: unknown): string[] {
   const list = Array.isArray(value) ? value :
     typeof value === "string" ? [value] : [];
   return [...new Set(list.map(x => String(x).trim().replace(/^#/, ""))
-    .filter(x => /^[\p{L}\p{N}_/-]{1,64}$/u.test(x)))].slice(0, 40);
+    .filter(x => /^[\p{L}\p{N}_/-]{1,64}$/u.test(x)))].slice(0, 12);
 }
 
 async function search(request: Request, env: Env, origin: string): Promise<Response> {
@@ -122,7 +123,7 @@ async function createNote(request: Request, env: Env, origin: string): Promise<R
   for (const tag of tags) {
     statements.push(env.DB.prepare("INSERT OR IGNORE INTO tags(tag,note_id) VALUES(?,?)").bind(tag, id));
   }
-  for (const match of [...body.matchAll(WIKI)].slice(0, 40)) {
+  for (const match of [...body.matchAll(WIKI)].slice(0, 12)) {
     const raw = String(match[1] || "").trim();
     const [target, alias] = raw.split("|").map(part => part.trim());
     if (!target) continue;
@@ -163,6 +164,7 @@ export default {
         return noteDetail(decodeURIComponent(path.slice("/api/notes/".length)), env, origin);
       }
       if (request.method === "POST" && path === "/api/notes") return createNote(request, env, origin);
+      if (request.method === "GET" && !path.startsWith("/api/")) return env.ASSETS.fetch(request);
       return json({ error: "Not found" }, 404, origin);
     } catch {
       return json({ error: "Brain request failed" }, 500, origin);
