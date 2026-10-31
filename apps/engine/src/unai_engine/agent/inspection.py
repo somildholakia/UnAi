@@ -146,7 +146,7 @@ class TaskInspector:
                     metadata={"workspace": request.workspace},
                 )
                 status = "workspace_unavailable"
-                next_gate = "approval_required"
+                next_gate = "workspace_correction_required"
             elif not root.exists() or not root.is_dir():
                 add(
                     "precondition",
@@ -156,7 +156,7 @@ class TaskInspector:
                     metadata={"workspace": request.workspace},
                 )
                 status = "workspace_unavailable"
-                next_gate = "approval_required"
+                next_gate = "workspace_correction_required"
             else:
                 add(
                     "precondition",
@@ -215,7 +215,7 @@ class TaskInspector:
                         metadata={"error": "Indexing failed; detailed exception suppressed."},
                     )
                     status = "workspace_unavailable"
-                    next_gate = "approval_required"
+                    next_gate = "workspace_correction_required"
 
         self.ledger.record_inspection(contract, status, evidence)
         return TaskInspectionResponse(
