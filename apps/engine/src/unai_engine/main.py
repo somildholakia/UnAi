@@ -204,10 +204,10 @@ async def refresh_task_quality(task_id: str) -> TaskQualityCheckResponse:
     snapshot = evidence_ledger.get_snapshot(task_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Task evidence not found.")
-    if snapshot.status != "inspection_complete":
-        raise HTTPException(status_code=409, detail="Task must complete inspection before quality checks.")
     if "workspace_read" not in snapshot.contract.permissions:
         raise HTTPException(status_code=403, detail="This task has not explicitly approved workspace_read.")
+    if snapshot.status != "inspection_complete":
+        raise HTTPException(status_code=409, detail="Task must complete inspection before quality checks.")
     try:
         root = resolve_workspace_path(settings.workspace_root, snapshot.workspace)
     except WorkspaceError as exc:
