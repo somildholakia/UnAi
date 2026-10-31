@@ -457,3 +457,45 @@ def test_probe_api_rejects_unknown_function(tmp_path, monkeypatch) -> None:
         json={"file_path": "service.py", "symbol_name": "missing_function"},
     )
     assert response.status_code == 404
+
+
+def test_post_patch_quality_refresh_requires_read_permission_and_records_evidence(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review the service implementation",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+
+    refreshed = client.post(f"/api/tasks/{task_id}/quality-check")
+    assert refreshed.status_code == 200
+    body = refreshed.json()
+    assert body["passed"] is True
+    assert body["files_parsed"] >= 1
+    assert body["evidence"]["source"] == "python-ast-parser"
+
+    proof = client.get(f"/api/tasks/{task_id}/proof")
+    assert proof.status_code == 200
+    assert proof.json()["quality_check_fresh"] is True
+    assert proof.json()["quality_check_passed"] is True
+
+
+def test_quality_refresh_rejects_task_without_read_permission(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review the service implementation",
+            "workspace": "demo",
+            "permissions": [],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    refreshed = client.post(f"/api/tasks/{task_id}/quality-check")
+    assert refreshed.status_code == 403
