@@ -154,3 +154,9 @@ def test_ambiguous_function_name_requires_qualified_name(tmp_path: Path) -> None
 
     with pytest.raises(ProbeTargetError, match="ambiguous"):
         generator.generate(task_id, "client.py", "send", source, "1" * 64)
+
+
+def test_non_python_source_is_rejected_as_unsupported(tmp_path: Path) -> None:
+    task_id, _, generator = _generator(tmp_path)
+    with pytest.raises(ProbeTargetError, match="Python files only"):
+        generator.generate(task_id, "service.js", "handler", "function handler() {}", "a" * 64)
