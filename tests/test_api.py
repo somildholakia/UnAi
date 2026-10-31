@@ -9,6 +9,7 @@ from unai_engine.main import app
 from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
 from unai_engine.runtime.patches import PatchManager
+from unai_engine.verification.probes import BoundaryProbeGenerator
 from unai_engine.verification.ledger import EvidenceLedger
 
 
@@ -38,6 +39,7 @@ def _configure_inspection(tmp_path, monkeypatch):
         IsolatedPythonTestRunner(ledger, DockerSandbox()),
     )
     monkeypatch.setattr(main_module, "patch_manager", PatchManager(ledger))
+    monkeypatch.setattr(main_module, "probe_generator", BoundaryProbeGenerator(ledger))
     return workspace_root
 
 
