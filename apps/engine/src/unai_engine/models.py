@@ -90,7 +90,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution"]
     source: str
     claim: str
     passed: bool | None = None
@@ -114,9 +114,29 @@ class TaskInspectionResponse(BaseModel):
 class TaskEvidenceSnapshot(BaseModel):
     task_id: str
     status: str
+    workspace: str = "."
     contract: TaskContract
     created_at: str
     evidence: list[EvidenceRecord] = Field(default_factory=list)
+
+
+class TaskRunApprovalRequest(BaseModel):
+    confirm: Literal["run-python-tests"]
+
+
+class TaskTestRunResponse(BaseModel):
+    task_id: str
+    status: Literal["passed", "failed", "unavailable"]
+    command: Literal["python -m pytest -q"] = "python -m pytest -q"
+    exit_code: int | None = None
+    timed_out: bool = False
+    sandboxed: Literal[True] = True
+    staged_files: int = 0
+    staged_bytes: int = 0
+    skipped_files: int = 0
+    stdout_preview: str = ""
+    stderr_preview: str = ""
+    evidence: EvidenceRecord
 
 
 class BrainNoteCreate(BaseModel):
