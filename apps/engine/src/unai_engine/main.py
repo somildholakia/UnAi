@@ -12,7 +12,7 @@ from unai_engine.models import (
     TaskCompileRequest, TaskContract, TaskInspectRequest,
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
-    WorkspaceFileSnapshot, TaskProofResponse,
+    WorkspaceFileSnapshot, TaskProofResponse, ProbeRequest, ProbeResponse,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
@@ -25,6 +25,7 @@ from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, TaskRunRej
 from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchRejected
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 from unai_engine.verification.proof import summarize_proof
+from unai_engine.verification.probes import BoundaryProbeGenerator, ProbeTargetError
 
 provider = OpenAICompatibleProvider(
     base_url=settings.model_base_url,
@@ -44,6 +45,7 @@ task_test_runner = IsolatedPythonTestRunner(
     max_bytes=settings.test_max_bytes,
 )
 patch_manager = PatchManager(evidence_ledger)
+probe_generator = BoundaryProbeGenerator(evidence_ledger)
 
 app = FastAPI(
     title="unAI Engine",
@@ -166,6 +168,29 @@ def apply_patch_proposal(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except PatchConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/tasks/{task_id}/probes", response_model=ProbeResponse)
+def generate_task_probes(task_id: str, request: ProbeRequest) -> ProbeResponse:
+    """Generate unverified AST boundary inputs for an approved workspace file."""
+    try:
+        source = patch_manager.read_file(task_id, request.file_path, settings.workspace_root)
+        return probe_generator.generate(
+            task_id,
+            source.file_path,
+            request.symbol_name,
+            source.content,
+            source.sha256,
+            request.limit,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+    except PatchRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ProbeTargetError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/tasks/{task_id}/proof", response_model=TaskProofResponse)
