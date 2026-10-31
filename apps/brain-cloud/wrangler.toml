@@ -1,0 +1,13 @@
+name = "unai-brain-api"
+main = "src/index.ts"
+compatibility_date = "2026-10-30"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "unai-brain"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[vars]
+BRAIN_ALLOWED_ORIGIN = "*"
+# Set BRAIN_WRITE_TOKEN with: npx wrangler secret put BRAIN_WRITE_TOKEN
