@@ -217,7 +217,7 @@ class TaskInspector:
                     status = "workspace_unavailable"
                     next_gate = "workspace_correction_required"
 
-        self.ledger.record_inspection(contract, status, evidence)
+        self.ledger.record_inspection(contract, status, evidence, workspace=request.workspace)
         return TaskInspectionResponse(
             task_id=contract.task_id,
             status=status,
