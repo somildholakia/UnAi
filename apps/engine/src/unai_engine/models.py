@@ -72,6 +72,53 @@ class TaskContract(BaseModel):
     steps: list[PlanStep] = Field(default_factory=list)
 
 
+class TaskInspectRequest(TaskCompileRequest):
+    workspace: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)] = "."
+    symbol_limit: int = Field(default=12, ge=1, le=100)
+
+
+class SymbolReference(BaseModel):
+    path: str
+    name: str
+    kind: Literal["function", "method", "class"]
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    score: int = Field(ge=1)
+    matched_terms: list[str] = Field(default_factory=list)
+
+
+class EvidenceRecord(BaseModel):
+    evidence_id: str
+    task_id: str
+    kind: Literal["precondition", "repository", "quality", "discovery"]
+    source: str
+    claim: str
+    passed: bool | None = None
+    artifact_ref: str | None = None
+    metadata: dict = Field(default_factory=dict)
+    created_at: str
+
+
+class TaskInspectionResponse(BaseModel):
+    task_id: str
+    status: Literal["inspection_complete", "awaiting_workspace_read", "workspace_unavailable"]
+    next_gate: Literal["approval_required", "execution_not_implemented", "workspace_access_required"]
+    contract: TaskContract
+    workspace: str
+    graph_summary: dict = Field(default_factory=dict)
+    symbol_matches: list[SymbolReference] = Field(default_factory=list)
+    evidence: list[EvidenceRecord] = Field(default_factory=list)
+    execution_started: Literal[False] = False
+
+
+class TaskEvidenceSnapshot(BaseModel):
+    task_id: str
+    status: str
+    contract: TaskContract
+    created_at: str
+    evidence: list[EvidenceRecord] = Field(default_factory=list)
+
+
 class BrainNoteCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     body: str = Field(default="", max_length=900_000)
