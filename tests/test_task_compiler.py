@@ -81,3 +81,14 @@ def test_whitespace_request_is_rejected() -> None:
 def test_unknown_permission_is_rejected_at_schema_boundary() -> None:
     with pytest.raises(ValidationError):
         TaskCompileRequest(request="Review this code", permissions=["root_shell"])  # type: ignore[list-item]
+
+
+def test_building_error_handling_is_classified_as_feature_not_bugfix() -> None:
+    contract = compile_task(TaskCompileRequest(request="Build an error monitoring page"))
+    assert contract.task_type == "feature"
+
+
+def test_explaining_a_crash_does_not_request_write_permissions() -> None:
+    contract = compile_task(TaskCompileRequest(request="Explain this application crash"))
+    assert contract.task_type == "research"
+    assert "workspace_write" not in contract.required_permissions
