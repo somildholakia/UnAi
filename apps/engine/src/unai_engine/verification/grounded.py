@@ -472,6 +472,7 @@ def _validate_cases(
     seen: set[str] = set()
     normalized: list[dict[str, Any]] = []
     total_payload_bytes = 0
+    total_replay_invocations = 0
 
     for case in request.cases:
         artifact_path = case.oracle_artifact_path
@@ -541,6 +542,20 @@ def _validate_cases(
             elif case.oracle_property.exception_name is not None:
                 raise GroundedVerificationError(
                     f"Property oracle case {case.case_id} cannot set exception_name for this property kind."
+                )
+            if case.oracle_property.kind == "output_stable_across_replays":
+                if case.oracle_property.replay_count < 2:
+                    raise GroundedVerificationError(
+                        f"Replay stability property case {case.case_id} must request at least 2 invocations."
+                    )
+                total_replay_invocations += case.oracle_property.replay_count
+                if total_replay_invocations > 24:
+                    raise GroundedVerificationError(
+                        "Grounded replay budget exceeds 24 function invocations per request."
+                    )
+            elif case.oracle_property.replay_count != 1:
+                raise GroundedVerificationError(
+                    f"Property oracle case {case.case_id} can set replay_count only for output_stable_across_replays."
                 )
         arguments = dict(case.arguments)
         unknown = set(arguments) - allowed
