@@ -725,8 +725,21 @@ def test_property_oracle_harness_uses_fixed_predicates_without_expected_value(tm
     ast.parse(generated)
     assert "def _property_holds(actual, arguments, property_spec):" in generated
     assert '"output_non_negative"' in generated
-    assert '"expected_output": null' not in generated
+    assert '"expected_output":null' in generated
     assert runner.calls[0]["metadata"]["oracle_case_ids"] == ["property-negative"]
+
+    staged_root = tmp_path / "property-staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        target.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+    with pytest.raises(AssertionError, match="UNAI_COUNTEREXAMPLE"):
+        namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
 
 
 def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(tmp_path: Path) -> None:
