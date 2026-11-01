@@ -163,6 +163,10 @@
 - M4 replay-trace PR CI: https://github.com/somildholakia/UnAi/actions/runs/41300724885
 - M4 replay-trace post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41300791616
 - Both PR #24 workflows reported 213 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 workspace filesystem side-effect audit PR #25 was squash-merged as e5fb39edb621f28e9286212dc8da46894a66d273.
+- M4 workspace-state PR CI: https://github.com/somildholakia/UnAi/actions/runs/41301773620
+- M4 workspace-state post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41301848383
+- Both PR #25 workflows reported 217 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
