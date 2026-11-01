@@ -258,9 +258,24 @@ class GroundedPropertyOracle(BaseModel):
         "output_is_empty",
         "output_not_empty",
         "output_equals_argument",
+        "raises_exception",
     ]
     argument_name: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+    ] | None = None
+    exception_name: Literal[
+        "ValueError",
+        "TypeError",
+        "KeyError",
+        "IndexError",
+        "ZeroDivisionError",
+        "OverflowError",
+        "AssertionError",
+        "RuntimeError",
+        "LookupError",
+        "FileNotFoundError",
+        "PermissionError",
+        "TimeoutError",
     ] | None = None
 
 
