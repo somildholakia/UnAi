@@ -95,6 +95,37 @@ Example request field:
 
 The signature is public verification material, not a secret. The Engine stores it with append-only oracle evidence and does not embed it into generated pytest input.
 
+### Publisher-signed specification artifact
+
+A specification case may additionally include an oracle_publisher_attestation from the publisher of the specification document. This is distinct from the reviewer attestation above: the publisher signs an artifact manifest (URI, revision and exact SHA-256 bytes), while the reviewer signs the derived test assertion (inputs and expected result/property).
+
+Configure publisher trust roots with UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS as a JSON object mapping stable key IDs to entries:
+
+    {
+      "acme-specs-2026": {
+        "public_key_b64": "<base64 raw 32-byte Ed25519 public key>",
+        "issuer": "Acme Specifications",
+        "allowed_domains": ["specs.acme.example"]
+      }
+    }
+
+The Engine checks the signature key ID, exact configured issuer identity, exact allowed HTTPS hostname and artifact bytes. Hostnames are exact matches, not wildcards. Publisher artifact URIs must use HTTPS without credentials, query strings, fragments or non-standard ports, and must use a DNS hostname rather than an IP address. The local Markdown/text artifact must still match oracle_artifact_sha256 before a publisher manifest is accepted.
+
+Add this field to the oracle case:
+
+    "oracle_publisher_attestation": {
+      "key_id": "acme-specs-2026",
+      "issuer": "Acme Specifications",
+      "artifact_uri": "https://specs.acme.example/releases/2026-11/product-spec.md",
+      "artifact_revision": "release-2026.11",
+      "issued_at": "2026-11-01T09:00:00Z",
+      "signature_b64": "<base64 Ed25519 signature>"
+    }
+
+The publisher signs canonical UTF-8 JSON from build_publisher_artifact_statement and canonical_attestation_message in unai_engine.verification.attestations. The manifest schema is unai.spec-publisher-manifest.v1 and binds the key ID, issuer, issuance time, HTTPS artifact URI, artifact revision and verified artifact SHA-256. The signature proves that the configured publisher key signed those exact bytes and metadata; it does not prove the document is factually correct or that a derived test assertion is the right interpretation.
+
+Key rotation is operator-managed: add the replacement key ID and public key to the trust configuration before switching the publisher, then remove the old key ID to revoke it. Removing a key prevents future verification with that key; retain historical evidence separately. The publisher keyring and reviewer keyring are independent.
+
 The expected values and request fields are serialized as JSON data embedded in a fixed generated pytest template. Caller text is never interpolated as Python statements. For async targets the fixed harness imports asyncio and invokes the coroutine with asyncio.run; it does not accept caller-provided event-loop code or commands. The generated test is placed in unai_generated_tests/ inside the disposable filtered copy only; it is not written to the original workspace. The existing fixed command python -m pytest -q is executed through Docker with networking disabled and the existing CPU, memory, PID and timeout limits. There is no host-shell fallback.
 
 ### Property-oracle case
