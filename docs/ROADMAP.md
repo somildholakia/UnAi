@@ -50,7 +50,8 @@
 - [x] Add bounded recursive shrinking inside JSON-compatible nested lists/dictionaries, with 4-level depth, 128-node traversal and 12-candidate-per-argument limits under the global 24-candidate/6-round Docker budget.
 - [x] Add structured counterexample traces with canonical JSON result hashes, exception-message hashes and target source line/function, preserving bounded redacted previews.
 - [x] Add opt-in per-case same-process replay stability checks for 2–4 identical JSON inputs, with fresh input copies, hash-only replay traces, a 24-invocation request budget and no automatic shrinking of replay-divergence cases.
-- [ ] Extend discriminating checks to explicit filesystem/state snapshots or other side-effect classes only with dedicated fixtures, isolation and resource policies.
+- [x] Add an opt-in workspace_filesystem_unchanged property that compares bounded before/after manifests in the disposable Docker workspace; hashes regular-file contents and symlink targets, does not follow symlinks, and reports unavailable on entry/byte/read limits.
+- [ ] Extend discriminating checks beyond the filtered workspace to explicitly managed external side effects only with dedicated fixtures, isolation and resource policies.
 - [ ] Extend deeper or broader recursive reductions only with additional per-type correctness/resource policies.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [x] Support explicitly decorated top-level-class @staticmethod and @classmethod targets with bound invocation, async support, signature validation and generated-harness tests.
