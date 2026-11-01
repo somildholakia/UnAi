@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+
+from fastapi.responses import JSONResponse
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
@@ -29,6 +31,7 @@ from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchReject
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 from unai_engine.verification.proof import summarize_proof
 from unai_engine.verification.probes import BoundaryProbeGenerator, ProbeTargetError
+from unai_engine.security import api_access_error
 
 provider = OpenAICompatibleProvider(
     base_url=settings.model_base_url,
@@ -60,8 +63,29 @@ app.add_middleware(
     allow_origins=list(settings.cors_origins),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+
+@app.middleware("http")
+async def enforce_api_access(request: Request, call_next):
+    """Require an installation bearer token or restrict tokenless access to loopback."""
+    if request.method != "OPTIONS":
+        client_host = request.client.host if request.client else None
+        denial = api_access_error(
+            client_host,
+            request.headers.get("Authorization"),
+            getattr(settings, "api_token", ""),
+        )
+        if denial is not None:
+            status_code, detail = denial
+            headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
+            return JSONResponse(
+                status_code=status_code,
+                content={"detail": detail},
+                headers=headers,
+            )
+    return await call_next(request)
 
 
 @app.post("/api/tasks/compile", response_model=TaskContract)

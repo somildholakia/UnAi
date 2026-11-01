@@ -26,6 +26,7 @@ class Settings:
     model_api_key: str = os.getenv("UNAI_MODEL_API_KEY", "")
     model_timeout_seconds: float = float(os.getenv("UNAI_MODEL_TIMEOUT_SECONDS", "180"))
     cors_origins: tuple[str, ...] = _csv(os.getenv("UNAI_CORS_ORIGINS", "http://localhost:5173"))
+    api_token: str = os.getenv("UNAI_API_TOKEN", "")
     workspace_root: Path = _path_setting("UNAI_WORKSPACE_ROOT", ".workspaces")
     docker_image: str = os.getenv("UNAI_DOCKER_IMAGE", "unai-python-test:latest")
     sandbox_timeout_seconds: int = int(os.getenv("UNAI_SANDBOX_TIMEOUT_SECONDS", "120"))
@@ -36,6 +37,10 @@ class Settings:
     test_max_files: int = int(os.getenv("UNAI_TEST_MAX_FILES", "5000"))
     test_max_bytes: int = int(os.getenv("UNAI_TEST_MAX_BYTES", str(50 * 1024 * 1024)))
     brain_write_token: str = os.getenv("UNAI_BRAIN_WRITE_TOKEN", "")
+
+    def __post_init__(self) -> None:
+        if self.api_token and len(self.api_token) < 32:
+            raise ValueError("UNAI_API_TOKEN must contain at least 32 characters.")
 
 
 settings = Settings()

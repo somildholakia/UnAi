@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 import hashlib
 
@@ -499,3 +500,57 @@ def test_quality_refresh_rejects_task_without_read_permission(tmp_path, monkeypa
     task_id = inspected.json()["task_id"]
     refreshed = client.post(f"/api/tasks/{task_id}/quality-check")
     assert refreshed.status_code == 403
+
+
+
+def test_engine_api_is_loopback_only_without_an_api_token(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        replace(main_module.settings, api_token=""),
+    )
+    remote = TestClient(app, client=("203.0.113.9", 4567))
+    loopback = TestClient(app, client=("127.0.0.1", 4567))
+    assert remote.get("/api/plugins").status_code == 403
+    assert loopback.get("/api/plugins").status_code == 200
+
+
+def test_engine_api_requires_valid_bearer_token_for_remote_clients(monkeypatch) -> None:
+    token = "unai-test-" + ("x" * 48)
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        replace(main_module.settings, api_token=token),
+    )
+    remote = TestClient(app, client=("203.0.113.9", 4567))
+    assert remote.get("/api/plugins").status_code == 401
+    assert remote.get(
+        "/api/plugins",
+        headers={"Authorization": "Bearer wrong-token"},
+    ).status_code == 401
+    authorized = remote.get(
+        "/api/plugins",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert authorized.status_code == 200
+    assert authorized.json()["verification"] == ["static-evidence"]
+
+
+def test_engine_api_preflight_allows_authorization_header(monkeypatch) -> None:
+    token = "unai-test-" + ("y" * 48)
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        replace(main_module.settings, api_token=token),
+    )
+    remote = TestClient(app, client=("203.0.113.9", 4567))
+    response = remote.options(
+        "/api/plugins",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code == 200
+    assert "authorization" in response.headers.get("access-control-allow-headers", "").lower()

@@ -18,6 +18,8 @@
 - [ ] Retrieve bounded, task-specific code slices rather than whole repositories.
 
 ## M3 — Evidence-producing agent loop
+- [x] Installation-wide bearer-token gate; tokenless access is restricted to loopback peers.
+- [ ] Per-user/scoped API credentials, revocation and tenant isolation.
 - [x] Read-only inspection workflow with explicit workspace-read approval and append-only evidence snapshots.
 - [x] Separately confirmed fixed pytest runner in Docker, using a filtered temporary copy and appended execution evidence.
 - [x] Task-scoped source snapshots and SHA-256-bound, one-file patch proposals with a separate apply confirmation.

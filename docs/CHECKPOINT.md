@@ -60,9 +60,18 @@
 - Cloudflare Worker/UI CI previously passed type generation, TypeScript check and browser JavaScript syntax validation: https://github.com/somildholakia/UnAi/actions/runs/41233718972
 - Documentation-only edits after the code verification commit do not change the verified engine code. Re-run CI when the next code change is made.
 
+## M3.1 — Engine API perimeter authentication
+
+- The Engine accepts an installation-wide bearer token through `UNAI_API_TOKEN`; when configured, every request must carry `Authorization: Bearer <token>`.
+- With no token configured, the middleware accepts loopback peers only and denies non-loopback peer addresses. It deliberately does not trust forwarded-IP headers.
+- CORS permits the Authorization header; preflight is allowed, while the actual request remains authenticated.
+- The token must be at least 32 characters and should be generated with a cryptographically secure random generator.
+- This is a shared installation credential, not per-user identity, scoped tokens, tenant isolation, or rate limiting. Keep public deployment disabled pending a full threat model.
+- The Brain write token remains separate; remote Brain note creation still requires `UNAI_BRAIN_WRITE_TOKEN`.
+
 ## Important limits and safety boundaries
 
-- The Engine HTTP API currently has no request authentication. Bind Uvicorn to 127.0.0.1; do not expose it directly to the internet until authentication, authorization and a deployment threat model exist.
+- Basic Engine perimeter authentication is now implemented, but it does not provide multi-user authorization, tenant isolation, rate limiting, token revocation, or a production deployment posture.
 - Workflow endpoints are HTTP APIs, not native model tool calls yet. An external client/UI must invoke them explicitly.
 - The test runner currently understands Python pytest only. Project-specific dependencies must be added deliberately to a reviewed sandbox image; it does not install packages at runtime.
 - No generic shell command, arbitrary code execution, network access from the test container, multi-file patch transaction, file create/delete workflow, or automatic candidate execution is exposed through these routes.
@@ -75,7 +84,7 @@
 
 ## Next work after this checkpoint
 
-1. Add authentication and scoped authorization before any network-facing Engine deployment.
+1. Add per-user/scoped authorization, credential revocation, rate limiting and tenant isolation before any network-facing Engine deployment.
 2. Add a typed client/tool adapter so the model can request inspection, file snapshots, patch proposals and proof through explicit host-mediated actions.
 3. Persist and incrementally refresh the repository graph; improve bounded code-slice retrieval.
 4. Turn selected probe candidates into reproducible tests only when expected outcomes are grounded in specifications, existing tests or user-approved oracles.
@@ -91,13 +100,15 @@ Build the pytest-enabled image before enabling the isolated test endpoint:
 
     docker build -f apps/engine/Dockerfile.sandbox -t unai-python-test:latest .
 
-The Engine defaults to UNAI_DOCKER_IMAGE=unai-python-test:latest. Configure the workspace and evidence paths in apps/engine/.env; use the example file as a starting point. Keep the service loopback-only until authentication is implemented.
+The Engine defaults to UNAI_DOCKER_IMAGE=unai-python-test:latest. Configure the workspace and evidence paths in apps/engine/.env; use the example file as a starting point. Leave UNAI_API_TOKEN blank only for loopback-only use. For a remote client, generate a 32+ character token and send it as a bearer credential; keep it out of browser bundles.
 
 
-## Stop point
+## Resume point — API perimeter gate
 
-This is the requested stopping checkpoint. The repository is left on `main` with
-the M3 evidence workflow and M4 unverified boundary-probe prototype documented
-above. No long-running agent, deployment, training job, or mobile benchmark is
-running. Resume from the "Next work after this checkpoint" list; do not treat
-the unchecked items as completed.
+The current continuation adds an installation-wide bearer-token gate and a
+loopback-only default for tokenless Engine requests. The shared token is a
+coarse perimeter credential; it does not create user identities or tenant
+boundaries. Existing task-level permissions and second confirmations are
+unchanged. CI verification for the resulting code commit is recorded above
+after the workflow completes. No long-running agent, deployment, training job,
+or mobile benchmark is running.
