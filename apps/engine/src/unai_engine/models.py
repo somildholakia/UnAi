@@ -263,6 +263,7 @@ class GroundedPropertyOracle(BaseModel):
         "output_equals_argument",
         "raises_exception",
         "output_stable_across_replays",
+        "workspace_filesystem_unchanged",
     ]
     replay_count: int = Field(default=1, ge=1, le=4)
     argument_name: Annotated[
@@ -401,6 +402,12 @@ class GroundedCounterexample(BaseModel):
     target_function: Annotated[str, StringConstraints(max_length=128)] | None = None
     replay_count: int | None = Field(default=None, ge=2, le=4)
     replay_trace_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+    filesystem_before_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+    filesystem_after_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+    filesystem_changed_entry_count: int | None = Field(default=None, ge=0)
+    filesystem_changed_paths_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+    filesystem_entry_count: int | None = Field(default=None, ge=0)
+    filesystem_bytes_hashed: int | None = Field(default=None, ge=0)
 
 
 class GroundedShrinkResult(BaseModel):

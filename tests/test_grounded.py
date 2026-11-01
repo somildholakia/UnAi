@@ -1545,6 +1545,140 @@ def _execute_replay_harness(
     return record
 
 
+def _execute_filesystem_audit_harness(
+    tmp_path: Path,
+    *,
+    source: str,
+    value=1,
+):
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        value=value,
+        property_kind="workspace_filesystem_unchanged",
+    )
+    result = verifier.run(task_id, request, workspace_root)
+    assert result.status == "passed"
+
+    generated_call = runner.calls[0]
+    staged_root = tmp_path / "filesystem-audit-workspace"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    trace_path = staged_root / generated_call["metadata"]["replay_trace_relative_path"]
+    assert trace_path.is_file()
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    record = trace["records"][0]
+    assert record["kind"] == "workspace_filesystem_unchanged"
+    assert record["status"] == "complete"
+    assert "side-effect.txt" not in json.dumps(record)
+    return completed, record, staged_root
+
+
+def test_workspace_filesystem_unchanged_passes_without_mutation(tmp_path: Path) -> None:
+    completed, record, _staged_root = _execute_filesystem_audit_harness(
+        tmp_path,
+        source=(
+            "def clamp(value):\n"
+            "    return value + 1\n"
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert record["unchanged"] is True
+    assert record["changed_entry_count"] == 0
+    assert record["before_sha256"] == record["after_sha256"]
+    assert record["entry_count"] > 0
+    assert record["bytes_hashed"] >= 0
+
+
+def test_workspace_filesystem_unchanged_detects_created_files_without_recording_paths(tmp_path: Path) -> None:
+    completed, record, staged_root = _execute_filesystem_audit_harness(
+        tmp_path,
+        source=(
+            "from pathlib import Path\n"
+            "def clamp(value):\n"
+            "    Path('side-effect.txt').write_text(str(value), encoding='utf-8')\n"
+            "    return value\n"
+        ),
+    )
+
+    assert completed.returncode != 0
+    assert "UNAI_COUNTEREXAMPLE:" in completed.stdout + completed.stderr
+    assert record["unchanged"] is False
+    assert record["changed_entry_count"] >= 1
+    assert record["before_sha256"] != record["after_sha256"]
+    assert record["changed_paths_sha256"]
+    assert (staged_root / "side-effect.txt").is_file()
+    assert "side-effect.txt" not in json.dumps(record)
+
+
+def test_workspace_mutation_is_structured_and_is_not_automatically_shrunk(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return value" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    runner.status = "failed"
+    runner.stdout = (
+        "FAILED unai_generated_tests/test_oracle.py::test_grounded_oracle_case[property-negative]\n"
+        + "UNAI_COUNTEREXAMPLE:"
+        + json.dumps(
+            {
+                "case_id": "property-negative",
+                "actual_type": "WorkspaceMutation",
+                "actual_summary": "The target changed the disposable workspace filesystem.",
+                "actual_sha256": "a" * 64,
+                "filesystem_before_sha256": "b" * 64,
+                "filesystem_after_sha256": "c" * 64,
+                "filesystem_changed_entry_count": 1,
+                "filesystem_changed_paths_sha256": "d" * 64,
+                "filesystem_entry_count": 5,
+                "filesystem_bytes_hashed": 1024,
+            },
+            separators=(",", ":"),
+        )
+    )
+
+    result = verifier.run(
+        task_id,
+        _property_request(
+            fresh,
+            property_kind="workspace_filesystem_unchanged",
+        ),
+        workspace_root,
+    )
+
+    assert result.status == "failed"
+    assert len(result.counterexamples) == 1
+    counterexample = result.counterexamples[0]
+    assert counterexample.actual_summary.startswith("WorkspaceMutation:")
+    assert counterexample.filesystem_before_sha256 == "b" * 64
+    assert counterexample.filesystem_after_sha256 == "c" * 64
+    assert counterexample.filesystem_changed_entry_count == 1
+    assert counterexample.filesystem_changed_paths_sha256 == "d" * 64
+    assert result.shrinking_results == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    evidence = next(item for item in saved.evidence if item.kind == "counterexample")
+    assert evidence.metadata["filesystem_changed_entry_count"] == 1
+    assert evidence.metadata["filesystem_bytes_hashed"] == 1024
+
+
 def test_replay_divergence_is_a_structured_counterexample_without_input_shrinking(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
