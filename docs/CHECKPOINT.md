@@ -158,6 +158,10 @@
 - M4 publisher-key lifecycle PR CI: https://github.com/somildholakia/UnAi/actions/runs/41296894788
 - M4 publisher-key lifecycle post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41296961455
 - Both PR #21 workflows reported 201 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 per-case replay stability traces PR #24 was squash-merged as 8889cdb61601baf2fc16b49865bd6befd9c312e1.
+- M4 replay-trace PR CI: https://github.com/somildholakia/UnAi/actions/runs/41300724885
+- M4 replay-trace post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41300791616
+- Both PR #24 workflows reported 213 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
