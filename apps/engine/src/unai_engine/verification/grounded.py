@@ -1371,6 +1371,23 @@ class GroundedTestVerifier:
                     f"Publisher issuer does not match the configured identity for key {publisher.key_id!r}.",
                     403,
                 )
+            if trusted_entry.get("revoked", False):
+                raise GroundedVerificationError(
+                    f"Publisher attestation key {publisher.key_id!r} has been revoked.",
+                    403,
+                )
+            not_before = trusted_entry.get("not_before")
+            not_after = trusted_entry.get("not_after")
+            if not_before is not None and publisher.issued_at < not_before:
+                raise GroundedVerificationError(
+                    f"Publisher key {publisher.key_id!r} was not yet valid when the manifest was issued.",
+                    403,
+                )
+            if not_after is not None and publisher.issued_at > not_after:
+                raise GroundedVerificationError(
+                    f"Publisher key {publisher.key_id!r} was outside its validity window when the manifest was issued.",
+                    403,
+                )
             parsed_uri = urlsplit(publisher.artifact_uri)
             hostname = (parsed_uri.hostname or "").casefold().rstrip(".")
             if hostname not in set(trusted_entry["allowed_domains"]):
