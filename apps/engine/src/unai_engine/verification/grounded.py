@@ -461,6 +461,308 @@ class GroundedTestVerifier:
         self.patch_manager = patch_manager
         self.test_runner = test_runner
 
+    def _shrink_property_counterexamples(
+        self,
+        task_id: str,
+        request: GroundedTestApprovalRequest,
+        normalized: list[dict[str, Any]],
+        counterexample_case_ids: set[str],
+        source_sha256: str,
+        is_async: bool,
+        artifact_fingerprints: dict[str, dict[str, Any]],
+        workspace_root,
+        parent_execution_id: str,
+    ) -> list[GroundedShrinkResult]:
+        """Check a bounded set of explicitly property-preserving integer reductions."""
+        by_case_id = {case["case_id"]: case for case in normalized}
+        candidate_map: dict[str, dict[str, Any]] = {}
+        attempts_by_case: dict[str, list[str]] = {}
+        results: list[GroundedShrinkResult] = []
+        used = 0
+
+        for case_id in sorted(counterexample_case_ids):
+            case = by_case_id.get(case_id)
+            if case is None or case.get("oracle_property") is None:
+                continue
+            attempts_by_case[case_id] = []
+            for argument_name in sorted(case["arguments"]):
+                value = case["arguments"][argument_name]
+                for reduced_value in _integer_shrink_candidates(value):
+                    if used >= _MAX_SHRINK_CANDIDATES:
+                        break
+                    candidate_arguments = dict(case["arguments"])
+                    candidate_arguments[argument_name] = reduced_value
+                    candidate_id = "sh-" + hashlib.sha256(
+                        f"{case_id}\x00{argument_name}\x00{reduced_value}".encode("utf-8")
+                    ).hexdigest()[:24]
+                    candidate = dict(case)
+                    candidate.update(
+                        {
+                            "case_id": candidate_id,
+                            "original_case_id": case_id,
+                            "arguments": candidate_arguments,
+                            "arguments_sha256": _digest(candidate_arguments, "Shrink candidate arguments"),
+                            "expected_output": None,
+                            "expected_sha256": None,
+                        }
+                    )
+                    candidate_map[candidate_id] = candidate
+                    attempts_by_case[case_id].append(candidate_id)
+                    used += 1
+                if used >= _MAX_SHRINK_CANDIDATES:
+                    break
+
+            if not attempts_by_case[case_id]:
+                results.append(
+                    GroundedShrinkResult(
+                        case_id=case_id,
+                        status="no_supported_integer_arguments",
+                        attempts=0,
+                        original_arguments_sha256=case["arguments_sha256"],
+                        note="Shrinking currently changes integer arguments only; booleans, floats, strings and collections are left unchanged.",
+                    )
+                )
+
+        if not candidate_map:
+            for result in results:
+                self.ledger.append_evidence(
+                    EvidenceRecord(
+                        evidence_id=uuid4().hex,
+                        task_id=task_id,
+                        kind="shrink",
+                        source="grounded-property-shrinker",
+                        claim=f"Counterexample shrinking was not applicable to case {result.case_id}.",
+                        passed=None,
+                        artifact_ref=f"oracle-case:{task_id}:{result.case_id}",
+                        metadata={
+                            "case_id": result.case_id,
+                            "status": result.status,
+                            "attempts": 0,
+                            "source_sha256": source_sha256,
+                        },
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+            return results
+
+        candidate_cases = list(candidate_map.values())
+        generated_content = _generated_pytest(
+            request.file_path,
+            request.symbol_name,
+            candidate_cases,
+            source_sha256,
+            is_async=is_async,
+        )
+        generated_path = f"unai_generated_tests/test_shrink_{uuid4().hex}.py"
+
+        # A shrink trial must observe the exact same target and pinned documents
+        # as the original counterexample; otherwise it is not comparable evidence.
+        try:
+            latest_source = self.patch_manager.read_file(
+                task_id, request.file_path, workspace_root
+            )
+            source_still_current = latest_source.sha256.lower() == source_sha256.lower()
+            artifacts_still_current = True
+            for artifact_path, fingerprint in artifact_fingerprints.items():
+                latest_artifact = self.patch_manager.read_file(
+                    task_id, artifact_path, workspace_root
+                )
+                if latest_artifact.sha256.lower() != fingerprint["sha256"].lower():
+                    artifacts_still_current = False
+                    break
+        except (PatchRejected, PatchConflict, OSError):
+            source_still_current = False
+            artifacts_still_current = False
+
+        if not source_still_current or not artifacts_still_current:
+            for case_id, candidate_ids in attempts_by_case.items():
+                original = by_case_id[case_id]
+                result = GroundedShrinkResult(
+                    case_id=case_id,
+                    status="unavailable",
+                    attempts=len(candidate_ids),
+                    original_arguments_sha256=original["arguments_sha256"],
+                    note="Target or pinned specification changed before shrink trials; no candidates were executed.",
+                )
+                results.append(result)
+                self.ledger.append_evidence(
+                    EvidenceRecord(
+                        evidence_id=uuid4().hex,
+                        task_id=task_id,
+                        kind="shrink",
+                        source="grounded-property-shrinker",
+                        claim=f"Shrink trials for case {case_id} were rejected because their source snapshot became stale.",
+                        passed=None,
+                        artifact_ref=f"oracle-case:{task_id}:{case_id}",
+                        metadata={
+                            "case_id": case_id,
+                            "status": result.status,
+                            "attempts": len(candidate_ids),
+                            "source_sha256": source_sha256,
+                            "parent_execution_evidence_id": parent_execution_id,
+                        },
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+            return results
+
+        shrink_metadata = {
+            "target_file": request.file_path,
+            "target_function": request.symbol_name,
+            "target_is_async": is_async,
+            "target_sha256": source_sha256,
+            "generated_test_sha256": hashlib.sha256(
+                generated_content.encode("utf-8")
+            ).hexdigest(),
+            "parent_execution_evidence_id": parent_execution_id,
+            "shrink_candidate_case_ids": list(candidate_map),
+            "shrink_candidate_map": [
+                {
+                    "candidate_case_id": candidate_id,
+                    "original_case_id": candidate["original_case_id"],
+                    "argument_name": next(
+                        key for key in candidate["arguments"]
+                        if candidate["arguments"][key] != by_case_id[candidate["original_case_id"]]["arguments"][key]
+                    ),
+                    "candidate_arguments_sha256": candidate["arguments_sha256"],
+                }
+                for candidate_id, candidate in candidate_map.items()
+            ],
+            "oracle_case_ids": [],
+            "source_fingerprint_rechecked_before_staging": True,
+            "staged_fingerprint_assertions_embedded": True,
+        }
+        shrink_execution = self.test_runner.run_generated_test(
+            task_id,
+            workspace_root,
+            generated_path,
+            generated_content,
+            shrink_metadata,
+            evidence_source="grounded-oracle-shrink-sandbox",
+        )
+
+        marker_values: set[str] = set()
+        marker_records = shrink_execution.evidence.metadata.get("counterexample_markers", [])
+        if isinstance(marker_records, list):
+            marker_values.update(
+                item["case_id"]
+                for item in marker_records
+                if isinstance(item, dict) and isinstance(item.get("case_id"), str)
+            )
+        shrink_output = "\n".join(
+            [shrink_execution.stdout_preview or "", shrink_execution.stderr_preview or ""]
+        )
+        for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", shrink_output):
+            try:
+                marker = json.loads(match)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(marker.get("case_id"), str):
+                marker_values.add(marker["case_id"])
+
+        for case_id, candidate_ids in attempts_by_case.items():
+            original = by_case_id[case_id]
+            failing_candidates = [
+                candidate_map[candidate_id]
+                for candidate_id in candidate_ids
+                if candidate_id in marker_values
+            ]
+            best = min(
+                failing_candidates,
+                key=lambda item: _shrink_score(item["arguments"]),
+                default=None,
+            )
+            if shrink_execution.status == "unavailable":
+                status = "unavailable"
+                note = "Docker or workspace staging could not execute the bounded shrink batch."
+            elif best is not None:
+                status = "smaller_failure_observed"
+                note = (
+                    "At least one strictly smaller integer input still violated the same fixed property. "
+                    "The selected input is the smallest observed in this bounded candidate batch, not a proof of global minimality."
+                )
+            elif shrink_execution.status == "passed":
+                status = "no_smaller_failure_observed"
+                note = "All bounded smaller candidates satisfied the property; the original counterexample remains valid."
+            else:
+                status = "unavailable"
+                note = "The shrink batch failed without a recognized property-violation marker; its result is inconclusive."
+
+            result = GroundedShrinkResult(
+                case_id=case_id,
+                status=status,
+                attempts=len(candidate_ids),
+                original_arguments_sha256=original["arguments_sha256"],
+                smallest_observed_arguments_sha256=best["arguments_sha256"] if best else None,
+                smallest_observed_arguments=best["arguments"] if best else None,
+                note=note,
+            )
+            results.append(result)
+            shrink_evidence = EvidenceRecord(
+                evidence_id=uuid4().hex,
+                task_id=task_id,
+                kind="shrink",
+                source="grounded-property-shrinker",
+                claim=f"Bounded property-oracle shrinking completed for case {case_id}: {status}.",
+                passed=None,
+                artifact_ref=f"oracle-case:{task_id}:{case_id}",
+                metadata={
+                    "case_id": case_id,
+                    "status": status,
+                    "attempts": len(candidate_ids),
+                    "candidate_case_ids": candidate_ids,
+                    "candidate_arguments_sha256": [
+                        candidate_map[candidate_id]["arguments_sha256"]
+                        for candidate_id in candidate_ids
+                    ],
+                    "failing_candidate_case_ids": [
+                        candidate["case_id"] for candidate in failing_candidates
+                    ],
+                    "original_arguments_sha256": original["arguments_sha256"],
+                    "smallest_observed_arguments_sha256": best["arguments_sha256"] if best else None,
+                    "oracle_property_sha256": original["oracle_property_sha256"],
+                    "oracle_property_kind": original["oracle_property"]["kind"],
+                    "source_sha256": source_sha256,
+                    "parent_execution_evidence_id": parent_execution_id,
+                    "shrink_execution_evidence_id": shrink_execution.evidence.evidence_id,
+                    "target_is_async": is_async,
+                },
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.ledger.append_evidence(shrink_evidence)
+
+        shrink_stdout = (shrink_execution.stdout_preview or "").encode("utf-8")
+        shrink_stderr = (shrink_execution.stderr_preview or "").encode("utf-8")
+        shrink_trace = EvidenceRecord(
+            evidence_id=uuid4().hex,
+            task_id=task_id,
+            kind="trace",
+            source="grounded-shrink-trace",
+            claim="Captured the bounded property-shrinking execution status and output fingerprints.",
+            passed=None,
+            artifact_ref=f"trace:{task_id}:{shrink_execution.evidence.evidence_id}",
+            metadata={
+                "execution_evidence_id": shrink_execution.evidence.evidence_id,
+                "parent_execution_evidence_id": parent_execution_id,
+                "target_sha256": source_sha256,
+                "generated_test_sha256": shrink_metadata["generated_test_sha256"],
+                "exit_code": shrink_execution.exit_code,
+                "timed_out": shrink_execution.timed_out,
+                "sandboxed": shrink_execution.sandboxed,
+                "stdout_sha256": shrink_execution.evidence.metadata.get("stdout_sha256"),
+                "stderr_sha256": shrink_execution.evidence.metadata.get("stderr_sha256"),
+                "stdout_preview_sha256": hashlib.sha256(shrink_stdout).hexdigest(),
+                "stderr_preview_sha256": hashlib.sha256(shrink_stderr).hexdigest(),
+                "candidate_count": len(candidate_cases),
+            },
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        shrink_trace.metadata["trace_sha256"] = hashlib.sha256(
+            _json_text(shrink_trace.metadata, "Shrink trace").encode("utf-8")
+        ).hexdigest()
+        self.ledger.append_evidence(shrink_trace)
+        return results
+
     def run(
         self,
         task_id: str,
