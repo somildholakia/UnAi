@@ -841,7 +841,10 @@ def test_generated_oracle_code_serializes_untrusted_text_in_json_string(tmp_path
         if isinstance(node, ast.Import)
         for alias in node.names
     ]
-    assert "os" not in imported
+    # The generated harness imports os for its fixed, no-follow replay trace writer.
+    # Caller text is serialized as JSON and must never become an os.remove call.
+    assert "os" in imported
+    assert "os.remove(" not in generated
 
 
 class FakeSandbox:
@@ -1014,7 +1017,7 @@ def test_async_grounded_function_uses_asyncio_run_in_generated_harness(tmp_path:
     assert result.status == "passed"
     generated = runner.calls[0]["content"]
     ast.parse(generated)
-    assert "import asyncio\nimport hashlib\nimport importlib.util" in generated
+    assert "import asyncio\nimport atexit\nimport copy\nimport hashlib\nimport importlib.util" in generated
     assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
@@ -1586,11 +1589,11 @@ def test_replay_stability_detects_same_process_global_state_changes(tmp_path: Pa
     record = _execute_replay_harness(
         tmp_path,
         source=(
-            "counter = 0\\n"
-            "def clamp(value):\\n"
-            "    global counter\\n"
-            "    counter += 1\\n"
-            "    return value + counter\\n"
+            "counter = 0\n"
+            "def clamp(value):\n"
+            "    global counter\n"
+            "    counter += 1\n"
+            "    return value + counter\n"
         ),
         value=10,
         expected_stable=False,
@@ -1603,9 +1606,9 @@ def test_replay_stability_resets_mutable_json_inputs_but_preserves_module_state(
     record = _execute_replay_harness(
         tmp_path,
         source=(
-            "def clamp(value):\\n"
-            "    value.append('new')\\n"
-            "    return len(value)\\n"
+            "def clamp(value):\n"
+            "    value.append('new')\n"
+            "    return len(value)\n"
         ),
         value=["start"],
         expected_stable=True,
@@ -1617,11 +1620,11 @@ def test_async_replay_stability_detects_module_state_changes(tmp_path: Path) -> 
     record = _execute_replay_harness(
         tmp_path,
         source=(
-            "counter = 0\\n"
-            "async def clamp(value):\\n"
-            "    global counter\\n"
-            "    counter += 1\\n"
-            "    return value + counter\\n"
+            "counter = 0\n"
+            "async def clamp(value):\n"
+            "    global counter\n"
+            "    counter += 1\n"
+            "    return value + counter\n"
         ),
         value=5,
         expected_stable=False,
