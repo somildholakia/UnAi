@@ -167,7 +167,7 @@ def test_runner_loads_replay_and_filesystem_audit_trace_artifacts(tmp_path: Path
         task_id,
         root,
         "unai_generated_tests/test_oracle.py",
-        "def test_placeholder():\\n    assert True\\n",
+        "def test_placeholder():\n    assert True\n",
         {
             "trace_case_ids": ["repeatable-case", "filesystem-case"],
             "filesystem_case_ids": ["filesystem-case"],
@@ -220,7 +220,7 @@ def test_runner_marks_filesystem_audit_unavailable_instead_of_passing(tmp_path: 
         task_id,
         root,
         "unai_generated_tests/test_oracle.py",
-        "def test_placeholder():\\n    assert True\\n",
+        "def test_placeholder():\n    assert True\n",
         {
             "trace_case_ids": ["filesystem-case"],
             "filesystem_case_ids": ["filesystem-case"],
@@ -255,7 +255,7 @@ def test_runner_rejects_symlinked_replay_trace_directory(tmp_path: Path) -> None
         task_id,
         root,
         "unai_generated_tests/test_oracle.py",
-        "def test_placeholder():\\n    assert True\\n",
+        "def test_placeholder():\n    assert True\n",
         {
             "trace_case_ids": ["repeatable-case"],
             "replay_trace_relative_path": "unai_generated_tests/test_oracle.replay.json",
