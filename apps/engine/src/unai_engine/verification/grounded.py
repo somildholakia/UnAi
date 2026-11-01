@@ -1350,7 +1350,7 @@ class GroundedTestVerifier:
                 public_key_b64 = self.trusted_oracle_public_keys.get(attestation.key_id)
                 if public_key_b64 is None:
                     raise GroundedVerificationError(
-                        f"Oracle reviewer key {attestation.key_id!r} is not in the configured trusted reviewer keyring.",
+                        f"Oracle reviewer key {attestation.key_id!r} is not in the configured trusted keyring for reviewers.",
                         403,
                     )
             else:
