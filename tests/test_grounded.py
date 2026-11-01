@@ -741,34 +741,57 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
     initial_marker = (
         'UNAI_COUNTEREXAMPLE:{"case_id":"property-negative","actual_type":"int","actual_summary":"-9"}'
     )
-    runner.response_queue.append(("failed", initial_marker, ""))
+    candidate_ids = {
+        value: "sh-" + hashlib.sha256(
+            f"property-negative\\x00value\\x00{value}".encode("utf-8")
+        ).hexdigest()[:24]
+        for value in (0, 1, 2, 4, 8)
+    }
+    shrink_markers = [
+        "UNAI_COUNTEREXAMPLE:" + json.dumps(
+            {
+                "case_id": candidate_ids[value],
+                "actual_type": "int",
+                "actual_summary": str(-value),
+            },
+            separators=(",", ":"),
+        )
+        for value in (1, 2, 4, 8)
+    ]
+    runner.response_queue.extend(
+        [
+            ("failed", initial_marker, ""),
+            ("failed", "\\n".join(shrink_markers), ""),
+        ]
+    )
+
     result = verifier.run(task_id, _property_request(fresh), workspace_root)
 
+    assert result.status == "failed"
+    assert len(result.counterexamples) == 1
     assert len(runner.calls) == 2
     shrink_cases = _generated_cases(runner.calls[1]["content"])
     assert len(shrink_cases) == 5
+    assert {item["arguments"]["value"] for item in shrink_cases} == {0, 1, 2, 4, 8}
     assert all(item["oracle_property"]["kind"] == "output_non_negative" for item in shrink_cases)
     assert all(item["expected_output"] is None for item in shrink_cases)
+    assert runner.calls[1]["metadata"]["parent_execution_evidence_id"] == result.execution_evidence.evidence_id
+    shrink = result.shrinking_results[0]
+    assert shrink.status == "smaller_failure_observed"
+    assert shrink.attempts == 5
+    assert shrink.smallest_observed_arguments == {"value": 1}
+    assert shrink.smallest_observed_arguments_sha256 == hashlib.sha256(
+        b'{"value":1}'
+    ).hexdigest()
 
-    # Simulate the sandbox comparator: zero satisfies the property, all other
-    # smaller candidates still violate it. Only marker-backed candidates count.
-    shrink_markers = []
-    for case in shrink_cases:
-        if case["arguments"]["value"] != 0:
-            shrink_markers.append(
-                "UNAI_COUNTEREXAMPLE:" + json.dumps({
-                    "case_id": case["case_id"],
-                    "actual_type": "int",
-                    "actual_summary": str(-case["arguments"]["value"]),
-                }, separators=(",", ":"))
-            )
-    runner.response_queue.append(("failed", "\\n".join(shrink_markers), ""))
-
-    # The fake runner responses are consumed in order: the first run above was
-    # already performed, so the shrink pass is explicitly executed by a second request.
-    # A dedicated one-shot test double is used below to exercise the full path.
-    assert result.shrinking_results == []
-
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    bundle = build_proof_bundle(saved)
+    assert bundle.overall_status == "counterexamples_found"
+    assert bundle.shrink_attempt_count == 5
+    assert bundle.shrunk_counterexample_count == 1
+    assert any(item.source == "grounded-oracle-shrink-sandbox" for item in saved.evidence)
+    assert any(item.source == "grounded-shrink-trace" for item in saved.evidence)
 
 def test_property_contract_rejects_expected_output_and_requires_argument_reference(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
