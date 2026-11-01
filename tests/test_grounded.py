@@ -838,3 +838,53 @@ def test_integer_shrink_candidates_are_deterministic_and_never_increase_magnitud
     assert _integer_shrink_candidates(-9) == [0, -1, -2, -4, -8]
     assert _integer_shrink_candidates(0) == []
     assert _integer_shrink_candidates(True) == []
+
+
+
+def test_exact_oracle_requires_explicit_expected_output_even_when_null_is_default(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="missing-expected",
+                arguments={"value": 9},
+                oracle_kind="user",
+                oracle_reference="Expected output was accidentally omitted",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="must explicitly supply expected_output"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_property_shrinking_skips_float_arguments_and_records_non_applicability(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    request = _property_request(snapshot, value=9.5)
+    runner.response_queue.append(
+        (
+            "failed",
+            'UNAI_COUNTEREXAMPLE:{"case_id":"property-negative","actual_type":"float","actual_summary":"-9.5"}',
+            "",
+        )
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "failed"
+    assert len(runner.calls) == 1
+    assert result.shrinking_results[0].status == "no_supported_integer_arguments"
+    assert result.shrinking_results[0].attempts == 0
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert any(
+        item.kind == "shrink"
+        and item.metadata.get("status") == "no_supported_integer_arguments"
+        for item in saved.evidence
+    )
