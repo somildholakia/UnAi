@@ -47,8 +47,8 @@ _MAX_NESTED_SHRINK_NODES = 128
 _MAX_NESTED_CANDIDATES_PER_ARGUMENT = 12
 
 _LIMITATIONS = [
-    "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated only when a configured Ed25519 reviewer key signs the exact source/artifact/input/expectation assertion.",
-    "Trusted reviewer identities are local operator configuration; a valid signature authenticates the configured key's approval, not the logical correctness of the reviewed requirement.",
+    "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated by an operator-configured Ed25519 reviewer key or an issuer-bound publisher key signing the exact source/artifact/input/expectation assertion.",
+    "Reviewer and publisher identities are local operator configuration; publisher signatures bind an issuer ID and key role but do not prove the logical correctness of the signed requirement or establish a public trust root.",
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
