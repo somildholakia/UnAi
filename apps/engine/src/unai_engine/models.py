@@ -290,6 +290,9 @@ class GroundedOracleAttestation(BaseModel):
     signature_b64: Annotated[
         str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")
     ]
+    issuer_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    ] | None = None
 
     @field_validator("issued_at")
     @classmethod
