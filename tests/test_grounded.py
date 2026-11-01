@@ -460,7 +460,7 @@ def test_async_grounded_function_uses_asyncio_run_in_generated_harness(tmp_path:
     assert result.status == "passed"
     generated = runner.calls[0]["content"]
     ast.parse(generated)
-    assert "import asyncio\nimport importlib.util" in generated
+    assert "import asyncio\nimport hashlib\nimport importlib.util" in generated
     assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
