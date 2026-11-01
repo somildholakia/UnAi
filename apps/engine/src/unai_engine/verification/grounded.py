@@ -1927,6 +1927,8 @@ class GroundedTestVerifier:
                 exception_message_sha256=marker.get("exception_message_sha256"),
                 target_line=marker.get("target_line"),
                 target_function=marker.get("target_function"),
+                replay_count=marker.get("replay_count"),
+                replay_trace_sha256=marker.get("replay_trace_sha256"),
             )
             counterexamples.append(counterexample)
             self.ledger.append_evidence(
@@ -1960,6 +1962,8 @@ class GroundedTestVerifier:
                         "exception_message_sha256": counterexample.exception_message_sha256,
                         "target_line": counterexample.target_line,
                         "target_function": counterexample.target_function,
+                        "replay_count": counterexample.replay_count,
+                        "replay_trace_sha256": counterexample.replay_trace_sha256,
                     },
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
@@ -2002,7 +2006,7 @@ class GroundedTestVerifier:
                     original_arguments_sha256=case_by_id[case_id]["arguments_sha256"],
                     note="Shrinking requires a completed, sandboxed initial counterexample run.",
                 )
-                for case_id in sorted(counterexample_case_ids)
+                for case_id in sorted(shrinkable_case_ids)
             ]
 
         stdout_bytes = (execution.stdout_preview or "").encode("utf-8")
