@@ -1719,7 +1719,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     risks.extend(
         [
             "Existing passing tests and a clean Python parse are evidence, not proof of complete semantic correctness.",
-            "Shrinking tries bounded integer, finite-float, string and top-level list/dictionary reductions under fixed properties; it does not prove global minimality or support recursive nested reductions, symbolic execution or complete semantic review.",
+            "Shrinking tries bounded recursive integer, finite-float, string, list and dictionary reductions under fixed properties; it does not prove global minimality, provide symbolic execution or replace complete semantic review.",
         ]
     )
 
