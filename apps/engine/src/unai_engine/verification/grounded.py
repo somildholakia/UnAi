@@ -1404,6 +1404,9 @@ class GroundedTestVerifier:
                 "artifact_revision": publisher.artifact_revision,
                 "artifact_sha256": case["oracle_artifact_sha256"],
                 "issued_at": statement["issued_at"],
+                "key_revoked": False,
+                "key_not_before": not_before.isoformat() if not_before is not None else None,
+                "key_not_after": not_after.isoformat() if not_after is not None else None,
                 "statement_sha256": attestation_statement_sha256(statement),
             }
             publisher_signatures[case["case_id"]] = publisher.signature_b64
