@@ -698,7 +698,7 @@ class GroundedTestVerifier:
                             "The result is locally reduced under the implemented numeric strategy, not a proof of global minimality."
                         )
                     else:
-                        final_status = "no_supported_integer_arguments"
+                        final_status = "no_supported_numeric_arguments"
                         final_note = (
                             "Shrinking currently changes non-zero integer and finite float arguments only; "
                             "booleans, NaN/infinity, strings, collections and zero-valued inputs are left unchanged."
