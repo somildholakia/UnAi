@@ -253,6 +253,12 @@ class GroundedOracleCase(BaseModel):
     oracle_reference: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=5, max_length=500)
     ]
+    oracle_artifact_path: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)
+    ] | None = None
+    oracle_artifact_sha256: Annotated[
+        str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")
+    ] | None = None
     probe_candidate_id: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
     ] | None = None
