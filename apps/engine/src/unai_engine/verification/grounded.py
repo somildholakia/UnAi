@@ -358,7 +358,7 @@ def _target_function(
         function = matches[0]
         if function.decorator_list:
             raise GroundedVerificationError(
-                "Decorated module-level functions are not supported."
+                "Decorated functions are not supported at module level."
             )
     else:
         owner_name, method_name = parts
