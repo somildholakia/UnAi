@@ -78,12 +78,13 @@
 - Caller data is JSON-serialized into a fixed generated pytest harness. The generated test is added only to the disposable filtered workspace under unai_generated_tests; it is never written to the original workspace. Per-value and aggregate oracle payload sizes are bounded.
 - Execution requires both workspace_read and run_tests permissions already approved on the task, as well as the separate exact run-grounded-oracle-tests confirmation. Only the fixed python -m pytest -q command runs in the Docker sandbox; no model-supplied shell command is accepted.
 - The verifier records oracle provenance, source and generated-test hashes, execution status, output hashes and bounded redacted traces. It does not store the raw oracle arguments/expected values in the ledger.
+- Specification cases may optionally pin a workspace Markdown/text artifact to a SHA-256 fingerprint; the verifier re-reads the file and records the verified hash. This confirms document-byte integrity, not authorship, publisher authority or truth.
 - Return mismatches and unexpected function exceptions that emit the generated case marker are recorded as counterexample evidence tied to the exact execution evidence ID and source SHA-256. Async functions are invoked using asyncio.run inside the generated sync pytest wrapper.
 - GET /api/tasks/{task_id}/proof-bundle combines task patch/test freshness, oracle events, counterexamples, traces, unverified probe candidates and unresolved risks.
 - The typed Engine client and read-only task MCP bridge expose proof-bundle retrieval; the MCP server does not gain test execution, patch-apply or arbitrary-code tools.
 - Proof summaries keep historical counterexamples while deriving the current overall status from the latest grounded run. A candidate is only marked verified when a completed sandbox run actually exercises its linked oracle case; an unavailable run leaves it unverified.
 - Grounded tests currently support JSON-compatible return values from synchronous and async, undecorated, module-level Python functions with keyword-addressable parameters. Async calls use asyncio.run in the generated synchronous pytest wrapper. Methods, decorators and expected-exception cases remain unsupported.
-- Oracle references are requester-supplied and are not independently authenticated. A mismatch is evidence against the implementation *assuming the oracle is correct*; passing examples are not a proof of general correctness.
+- Oracle references remain requester-supplied. A workspace artifact hash can pin document bytes but does not authenticate authorship or publisher authority. A mismatch is evidence against the implementation *assuming the oracle is correct*; passing examples are not a proof of general correctness.
 
 ## CI verification
 

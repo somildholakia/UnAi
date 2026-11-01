@@ -38,7 +38,8 @@
 - [x] Record output mismatches as source-hash-bound counterexample evidence.
 - [x] Preserve bounded execution traces, output fingerprints and unresolved assumptions in proof bundles.
 - [x] Expose proof-bundle retrieval through the typed Engine client and read-only MCP bridge.
-- [ ] Independently authenticate external specification references; current oracle references are caller-supplied.
+- [x] Allow specification cases to bind an optional workspace Markdown/text artifact to a SHA-256 fingerprint and verify its bytes before execution.
+- [ ] Independently authenticate the external publisher/author or a human-review attestation; a hash proves content integrity, not trust or correctness.
 - [ ] Add automatic counterexample shrinking and broader trace/discriminating analysis.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [ ] Extend grounded tests to class methods, decorated functions and broader Python signatures with explicit invocation rules.

@@ -123,7 +123,15 @@ def _setup(tmp_path: Path, permissions=None):
     return contract.task_id, workspace_root, target, source, ledger, snapshot, probes, runner, verifier
 
 
-def _request(snapshot, *, candidate_id="probe-1", expected=0, source_hash=None):
+def _request(
+    snapshot,
+    *,
+    candidate_id="probe-1",
+    expected=0,
+    source_hash=None,
+    oracle_artifact_path=None,
+    oracle_artifact_sha256=None,
+):
     return GroundedTestApprovalRequest(
         confirm="run-grounded-oracle-tests",
         file_path="service.py",
@@ -136,6 +144,8 @@ def _request(snapshot, *, candidate_id="probe-1", expected=0, source_hash=None):
                 expected_output=expected,
                 oracle_kind="specification",
                 oracle_reference="product-spec.md#clamp-lower-bound",
+                oracle_artifact_path=oracle_artifact_path,
+                oracle_artifact_sha256=oracle_artifact_sha256,
                 probe_candidate_id=candidate_id,
             )
         ],
@@ -450,7 +460,7 @@ def test_async_grounded_function_uses_asyncio_run_in_generated_harness(tmp_path:
     assert result.status == "passed"
     generated = runner.calls[0]["content"]
     ast.parse(generated)
-    assert "import asyncio\nimport importlib.util" in generated
+    assert "import asyncio\nimport hashlib\nimport importlib.util" in generated
     assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
@@ -494,3 +504,166 @@ def test_decorated_async_function_remains_rejected(tmp_path: Path) -> None:
         verifier.run(task_id, request, workspace_root)
 
     assert runner.calls == []
+
+
+
+def test_specification_artifact_hash_is_recorded_and_verified(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec = workspace_root / "demo" / "product-spec.md"
+    spec_content = "# Clamp requirement\nValues below 10 return zero.\n"
+    spec.write_text(spec_content, encoding="utf-8")
+    expected_hash = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
+
+    result = verifier.run(
+        task_id,
+        _request(
+            snapshot,
+            oracle_artifact_path="product-spec.md",
+            oracle_artifact_sha256=expected_hash,
+        ),
+        workspace_root,
+    )
+
+    metadata = result.oracle_evidence[0].metadata
+    assert metadata["oracle_artifact_path"] == "product-spec.md"
+    assert metadata["oracle_artifact_sha256"] == expected_hash
+    assert metadata["oracle_artifact_integrity"] == "workspace-file-sha256-verified"
+    assert metadata["oracle_artifact_size_bytes"] == len(spec_content.encode("utf-8"))
+    assert runner.calls[0]["metadata"]["oracle_references"][0]["oracle_artifact_sha256"] == expected_hash
+    assert runner.calls[0]["metadata"]["staged_fingerprint_assertions_embedded"] is True
+    generated = runner.calls[0]["content"]
+    staged_root = tmp_path / "staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        (workspace_root / "demo" / "service.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (staged_root / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+    namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
+
+    # The same generated harness rejects a document whose bytes changed after
+    # the engine's final pre-staging read.
+    (staged_root / "product-spec.md").write_text("# Modified spec\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Pinned specification artifact changed"):
+        exec(compile(generated, str(generated_path), "exec"), {"__file__": str(generated_path)})
+
+
+def test_specification_artifact_hash_mismatch_rejects_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec = workspace_root / "demo" / "product-spec.md"
+    spec.write_text("# Actual specification\\n", encoding="utf-8")
+
+    with pytest.raises(GroundedVerificationError, match="does not match its supplied SHA-256") as raised:
+        verifier.run(
+            task_id,
+            _request(
+                snapshot,
+                oracle_artifact_path="product-spec.md",
+                oracle_artifact_sha256="0" * 64,
+            ),
+            workspace_root,
+        )
+
+    assert raised.value.status_code == 409
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_specification_artifact_requires_a_path_hash_pair(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    with pytest.raises(GroundedVerificationError, match="must supply both"):
+        verifier.run(
+            task_id,
+            _request(snapshot, oracle_artifact_path="product-spec.md"),
+            workspace_root,
+        )
+
+    assert runner.calls == []
+
+
+def test_specification_artifact_path_rejects_traversal_and_non_text_files(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    with pytest.raises(GroundedVerificationError, match="workspace-relative"):
+        verifier.run(
+            task_id,
+            _request(
+                snapshot,
+                oracle_artifact_path="../outside.md",
+                oracle_artifact_sha256="0" * 64,
+            ),
+            workspace_root,
+        )
+
+    assert runner.calls == []
+
+
+
+def test_specification_artifact_is_rechecked_before_sandbox_staging(tmp_path: Path, monkeypatch) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec = workspace_root / "demo" / "product-spec.md"
+    initial_content = "# Original specification\n"
+    spec.write_text(initial_content, encoding="utf-8")
+    expected_hash = hashlib.sha256(initial_content.encode("utf-8")).hexdigest()
+    original_read = verifier.patch_manager.read_file
+    artifact_reads = 0
+
+    def change_spec_before_second_read(read_task_id, file_path, read_workspace_root):
+        nonlocal artifact_reads
+        if file_path == "product-spec.md":
+            artifact_reads += 1
+            if artifact_reads == 2:
+                spec.write_text("# Changed after verification\\n", encoding="utf-8")
+        return original_read(read_task_id, file_path, read_workspace_root)
+
+    monkeypatch.setattr(verifier.patch_manager, "read_file", change_spec_before_second_read)
+    with pytest.raises(
+        GroundedVerificationError,
+        match="changed after test generation and before sandbox staging",
+    ) as raised:
+        verifier.run(
+            task_id,
+            _request(
+                snapshot,
+                oracle_artifact_path="product-spec.md",
+                oracle_artifact_sha256=expected_hash,
+            ),
+            workspace_root,
+        )
+
+    assert raised.value.status_code == 409
+    assert artifact_reads == 2
+    assert runner.calls == []
+
+
+
+def test_user_oracle_does_not_create_missing_specification_pin_risk(tmp_path: Path) -> None:
+    task_id, _workspace_root, _target, _source, ledger, _snapshot, _probes, _runner, _verifier = _setup(tmp_path)
+    ledger.append_evidence(
+        EvidenceRecord(
+            evidence_id="user-oracle-only",
+            task_id=task_id,
+            kind="oracle",
+            source="grounded-oracle",
+            claim="Expected output supplied directly by the user.",
+            metadata={"case_id": "user-case", "oracle_kind": "user"},
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+    )
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    bundle = build_proof_bundle(saved)
+
+    assert not any(
+        "specification references are not bound" in risk
+        for risk in bundle.unresolved_risks
+    )
