@@ -70,6 +70,34 @@ def _digest(value: Any, label: str) -> str:
     return hashlib.sha256(_json_text(value, label).encode("utf-8")).hexdigest()
 
 
+def _integer_shrink_candidates(value: int) -> list[int]:
+    """Return bounded, deterministic, strictly smaller integer candidates."""
+    if isinstance(value, bool) or not isinstance(value, int) or value == 0:
+        return []
+    sign = 1 if value > 0 else -1
+    magnitude = abs(value)
+    candidates = {0, sign, value - sign}
+    for divisor in (2, 4, 8, 16, 32):
+        reduced = magnitude // divisor
+        if reduced < magnitude:
+            candidates.add(sign * reduced)
+    return sorted(
+        (item for item in candidates if abs(item) < magnitude),
+        key=lambda item: (abs(item), item),
+    )
+
+
+def _shrink_score(arguments: dict[str, Any]) -> tuple[int, int, str]:
+    """Score only supported integer arguments; never claim global minimality."""
+    integer_magnitude = sum(
+        abs(value)
+        for value in arguments.values()
+        if isinstance(value, int) and not isinstance(value, bool)
+    )
+    encoded = _json_text(arguments, "Shrunk arguments")
+    return integer_magnitude, len(encoded.encode("utf-8")), encoded
+
+
 def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     if not symbol_name.isidentifier():
         raise GroundedVerificationError("Only a simple module-level function name is supported.")
