@@ -39,7 +39,7 @@ _LIMITATIONS = [
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
-    "The selected function must return JSON-compatible values; exceptions and import/collection failures are reported as test failures, not silently converted into expected results.",
+    "Return-value oracles require JSON-compatible results; an explicit raises_exception property may require only one of the fixed allowlisted built-in exception types, never an arbitrary caller-supplied class name.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
     "Execution traces retain hashes and redacted bounded previews, not a complete deterministic replay of process state.",
 ]
@@ -225,6 +225,15 @@ def _validate_cases(
             elif property_argument is not None:
                 raise GroundedVerificationError(
                     f"Property oracle case {case.case_id} cannot set argument_name for this property kind."
+                )
+            if case.oracle_property.kind == "raises_exception":
+                if case.oracle_property.exception_name is None:
+                    raise GroundedVerificationError(
+                        f"Exception property oracle case {case.case_id} must select an allowlisted exception_name."
+                    )
+            elif case.oracle_property.exception_name is not None:
+                raise GroundedVerificationError(
+                    f"Property oracle case {case.case_id} cannot set exception_name for this property kind."
                 )
         arguments = dict(case.arguments)
         unknown = set(arguments) - allowed
@@ -418,14 +427,23 @@ def _property_holds(actual, arguments, property_spec):
     if kind == "output_equals_argument":
         argument_name = property_spec["argument_name"]
         return _strict_equal(actual, arguments[argument_name])
+    if kind == "raises_exception":
+        return False
     raise RuntimeError("Unknown fixed property-oracle kind.")
 
 
 @pytest.mark.parametrize("case", _CASES, ids=lambda case: case["case_id"])
 def test_grounded_oracle_case(case):
+    property_spec = case.get("oracle_property")
     try:
         actual = {invocation}
     except Exception as exc:
+        if (
+            property_spec is not None
+            and property_spec["kind"] == "raises_exception"
+            and type(exc).__name__ == property_spec["exception_name"]
+        ):
+            return
         details = {{
             "case_id": case["case_id"],
             "actual_type": type(exc).__name__,
@@ -434,17 +452,21 @@ def test_grounded_oracle_case(case):
         raise AssertionError(
             "UNAI_COUNTEREXAMPLE:" + json.dumps(details, sort_keys=True, separators=(",", ":"))
         ) from exc
-    property_spec = case.get("oracle_property")
-    violation = (
-        not _property_holds(actual, case["arguments"], property_spec)
-        if property_spec is not None
-        else not _strict_equal(actual, case["expected_output"])
-    )
+    if property_spec is not None and property_spec["kind"] == "raises_exception":
+        violation = True
+        actual_summary = "Function returned without the required exception."
+    else:
+        violation = (
+            not _property_holds(actual, case["arguments"], property_spec)
+            if property_spec is not None
+            else not _strict_equal(actual, case["expected_output"])
+        )
+        actual_summary = repr(actual)[:300]
     if violation:
         details = {{
             "case_id": case["case_id"],
             "actual_type": type(actual).__name__,
-            "actual_summary": repr(actual)[:300],
+            "actual_summary": actual_summary,
         }}
         raise AssertionError(
             "UNAI_COUNTEREXAMPLE:" + json.dumps(details, sort_keys=True, separators=(",", ":"))
