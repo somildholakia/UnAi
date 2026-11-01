@@ -530,6 +530,27 @@ def test_specification_artifact_hash_is_recorded_and_verified(tmp_path: Path) ->
     assert metadata["oracle_artifact_integrity"] == "workspace-file-sha256-verified"
     assert metadata["oracle_artifact_size_bytes"] == len(spec_content.encode("utf-8"))
     assert runner.calls[0]["metadata"]["oracle_references"][0]["oracle_artifact_sha256"] == expected_hash
+    assert runner.calls[0]["metadata"]["source_fingerprint_checked_in_staged_workspace"] is True
+    generated = runner.calls[0]["content"]
+    staged_root = tmp_path / "staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        (workspace_root / "demo" / "service.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (staged_root / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+    namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
+
+    # The same generated harness rejects a document whose bytes changed after
+    # the engine's final pre-staging read.
+    (staged_root / "product-spec.md").write_text("# Modified spec\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Pinned specification artifact changed"):
+        exec(compile(generated, str(generated_path), "exec"), {"__file__": str(generated_path)})
 
 
 def test_specification_artifact_hash_mismatch_rejects_before_execution(tmp_path: Path) -> None:
