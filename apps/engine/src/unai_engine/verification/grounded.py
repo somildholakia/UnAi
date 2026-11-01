@@ -319,9 +319,21 @@ def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
     return numeric_magnitude, len(encoded.encode("utf-8")), encoded
 
 
-def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
-    if not symbol_name.isidentifier():
-        raise GroundedVerificationError("Only a simple module-level function name is supported.")
+def _decorator_name(decorator: ast.expr) -> str | None:
+    return decorator.id if isinstance(decorator, ast.Name) else None
+
+
+def _target_function(
+    source: str, symbol_name: str
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    parts = symbol_name.split(".")
+    if (
+        len(parts) not in {1, 2}
+        or any(not part.isidentifier() for part in parts)
+    ):
+        raise GroundedVerificationError(
+            "Use a module-level function name or one ClassName.method name."
+        )
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
@@ -329,22 +341,60 @@ def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.Asy
             f"Target Python source does not parse at line {exc.lineno}.", 409
         ) from exc
 
-    matches = [
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == symbol_name
-    ]
-    if len(matches) != 1:
-        if not matches:
+    if len(parts) == 1:
+        matches = [
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == parts[0]
+        ]
+        if len(matches) != 1:
+            if not matches:
+                raise GroundedVerificationError(
+                    f"Top-level Python function not found: {symbol_name}.", 404
+                )
             raise GroundedVerificationError(
-                f"Top-level Python function not found: {symbol_name}.", 404
+                f"Function name is ambiguous: {symbol_name}.", 409
             )
-        raise GroundedVerificationError(
-            f"Function name is ambiguous: {symbol_name}.", 409
-        )
+        function = matches[0]
+        if function.decorator_list:
+            raise GroundedVerificationError(
+                "Decorated module-level functions are not supported."
+            )
+    else:
+        owner_name, method_name = parts
+        classes = [
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == owner_name
+        ]
+        if len(classes) != 1:
+            if not classes:
+                raise GroundedVerificationError(
+                    f"Top-level class not found: {owner_name}.", 404
+                )
+            raise GroundedVerificationError(
+                f"Class name is ambiguous: {owner_name}.", 409
+            )
+        methods = [
+            node for node in classes[0].body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == method_name
+        ]
+        if len(methods) != 1:
+            if not methods:
+                raise GroundedVerificationError(
+                    f"Class method not found: {symbol_name}.", 404
+                )
+            raise GroundedVerificationError(
+                f"Class method name is ambiguous: {symbol_name}.", 409
+            )
+        function = methods[0]
+        decorators = [_decorator_name(item) for item in function.decorator_list]
+        if decorators not in ([ "staticmethod" ], [ "classmethod" ]):
+            raise GroundedVerificationError(
+                "Only explicitly decorated @staticmethod and @classmethod targets are supported; "
+                "ordinary instance methods and other decorators are rejected."
+            )
 
-    function = matches[0]
-    if function.decorator_list:
-        raise GroundedVerificationError("Decorated functions are not yet supported for grounded tests.")
     if function.args.posonlyargs or function.args.vararg or function.args.kwarg:
         raise GroundedVerificationError(
             "Positional-only, *args and **kwargs signatures are not supported."
@@ -352,8 +402,18 @@ def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.Asy
     return function
 
 
-def _signature(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], set[str]]:
+def _signature(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    drop_first_parameter: bool = False,
+) -> tuple[set[str], set[str]]:
     positional = list(function.args.args)
+    if drop_first_parameter:
+        if not positional:
+            raise GroundedVerificationError(
+                "A classmethod must declare its bound class parameter."
+            )
+        positional = positional[1:]
     defaults_start = len(positional) - len(function.args.defaults)
     required = {
         arg.arg for index, arg in enumerate(positional)
@@ -395,7 +455,14 @@ def _validate_cases(
     request: GroundedTestApprovalRequest,
     function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> list[dict[str, Any]]:
-    allowed, required = _signature(function)
+    is_classmethod = (
+        "." in request.symbol_name
+        and len(function.decorator_list) == 1
+        and _decorator_name(function.decorator_list[0]) == "classmethod"
+    )
+    allowed, required = _signature(
+        function, drop_first_parameter=is_classmethod
+    )
     candidates = _candidate_index(
         snapshot, request.file_path, request.symbol_name, request.source_sha256
     )
