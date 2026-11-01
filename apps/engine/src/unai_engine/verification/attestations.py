@@ -17,7 +17,8 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
-ATTESTATION_SCHEMA = "unai.oracle-attestation.v1"
+REVIEWER_ATTESTATION_SCHEMA = "unai.oracle-attestation.v1"
+PUBLISHER_ATTESTATION_SCHEMA = "unai.oracle-publisher-attestation.v1"
 
 
 def _utc_timestamp(value: datetime) -> str:
@@ -43,10 +44,13 @@ def build_oracle_attestation_statement(
     arguments_sha256: str,
     expected_output_sha256: str | None,
     oracle_property_sha256: str | None,
+    issuer_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build the exact assertion envelope that a trusted reviewer must sign."""
-    return {
-        "schema": ATTESTATION_SCHEMA,
+    """Build an assertion envelope for a configured reviewer or publisher key."""
+    if issuer_id is not None and not issuer_id.strip():
+        raise ValueError("Publisher issuer_id must be a non-empty stable identifier.")
+    statement = {
+        "schema": PUBLISHER_ATTESTATION_SCHEMA if issuer_id else REVIEWER_ATTESTATION_SCHEMA,
         "key_id": key_id,
         "issued_at": _utc_timestamp(issued_at),
         "task_id": task_id,
@@ -63,6 +67,10 @@ def build_oracle_attestation_statement(
         "expected_output_sha256": expected_output_sha256.lower() if expected_output_sha256 else None,
         "oracle_property_sha256": oracle_property_sha256.lower() if oracle_property_sha256 else None,
     }
+    if issuer_id is not None:
+        statement["issuer_id"] = issuer_id
+        statement["key_role"] = "publisher"
+    return statement
 
 
 def canonical_attestation_message(statement: dict[str, Any]) -> bytes:
