@@ -724,6 +724,19 @@ if _REPLAY_TRACE_PATH is not None and not _REPLAY_TRACE_PATH.is_relative_to(
     (_ROOT / "unai_generated_tests").resolve()
 ):
     raise RuntimeError("Replay trace path escaped the generated-test directory.")
+_REPLAY_TRACE_DIRECTORY_FD = None
+if _REPLAY_TRACE_PATH is not None:
+    _REPLAY_TRACE_DIRECTORY = _ROOT / "unai_generated_tests"
+    try:
+        if not _REPLAY_TRACE_DIRECTORY.is_symlink():
+            _REPLAY_TRACE_DIRECTORY_FD = os.open(
+                _REPLAY_TRACE_DIRECTORY,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+    except OSError:
+        _REPLAY_TRACE_DIRECTORY_FD = None
 _REPLAY_TRACE_RECORDS = []
 _ALLOWED_EXCEPTIONS = {{
     "ValueError": ValueError,
@@ -840,12 +853,28 @@ def _write_replay_trace_file():
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
     if len(encoded.encode("utf-8")) > 16_384:
         return
+    if _REPLAY_TRACE_DIRECTORY_FD is None:
+        return
+    descriptor = None
     try:
-        with _REPLAY_TRACE_PATH.open("x", encoding="utf-8", newline="") as handle:
+        descriptor = os.open(
+            _REPLAY_TRACE_PATH.name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=_REPLAY_TRACE_DIRECTORY_FD,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            descriptor = None
             handle.write(encoded)
     except OSError:
         # Trace failure must not change the oracle result or run pytest commands.
         return
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 if _REPLAY_TRACE_PATH is not None:
