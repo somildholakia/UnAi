@@ -934,6 +934,69 @@ def test_expected_exception_property_accepts_only_the_selected_allowlisted_excep
     namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
 
 
+def test_expected_exception_property_rejects_custom_class_with_allowlisted_name(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class ValueError(Exception):" + chr(10)
+        + "    pass" + chr(10) + chr(10)
+        + "def clamp(value):" + chr(10)
+        + "    raise ValueError('custom exception')" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        property_kind="raises_exception",
+        exception_name="ValueError",
+    )
+
+    verifier.run(task_id, request, workspace_root)
+    generated = runner.calls[0]["content"]
+    staged_root = tmp_path / "custom-exception-staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        target.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+
+    with pytest.raises(AssertionError, match="UNAI_COUNTEREXAMPLE"):
+        namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
+
+
+def test_expected_exception_property_rejects_normal_return(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return value" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        property_kind="raises_exception",
+        exception_name="ValueError",
+    )
+
+    verifier.run(task_id, request, workspace_root)
+    generated = runner.calls[0]["content"]
+    staged_root = tmp_path / "normal-return-staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        target.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+
+    with pytest.raises(AssertionError, match="UNAI_COUNTEREXAMPLE"):
+        namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
+
+
 def test_expected_exception_property_reports_wrong_or_missing_exception(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
