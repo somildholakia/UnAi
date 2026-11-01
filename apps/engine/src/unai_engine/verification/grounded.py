@@ -32,6 +32,7 @@ from unai_engine.verification.proof import summarize_proof
 
 
 _MAX_SHRINK_CANDIDATES = 24
+_MAX_SHRINK_ROUNDS = 6
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
@@ -628,21 +629,26 @@ class GroundedTestVerifier:
             final_note = ""
 
             while True:
-                descriptors: list[tuple[str, int, dict[str, Any]]] = []
+                base_integer_magnitude = sum(
+                    abs(value)
+                    for value in current_arguments.values()
+                    if isinstance(value, int) and not isinstance(value, bool)
+                )
+                # Keep descriptor storage light: copy the complete argument map
+                # only for the at-most-24 candidates selected for a sandbox round.
+                descriptors: list[tuple[str, int, int]] = []
                 for argument_name in sorted(current_arguments):
                     value = current_arguments[argument_name]
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        continue
                     for reduced_value in _integer_shrink_candidates(value):
-                        candidate_arguments = dict(current_arguments)
-                        candidate_arguments[argument_name] = reduced_value
-                        descriptors.append((argument_name, reduced_value, candidate_arguments))
+                        score = (
+                            base_integer_magnitude - abs(value) + abs(reduced_value)
+                        )
+                        descriptors.append((argument_name, reduced_value, score))
 
                 descriptors.sort(
-                    key=lambda item: (
-                        _shrink_score(item[2]),
-                        item[0],
-                        item[1],
-                        _json_text(item[2], "Shrink candidate arguments"),
-                    )
+                    key=lambda item: (item[2], item[0], item[1])
                 )
 
                 if not descriptors:
@@ -679,7 +685,9 @@ class GroundedTestVerifier:
 
                 candidate_map: dict[str, dict[str, Any]] = {}
                 candidate_metadata: list[dict[str, str]] = []
-                for argument_name, reduced_value, candidate_arguments in candidate_descriptors:
+                for argument_name, reduced_value, _score in candidate_descriptors:
+                    candidate_arguments = dict(current_arguments)
+                    candidate_arguments[argument_name] = reduced_value
                     candidate_identity = {
                         "case_id": case_id,
                         "base_arguments": current_arguments,
@@ -895,11 +903,16 @@ class GroundedTestVerifier:
 
                 current_arguments = dict(best["arguments"])
                 smallest_observed = dict(current_arguments)
-                if used_total >= _MAX_SHRINK_CANDIDATES or budget_truncated:
+                if (
+                    used_total >= _MAX_SHRINK_CANDIDATES
+                    or budget_truncated
+                    or len(iteration_history) >= _MAX_SHRINK_ROUNDS
+                ):
                     final_status = "smaller_failure_observed"
                     final_note = (
                         "Cumulative reductions found a smaller input that still violated the same property, "
-                        "then reached the 24-candidate request budget. The input is the smallest observed, not a proven global minimum."
+                        "then reached a request resource limit (24 candidates or 6 isolated rounds). "
+                        "The input is the smallest observed, not a proven global minimum."
                     )
                     break
 
