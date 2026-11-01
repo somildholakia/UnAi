@@ -271,7 +271,13 @@ def test_generated_oracle_code_serializes_untrusted_text_in_json_string(tmp_path
     generated = runner.calls[0]["content"]
     ast.parse(generated)
     assert "json.loads(" in generated
-    assert "import os" not in generated
+    imported = [
+        alias.name
+        for node in ast.walk(ast.parse(generated))
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    ]
+    assert "os" not in imported
 
 
 class FakeSandbox:
