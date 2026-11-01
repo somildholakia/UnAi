@@ -40,7 +40,8 @@
 - [x] Expose proof-bundle retrieval through the typed Engine client and read-only MCP bridge.
 - [x] Allow specification cases to bind an optional workspace Markdown/text artifact to a SHA-256 fingerprint and verify its bytes before execution.
 - [ ] Independently authenticate the external publisher/author or a human-review attestation; a hash proves content integrity, not trust or correctness.
-- [ ] Add automatic counterexample shrinking and broader trace/discriminating analysis.
+- [x] Add fixed, non-executable property-oracle contracts and opt-in, Docker-isolated integer shrinking capped at 24 candidates per request; report smallest observed failures without claiming global minimality.
+- [ ] Extend shrinking to multiple-argument cumulative reduction, floats, strings and collections only with separate correctness/resource policies; add broader trace/discriminating analysis.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [ ] Extend grounded tests to class methods, decorated functions and broader Python signatures with explicit invocation rules.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
