@@ -37,7 +37,8 @@ _MAX_SHRINK_ROUNDS = 6
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
-    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float and string arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
+    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
+    "Collection shrinking removes only top-level list elements or string-keyed mapping entries; it does not recursively shrink nested values or reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
@@ -136,6 +137,63 @@ def _string_shrink_candidates(value: str) -> list[str]:
     return sorted(candidates, key=lambda item: (len(item), item))[:12]
 
 
+def _collection_shrink_candidates(value: Any) -> list[Any]:
+    """Remove bounded top-level chunks from JSON lists or string-keyed mappings."""
+    if isinstance(value, list):
+        length = len(value)
+        if not length:
+            return []
+        candidates: list[Any] = [[]]
+        chunk_sizes = sorted(
+            {max(1, length // divisor) for divisor in (2, 4, 8, 16)},
+            reverse=True,
+        )
+        for chunk_size in chunk_sizes:
+            if chunk_size >= length:
+                continue
+            starts = sorted({0, (length - chunk_size) // 2, length - chunk_size})
+            for start in starts:
+                candidates.append(value[:start] + value[start + chunk_size:])
+                if len(candidates) >= 12:
+                    break
+            if len(candidates) >= 12:
+                break
+    elif isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        keys = sorted(value)
+        length = len(keys)
+        if not length:
+            return []
+        candidates = [{}]
+        chunk_sizes = sorted(
+            {max(1, length // divisor) for divisor in (2, 4, 8, 16)},
+            reverse=True,
+        )
+        for chunk_size in chunk_sizes:
+            if chunk_size >= length:
+                continue
+            starts = sorted({0, (length - chunk_size) // 2, length - chunk_size})
+            for start in starts:
+                removed = set(keys[start:start + chunk_size])
+                candidates.append({
+                    key: item for key, item in value.items() if key not in removed
+                })
+                if len(candidates) >= 12:
+                    break
+            if len(candidates) >= 12:
+                break
+    else:
+        return []
+
+    unique: dict[str, Any] = {}
+    for candidate in candidates:
+        if len(candidate) < len(value):
+            unique.setdefault(_digest(candidate, "Collection shrink candidate"), candidate)
+    return sorted(
+        unique.values(),
+        key=lambda item: (len(item), _json_text(item, "Collection shrink candidate")),
+    )[:12]
+
+
 def _argument_measure(value: Any) -> Decimal:
     if isinstance(value, bool):
         return Decimal(0)
@@ -144,6 +202,8 @@ def _argument_measure(value: Any) -> Decimal:
     if isinstance(value, float) and math.isfinite(value):
         return Decimal(str(abs(value)))
     if isinstance(value, str):
+        return Decimal(len(value))
+    if isinstance(value, (list, dict)):
         return Decimal(len(value))
     return Decimal(0)
 
@@ -705,6 +765,8 @@ class GroundedTestVerifier:
                         reductions = _float_shrink_candidates(value)
                     elif isinstance(value, str):
                         reductions = _string_shrink_candidates(value)
+                    elif isinstance(value, (list, dict)):
+                        reductions = _collection_shrink_candidates(value)
                     else:
                         continue
                     for reduced_value in reductions:
@@ -729,8 +791,8 @@ class GroundedTestVerifier:
                     else:
                         final_status = "no_supported_numeric_arguments"
                         final_note = (
-                            "Shrinking currently changes non-zero integer/finite-float and non-empty string arguments only; "
-                            "booleans, NaN/infinity, collections and already-minimal inputs are left unchanged."
+                            "Shrinking currently changes non-zero integer/finite-float, non-empty string, and non-empty top-level list/string-keyed dict arguments only; "
+                            "booleans, NaN/infinity, unsupported mappings and already-minimal inputs are left unchanged."
                         )
                     break
 
