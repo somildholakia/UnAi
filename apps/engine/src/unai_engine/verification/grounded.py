@@ -1168,6 +1168,7 @@ class GroundedTestVerifier:
 
         # An optional signature is trusted only when its key ID is in the
         # operator-configured keyring. Signatures bind the exact test assertion.
+        attestation_signatures: dict[str, str] = {}
         for case in normalized:
             attestation_data = case.get("oracle_attestation")
             if not attestation_data:
@@ -1213,8 +1214,8 @@ class GroundedTestVerifier:
                 "key_id": attestation.key_id,
                 "issued_at": statement["issued_at"],
                 "statement_sha256": attestation_statement_sha256(statement),
-                "signature_b64": attestation.signature_b64,
             }
+            attestation_signatures[case["case_id"]] = attestation.signature_b64
             # Signature is evidence, not test input. Do not embed it in generated pytest.
             case["oracle_attestation"] = None
 
@@ -1259,6 +1260,7 @@ class GroundedTestVerifier:
                         else "user-supplied-oracle"
                     ),
                     "oracle_attestation": case["oracle_attestation_provenance"],
+                    "oracle_attestation_signature_b64": attestation_signatures.get(case["case_id"]),
                     "probe_candidate_id": case["probe_candidate_id"],
                 },
                 created_at=now,
