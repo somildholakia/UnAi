@@ -79,7 +79,21 @@ When a probe ID is supplied, every input/value pair generated for that candidate
 
 The target is re-read immediately before execution. If its SHA-256 differs from the request or the referenced probe, execution is rejected as stale. The verifier supports synchronous and async, undecorated, module-level Python functions with keyword-addressable arguments. Async functions are awaited through asyncio.run inside the generated synchronous pytest case. Positional-only arguments, *args, **kwargs, methods and decorated functions are not supported. Expected-exception cases are supported only through the fixed `raises_exception` property and the exception allowlist below; custom exception classes and arbitrary exception names remain unsupported.
 
-A matching artifact hash proves that the workspace document bytes match the supplied fingerprint; it does not prove who authored or published the document, whether its publisher is authoritative, or whether the expected output is correct. Cases without an artifact hash remain requester-reference-only.
+A matching artifact hash proves the workspace document bytes match the supplied fingerprint; by itself it does not prove who authored or published the document. A specification case may additionally include an oracle attestation signed by a reviewer whose Ed25519 public key is configured by the Engine operator. The signature covers the task/workspace, target file/function/source hash, case ID, oracle reference, artifact path/hash, argument hash, expected-output/property hash, reviewer key ID and issuance time. Therefore the signature approves one exact test assertion and cannot be replayed for a different input, expected value, source version, artifact or task.
+
+Configure trusted reviewer keys in the UNAI_ORACLE_TRUSTED_PUBLIC_KEYS setting as a JSON object mapping stable key IDs to base64-encoded 32-byte raw Ed25519 public keys. Keep private keys outside the Engine and workspace. Removing a key from this operator-managed keyring revokes trust in signatures from that key. An unknown key or invalid signature is rejected before oracle evidence is appended or tests execute. User oracles and un-attested specification references remain usable but visibly untrusted.
+
+The reviewer signs the canonical UTF-8 JSON assertion produced by the Engine's build_oracle_attestation_statement and canonical_attestation_message helpers in unai_engine.verification.attestations. The assertion binds the exact case inputs, expected output or property, target source hash, workspace, task and pinned specification artifact hash. A valid signature authenticates approval by the configured key, not the truth of the requirement itself; trusted reviewers must inspect the specification and expected assertion before signing.
+
+Example request field:
+
+    "oracle_attestation": {
+      "key_id": "reviewer-release",
+      "issued_at": "2026-11-01T09:00:00Z",
+      "signature_b64": "<base64 Ed25519 signature>"
+    }
+
+The signature is public verification material, not a secret. The Engine stores it with append-only oracle evidence and does not embed it into generated pytest input.
 
 The expected values and request fields are serialized as JSON data embedded in a fixed generated pytest template. Caller text is never interpolated as Python statements. For async targets the fixed harness imports asyncio and invokes the coroutine with asyncio.run; it does not accept caller-provided event-loop code or commands. The generated test is placed in unai_generated_tests/ inside the disposable filtered copy only; it is not written to the original workspace. The existing fixed command python -m pytest -q is executed through Docker with networking disabled and the existing CPU, memory, PID and timeout limits. There is no host-shell fallback.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
 import json
 import math
@@ -10,10 +11,13 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from unai_engine.cognition.task_compiler import compile_task
 from unai_engine.models import (
     EvidenceRecord,
+    GroundedOracleAttestation,
     GroundedOracleCase,
     GroundedPropertyOracle,
     GroundedTestApprovalRequest,
@@ -23,6 +27,10 @@ from unai_engine.models import (
 from unai_engine.runtime.patches import PatchManager
 from unai_engine.runtime.sandbox import ExecutionResult
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, WorkspaceStagingError
+from unai_engine.verification.attestations import (
+    build_oracle_attestation_statement,
+    canonical_attestation_message,
+)
 from unai_engine.verification.grounded import (
     GroundedTestVerifier,
     GroundedVerificationError,
@@ -168,6 +176,181 @@ def _request(
     )
 
 
+
+
+def _signed_specification_request(
+    task_id: str,
+    snapshot,
+    *,
+    spec_content: str,
+    expected_output=0,
+    private_key=None,
+):
+    private_key = private_key or Ed25519PrivateKey.generate()
+    issued_at = datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc)
+    arguments = {"value": 9}
+    artifact_path = "product-spec.md"
+    artifact_sha256 = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
+    canonical_json = lambda value: json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    statement = build_oracle_attestation_statement(
+        key_id="reviewer-release",
+        issued_at=issued_at,
+        task_id=task_id,
+        workspace="demo",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        case_id="signed-lower-edge",
+        oracle_kind="specification",
+        oracle_reference="product-spec.md#clamp-lower-bound",
+        oracle_artifact_path=artifact_path,
+        oracle_artifact_sha256=artifact_sha256,
+        arguments_sha256=hashlib.sha256(canonical_json(arguments)).hexdigest(),
+        expected_output_sha256=hashlib.sha256(canonical_json(expected_output)).hexdigest(),
+        oracle_property_sha256=None,
+    )
+    signature_b64 = base64.b64encode(
+        private_key.sign(canonical_attestation_message(statement))
+    ).decode("ascii")
+    public_key_b64 = base64.b64encode(
+        private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    ).decode("ascii")
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="signed-lower-edge",
+                arguments=arguments,
+                expected_output=expected_output,
+                oracle_kind="specification",
+                oracle_reference="product-spec.md#clamp-lower-bound",
+                oracle_artifact_path=artifact_path,
+                oracle_artifact_sha256=artifact_sha256,
+                oracle_attestation=GroundedOracleAttestation(
+                    key_id="reviewer-release",
+                    issued_at=issued_at,
+                    signature_b64=signature_b64,
+                ),
+            )
+        ],
+    )
+    return request, public_key_b64, signature_b64
+
+
+def test_trusted_ed25519_attestation_authenticates_exact_specification_case(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, public_key_b64, signature_b64 = _signed_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_public_keys = {"reviewer-release": public_key_b64}
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    oracle_metadata = result.oracle_evidence[0].metadata
+    assert oracle_metadata["oracle_artifact_integrity"] == "trusted-ed25519-review-attestation"
+    attestation = oracle_metadata["oracle_attestation"]
+    assert attestation["verified"] is True
+    assert attestation["algorithm"] == "Ed25519"
+    assert attestation["key_id"] == "reviewer-release"
+    assert oracle_metadata["oracle_attestation_signature_b64"] == signature_b64
+    assert signature_b64 not in runner.calls[0]["content"]
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    bundle = build_proof_bundle(saved)
+    assert not any("lack a valid signature" in risk for risk in bundle.unresolved_risks)
+    assert any("do not prove the underlying specification" in risk for risk in bundle.unresolved_risks)
+
+
+def test_tampered_expected_output_invalidates_reviewer_signature_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, public_key_b64, _signature_b64 = _signed_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_public_keys = {"reviewer-release": public_key_b64}
+    request.cases[0].expected_output = 1
+
+    with pytest.raises(GroundedVerificationError, match="signature .* is invalid") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_unconfigured_reviewer_key_is_rejected_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, _public_key_b64, _signature_b64 = _signed_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_public_keys = {}
+
+    with pytest.raises(GroundedVerificationError, match="not in the configured trusted keyring") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_attestation_requires_a_pinned_specification_artifact(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    private_key = Ed25519PrivateKey.generate()
+    signature_b64 = base64.b64encode(private_key.sign(b"irrelevant")).decode("ascii")
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="missing-artifact",
+                arguments={"value": 9},
+                expected_output=0,
+                oracle_kind="specification",
+                oracle_reference="product specification requirement",
+                oracle_attestation=GroundedOracleAttestation(
+                    key_id="reviewer-release",
+                    issued_at=datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc),
+                    signature_b64=signature_b64,
+                ),
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="requires a pinned specification artifact"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_oracle_attestation_rejects_timezone_naive_issuance_time() -> None:
+    signature_b64 = base64.b64encode(b"x" * 64).decode("ascii")
+    with pytest.raises(ValidationError, match="explicit timezone"):
+        GroundedOracleAttestation(
+            key_id="reviewer-release",
+            issued_at=datetime(2026, 11, 1, 9, 0),
+            signature_b64=signature_b64,
+        )
+
 def test_grounded_case_turns_exact_probe_into_specification_backed_test(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, ledger, snapshot, probes, runner, verifier = _setup(tmp_path)
     assert probes.candidates[0].candidate_id == "probe-1"
@@ -217,7 +400,7 @@ def test_failed_grounded_case_records_counterexample_and_proof_bundle(tmp_path: 
     assert bundle.grounded_counterexample_count == 1
     assert bundle.unverified_probe_candidate_count == len(probes.candidates) - 1
     assert len(bundle.execution_traces) == 1
-    assert any("Oracle provenance" in risk for risk in bundle.unresolved_risks)
+    assert any("lack a valid signature from an operator-configured trusted reviewer key" in risk for risk in bundle.unresolved_risks)
 
 
 def test_grounded_request_rejects_stale_source_fingerprint(tmp_path: Path) -> None:
