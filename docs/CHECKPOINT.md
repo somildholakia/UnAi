@@ -4,9 +4,10 @@
 **Date:** 2026-11-01
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** main
-**Latest main commit at checkpoint:** 1c0e82d1bb2a75789170278e4e31c81f68d74297
-**M4 implementation PR:** https://github.com/somildholakia/UnAi/pull/2 (merged)
-**M4 code commit before squash merge:** 3778cab22767d8e554928807279fb44d695e220f
+**M4 grounded-verification implementation PR:** https://github.com/somildholakia/UnAi/pull/2 (merged)
+**M4 first-milestone merge commit:** 1c0e82d1bb2a75789170278e4e31c81f68d74297
+**M4 async extension PR:** https://github.com/somildholakia/UnAi/pull/3 (merged)
+**M4 async extension merge commit:** 6a95421d171433fe52d6f54722dc8924e33f3c66
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
 
@@ -81,7 +82,7 @@
 - GET /api/tasks/{task_id}/proof-bundle combines task patch/test freshness, oracle events, counterexamples, traces, unverified probe candidates and unresolved risks.
 - The typed Engine client and read-only task MCP bridge expose proof-bundle retrieval; the MCP server does not gain test execution, patch-apply or arbitrary-code tools.
 - Proof summaries keep historical counterexamples while deriving the current overall status from the latest grounded run. A candidate is only marked verified when a completed sandbox run actually exercises its linked oracle case; an unavailable run leaves it unverified.
-- Grounded tests currently support JSON-compatible return values from synchronous, undecorated, module-level Python functions with keyword-addressable parameters. Methods, async functions, decorators and expected-exception cases are unsupported.
+- Grounded tests currently support JSON-compatible return values from synchronous and async, undecorated, module-level Python functions with keyword-addressable parameters. Async calls use asyncio.run in the generated synchronous pytest wrapper. Methods, decorators and expected-exception cases remain unsupported.
 - Oracle references are requester-supplied and are not independently authenticated. A mismatch is evidence against the implementation *assuming the oracle is correct*; passing examples are not a proof of general correctness.
 
 ## CI verification
@@ -92,8 +93,12 @@
 - M4 PR #2 was squash-merged to main as 1c0e82d1bb2a75789170278e4e31c81f68d74297.
 - M4 PR CI: https://github.com/somildholakia/UnAi/actions/runs/41289393795
 - M4 post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41289447443
-- Both M4 workflows reported 146 tests passed; python -m compileall -q apps/engine/src training passed.
-- Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded.
+- Both M4 PR #2 workflows reported 146 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 async extension PR #3 was squash-merged as 6a95421d171433fe52d6f54722dc8924e33f3c66.
+- M4 async extension PR CI: https://github.com/somildholakia/UnAi/actions/runs/41290095843
+- M4 async extension post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41290137057
+- Both PR #3 workflows reported 149 tests passed; python -m compileall -q apps/engine/src training passed.
+- Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
 
@@ -113,7 +118,7 @@
 1. Improve source/specification oracle provenance: support durable specification artifacts or human review attestations without treating a URL/string reference as authenticated.
 2. Add an explicit property-oracle contract before implementing automatic input shrinking; do not reuse one exact expected output for changed inputs unless the oracle says that property is invariant.
 3. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
-4. Expand grounded tests to supported methods, async functions, exceptions and more languages only with dedicated execution isolation and tests.
+4. Expand grounded tests to supported class/static methods, exception oracles and more languages only with dedicated invocation rules, execution isolation and tests.
 5. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
 6. Design per-user/scoped Engine credentials, revocation, rate limits and tenant isolation before network-facing Engine deployment.
 7. Deploy Brain to a real Cloudflare D1 account with read/write secrets, access controls and quotas, then connect the remote MCP bridge.
