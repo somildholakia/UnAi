@@ -307,6 +307,7 @@ class GroundedShrinkResult(BaseModel):
         "smaller_failure_observed",
         "no_smaller_failure_observed",
         "no_supported_integer_arguments",
+        "budget_exhausted",
         "unavailable",
     ]
     attempts: int = Field(ge=0)
