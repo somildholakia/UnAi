@@ -33,6 +33,7 @@ _LIMITATIONS = [
     "Expected outputs are supplied by the requester; oracle references are recorded but not automatically authenticated against an external specification.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
+    "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
     "The selected function must return JSON-compatible values; exceptions and import/collection failures are reported as test failures, not silently converted into expected results.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
     "Execution traces retain hashes and redacted bounded previews, not a complete deterministic replay of process state.",
@@ -138,7 +139,7 @@ def _candidate_index(
 def _validate_cases(
     snapshot: TaskEvidenceSnapshot,
     request: GroundedTestApprovalRequest,
-    function: ast.FunctionDef,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> list[dict[str, Any]]:
     allowed, required = _signature(function)
     candidates = _candidate_index(
@@ -149,6 +150,25 @@ def _validate_cases(
     total_payload_bytes = 0
 
     for case in request.cases:
+        artifact_path = case.oracle_artifact_path
+        artifact_sha256 = case.oracle_artifact_sha256
+        if (artifact_path is None) != (artifact_sha256 is None):
+            raise GroundedVerificationError(
+                f"Oracle case {case.case_id} must supply both oracle_artifact_path and oracle_artifact_sha256."
+            )
+        if artifact_path is not None:
+            artifact_relative = PurePosixPath(artifact_path)
+            if (
+                case.oracle_kind != "specification"
+                or artifact_relative.is_absolute()
+                or "\\" in artifact_path
+                or any(part in {"", ".", ".."} for part in artifact_relative.parts)
+                or artifact_relative.suffix.casefold() not in {".md", ".txt", ".rst", ".adoc"}
+                or artifact_path == request.file_path
+            ):
+                raise GroundedVerificationError(
+                    f"Oracle case {case.case_id} must reference a separate workspace-relative Markdown/text specification file."
+                )
         if case.case_id in seen:
             raise GroundedVerificationError("Oracle case IDs must be unique within a run.")
         seen.add(case.case_id)
@@ -200,6 +220,8 @@ def _validate_cases(
                 "expected_output": case.expected_output,
                 "oracle_kind": case.oracle_kind,
                 "oracle_reference": case.oracle_reference,
+                "oracle_artifact_path": artifact_path,
+                "oracle_artifact_sha256": artifact_sha256.lower() if artifact_sha256 else None,
                 "probe_candidate_id": case.probe_candidate_id,
                 "arguments_sha256": _digest(arguments, "Arguments"),
                 "expected_sha256": _digest(case.expected_output, "Expected output"),
@@ -351,6 +373,30 @@ class GroundedTestVerifier:
         function = _target_function(source_snapshot.content, request.symbol_name)
         normalized = _validate_cases(snapshot, request, function)
 
+        # A supplied workspace document hash pins the exact bytes used as the
+        # specification reference. It does not authenticate the document author.
+        artifact_fingerprints: dict[str, dict[str, Any]] = {}
+        for case in normalized:
+            artifact_path = case["oracle_artifact_path"]
+            if not artifact_path:
+                continue
+            fingerprint = artifact_fingerprints.get(artifact_path)
+            if fingerprint is None:
+                artifact_snapshot = self.patch_manager.read_file(
+                    task_id, artifact_path, workspace_root
+                )
+                fingerprint = {
+                    "sha256": artifact_snapshot.sha256,
+                    "size_bytes": artifact_snapshot.size_bytes,
+                }
+                artifact_fingerprints[artifact_path] = fingerprint
+            if fingerprint["sha256"].lower() != case["oracle_artifact_sha256"]:
+                raise GroundedVerificationError(
+                    f"Specification artifact changed or does not match its supplied SHA-256: {artifact_path}.",
+                    409,
+                )
+            case["oracle_artifact_size_bytes"] = fingerprint["size_bytes"]
+
         # Record every supplied oracle before executing it. A source/reference is
         # provenance, not an independently authenticated oracle.
         oracle_events: list[EvidenceRecord] = []
@@ -373,6 +419,14 @@ class GroundedTestVerifier:
                     "expected_sha256": case["expected_sha256"],
                     "oracle_kind": case["oracle_kind"],
                     "oracle_reference": case["oracle_reference"],
+                    "oracle_artifact_path": case["oracle_artifact_path"],
+                    "oracle_artifact_sha256": case["oracle_artifact_sha256"],
+                    "oracle_artifact_size_bytes": case.get("oracle_artifact_size_bytes"),
+                    "oracle_artifact_integrity": (
+                        "workspace-file-sha256-verified"
+                        if case["oracle_artifact_path"]
+                        else "requester-reference-only"
+                    ),
                     "probe_candidate_id": case["probe_candidate_id"],
                 },
                 created_at=now,
@@ -399,6 +453,8 @@ class GroundedTestVerifier:
                     "case_id": case["case_id"],
                     "kind": case["oracle_kind"],
                     "reference": case["oracle_reference"],
+                    "oracle_artifact_path": case["oracle_artifact_path"],
+                    "oracle_artifact_sha256": case["oracle_artifact_sha256"],
                     "probe_candidate_id": case["probe_candidate_id"],
                 }
                 for case in normalized
@@ -625,7 +681,11 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     if not oracle_events:
         risks.append("No user- or specification-referenced expected outputs have been executed.")
     else:
-        risks.append("Oracle provenance is requester-supplied and has not been independently authenticated.")
+        risks.append(
+            "Oracle provenance is requester-supplied; a workspace artifact hash proves content integrity only, not publisher identity, authorship, authority or correctness."
+        )
+        if any(not item.metadata.get("oracle_artifact_sha256") for item in oracle_events):
+            risks.append("One or more specification references are not bound to a SHA-256-pinned workspace document.")
     if unverified_count:
         risks.append(
             f"{unverified_count} AST-generated probe candidate(s) have not been tied to a grounded oracle case."
