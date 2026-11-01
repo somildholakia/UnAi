@@ -58,6 +58,8 @@ Example request:
           "expected_output": 0,
           "oracle_kind": "specification",
           "oracle_reference": "product-spec.md#clamp-lower-bound",
+          "oracle_artifact_path": "docs/product-spec.md",
+          "oracle_artifact_sha256": "<sha256 from the approved workspace file snapshot>",
           "probe_candidate_id": "probe-1"
         }
       ]
@@ -70,11 +72,14 @@ Every case must include:
 - An explicit JSON-compatible expected return value.
 - oracle_kind of user or specification.
 - A human-readable oracle_reference such as an acceptance criterion or specification section.
+- Optionally, oracle_artifact_path and oracle_artifact_sha256 to bind a specification case to a UTF-8 Markdown/text document in the approved workspace. Obtain the fingerprint from the task file-snapshot endpoint; the verifier re-reads the file and rejects a mismatch before execution.
 - Optionally, a probe_candidate_id to bind the case to a probe generated for the exact file, function and source hash.
 
 When a probe ID is supplied, every input/value pair generated for that candidate must be preserved exactly (including JSON type). Additional required function arguments may be supplied in the same arguments object. Cases are rejected when they use unknown parameters or omit required parameters.
 
 The target is re-read immediately before execution. If its SHA-256 differs from the request or the referenced probe, execution is rejected as stale. The verifier supports synchronous and async, undecorated, module-level Python functions with keyword-addressable arguments. Async functions are awaited through asyncio.run inside the generated synchronous pytest case. Positional-only arguments, *args, **kwargs, methods, decorated functions and exception-as-expected-result cases are not supported.
+
+A matching artifact hash proves that the workspace document bytes match the supplied fingerprint; it does not prove who authored or published the document, whether its publisher is authoritative, or whether the expected output is correct. Cases without an artifact hash remain requester-reference-only.
 
 The expected values and request fields are serialized as JSON data embedded in a fixed generated pytest template. Caller text is never interpolated as Python statements. For async targets the fixed harness imports asyncio and invokes the coroutine with asyncio.run; it does not accept caller-provided event-loop code or commands. The generated test is placed in unai_generated_tests/ inside the disposable filtered copy only; it is not written to the original workspace. The existing fixed command python -m pytest -q is executed through Docker with networking disabled and the existing CPU, memory, PID and timeout limits. There is no host-shell fallback.
 
