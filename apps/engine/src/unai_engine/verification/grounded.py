@@ -389,14 +389,14 @@ def _property_holds(actual, arguments, property_spec):
         return (
             isinstance(actual, (int, float))
             and not isinstance(actual, bool)
-            and math.isfinite(actual)
+            and (not isinstance(actual, float) or math.isfinite(actual))
             and actual >= 0
         )
     if kind == "output_positive":
         return (
             isinstance(actual, (int, float))
             and not isinstance(actual, bool)
-            and math.isfinite(actual)
+            and (not isinstance(actual, float) or math.isfinite(actual))
             and actual > 0
         )
     if kind == "output_truthy":
