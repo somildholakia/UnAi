@@ -1,8 +1,9 @@
-"""Trusted reviewer attestations for specification-grounded oracle cases.
+"""Trusted reviewer and publisher attestations for specification-grounded oracle cases.
 
-A valid signature authenticates that a configured reviewer key signed the exact
-test assertion, including the source, artifact, input, expected result/property and
-task/workspace context. It does not prove the assertion is logically correct.
+A valid signature authenticates that a configured reviewer key or issuer-bound
+publisher key signed the exact source/artifact/input/expectation assertion. Publisher
+identity is only as trustworthy as the Engine operator key-to-issuer configuration.
+A valid signature does not prove that the assertion is logically correct.
 """
 from __future__ import annotations
 
