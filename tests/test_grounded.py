@@ -727,7 +727,7 @@ def test_property_oracle_harness_uses_fixed_predicates_without_expected_value(tm
     ast.parse(generated)
     assert "def _property_holds(actual, arguments, property_spec):" in generated
     assert '"output_non_negative"' in generated
-    assert '"expected_output":null' in generated
+    assert "expected_output" not in _generated_cases(generated)[0]
     assert runner.calls[0]["metadata"]["oracle_case_ids"] == ["property-negative"]
 
     staged_root = tmp_path / "property-staged"
@@ -787,7 +787,7 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
     assert len(shrink_cases) == 5
     assert {item["arguments"]["value"] for item in shrink_cases} == {0, 1, 2, 4, 8}
     assert all(item["oracle_property"]["kind"] == "output_non_negative" for item in shrink_cases)
-    assert all(item["expected_output"] is None for item in shrink_cases)
+    assert all("expected_output" not in item for item in shrink_cases)
     assert runner.calls[1]["metadata"]["parent_execution_evidence_id"] == result.execution_evidence.evidence_id
     shrink = result.shrinking_results[0]
     assert shrink.status == "smaller_failure_observed"
