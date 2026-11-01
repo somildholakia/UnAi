@@ -41,12 +41,15 @@ from unai_engine.verification.proof import summarize_proof
 
 _MAX_SHRINK_CANDIDATES = 24
 _MAX_SHRINK_ROUNDS = 6
+_MAX_NESTED_SHRINK_DEPTH = 4
+_MAX_NESTED_SHRINK_NODES = 128
+_MAX_NESTED_CANDIDATES_PER_ARGUMENT = 12
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated only when a configured Ed25519 reviewer key signs the exact source/artifact/input/expectation assertion.",
     "Trusted reviewer identities are local operator configuration; a valid signature authenticates the configured key's approval, not the logical correctness of the reviewed requirement.",
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
-    "Collection shrinking removes only top-level list elements or string-keyed mapping entries; it does not recursively shrink nested values or reorder collections.",
+    "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
@@ -203,17 +206,107 @@ def _collection_shrink_candidates(value: Any) -> list[Any]:
 
 
 def _argument_measure(value: Any) -> Decimal:
-    if isinstance(value, bool):
+    """Measure JSON values recursively so nested reductions strictly decrease."""
+    if isinstance(value, bool) or value is None:
         return Decimal(0)
     if isinstance(value, int):
         return Decimal(abs(value))
-    if isinstance(value, float) and math.isfinite(value):
-        return Decimal(str(abs(value)))
+    if isinstance(value, float):
+        return Decimal(str(abs(value))) if math.isfinite(value) else Decimal(0)
     if isinstance(value, str):
         return Decimal(len(value))
-    if isinstance(value, (list, dict)):
-        return Decimal(len(value))
+    if isinstance(value, list):
+        return Decimal(len(value)) + sum(
+            (_argument_measure(item) for item in value), Decimal(0)
+        )
+    if isinstance(value, dict):
+        return Decimal(len(value)) + sum(
+            (_argument_measure(item) for item in value.values()), Decimal(0)
+        )
     return Decimal(0)
+
+
+def _replace_nested_value(value: Any, path: tuple[str | int, ...], replacement: Any) -> Any:
+    """Copy only containers on a path and replace one nested JSON value."""
+    if not path:
+        return replacement
+    head, *tail = path
+    if isinstance(value, list) and isinstance(head, int):
+        copied = list(value)
+        copied[head] = _replace_nested_value(copied[head], tuple(tail), replacement)
+        return copied
+    if isinstance(value, dict) and isinstance(head, str):
+        copied = dict(value)
+        copied[head] = _replace_nested_value(copied[head], tuple(tail), replacement)
+        return copied
+    raise GroundedVerificationError("Nested shrink path no longer matches its JSON value.")
+
+
+def _direct_value_shrink_candidates(value: Any) -> list[Any]:
+    """Get the fixed deterministic reductions for one JSON value, without recursion."""
+    if isinstance(value, bool) or value is None:
+        return []
+    if isinstance(value, int):
+        return _integer_shrink_candidates(value)
+    if isinstance(value, float):
+        return _float_shrink_candidates(value)
+    if isinstance(value, str):
+        return _string_shrink_candidates(value)
+    if isinstance(value, (list, dict)):
+        return _collection_shrink_candidates(value)
+    return []
+
+
+def _nested_argument_shrink_candidates(value: Any) -> list[Any]:
+    """Generate bounded candidates by reducing a value at any shallow JSON path."""
+    original_measure = _argument_measure(value)
+    original_json = _json_text(value, "Original shrink argument")
+    candidates: dict[str, Any] = {}
+    visited_nodes = 0
+
+    def add(path: tuple[str | int, ...], reduced: Any) -> None:
+        if len(candidates) >= _MAX_NESTED_CANDIDATES_PER_ARGUMENT * 4:
+            return
+        candidate = _replace_nested_value(value, path, reduced)
+        if _argument_measure(candidate) >= original_measure:
+            return
+        encoded = _json_text(candidate, "Nested shrink candidate")
+        if encoded == original_json:
+            return
+        candidates.setdefault(hashlib.sha256(encoded.encode("utf-8")).hexdigest(), candidate)
+
+    def visit(node: Any, path: tuple[str | int, ...], depth: int) -> None:
+        nonlocal visited_nodes
+        if visited_nodes >= _MAX_NESTED_SHRINK_NODES or len(candidates) >= _MAX_NESTED_CANDIDATES_PER_ARGUMENT * 4:
+            return
+        visited_nodes += 1
+        for reduced in _direct_value_shrink_candidates(node):
+            add(path, reduced)
+            if len(candidates) >= _MAX_NESTED_CANDIDATES_PER_ARGUMENT * 4:
+                return
+        if depth >= _MAX_NESTED_SHRINK_DEPTH:
+            return
+        if isinstance(node, list):
+            for index, child in enumerate(node):
+                visit(child, path + (index,), depth + 1)
+                if visited_nodes >= _MAX_NESTED_SHRINK_NODES or len(candidates) >= _MAX_NESTED_CANDIDATES_PER_ARGUMENT * 4:
+                    break
+        elif isinstance(node, dict) and all(isinstance(key, str) for key in node):
+            for key in sorted(node):
+                visit(node[key], path + (key,), depth + 1)
+                if visited_nodes >= _MAX_NESTED_SHRINK_NODES or len(candidates) >= _MAX_NESTED_CANDIDATES_PER_ARGUMENT * 4:
+                    break
+
+    visit(value, (), 0)
+    ordered = sorted(
+        candidates.values(),
+        key=lambda item: (
+            _argument_measure(item),
+            len(_json_text(item, "Nested shrink candidate").encode("utf-8")),
+            _json_text(item, "Nested shrink candidate"),
+        ),
+    )
+    return ordered[:_MAX_NESTED_CANDIDATES_PER_ARGUMENT]
 
 
 def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
@@ -777,22 +870,10 @@ class GroundedTestVerifier:
                 )
                 # Keep descriptor storage light: copy the complete argument map
                 # only for the at-most-24 candidates selected for a sandbox round.
-                descriptors: list[tuple[str, int | float | str, Decimal]] = []
+                descriptors: list[tuple[str, Any, Decimal]] = []
                 for argument_name in sorted(current_arguments):
                     value = current_arguments[argument_name]
-                    if isinstance(value, bool):
-                        continue
-                    if isinstance(value, int):
-                        reductions = _integer_shrink_candidates(value)
-                    elif isinstance(value, float):
-                        reductions = _float_shrink_candidates(value)
-                    elif isinstance(value, str):
-                        reductions = _string_shrink_candidates(value)
-                    elif isinstance(value, (list, dict)):
-                        reductions = _collection_shrink_candidates(value)
-                    else:
-                        continue
-                    for reduced_value in reductions:
+                    for reduced_value in _nested_argument_shrink_candidates(value):
                         score = (
                             base_argument_measure
                             - _argument_measure(value)
@@ -800,8 +881,14 @@ class GroundedTestVerifier:
                         )
                         descriptors.append((argument_name, reduced_value, score))
 
+                # JSON serialization is the deterministic tie-breaker because
+                # heterogeneous nested lists/dicts are not order-comparable.
                 descriptors.sort(
-                    key=lambda item: (item[2], item[0], item[1])
+                    key=lambda item: (
+                        item[2],
+                        item[0],
+                        _json_text(item[1], "Shrink candidate ordering"),
+                    )
                 )
 
                 if not descriptors:
