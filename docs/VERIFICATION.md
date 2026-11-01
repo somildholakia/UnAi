@@ -77,7 +77,7 @@ Every case must include:
 
 When a probe ID is supplied, every input/value pair generated for that candidate must be preserved exactly (including JSON type). Additional required function arguments may be supplied in the same arguments object. Cases are rejected when they use unknown parameters or omit required parameters.
 
-The target is re-read immediately before execution. If its SHA-256 differs from the request or the referenced probe, execution is rejected as stale. The verifier supports synchronous and async, undecorated, module-level Python functions with keyword-addressable arguments. Async functions are awaited through asyncio.run inside the generated synchronous pytest case. Positional-only arguments, *args, **kwargs, methods, decorated functions and exception-as-expected-result cases are not supported.
+The target is re-read immediately before execution. If its SHA-256 differs from the request or the referenced probe, execution is rejected as stale. The verifier supports synchronous and async, undecorated, module-level Python functions with keyword-addressable arguments. Async functions are awaited through asyncio.run inside the generated synchronous pytest case. Positional-only arguments, *args, **kwargs, methods and decorated functions are not supported. Expected-exception cases are supported only through the fixed `raises_exception` property and the exception allowlist below; custom exception classes and arbitrary exception names remain unsupported.
 
 A matching artifact hash proves that the workspace document bytes match the supplied fingerprint; it does not prove who authored or published the document, whether its publisher is authoritative, or whether the expected output is correct. Cases without an artifact hash remain requester-reference-only.
 
@@ -105,8 +105,11 @@ The supported, non-executable property kinds are:
 - `output_is_none` / `output_not_none`: be None / not None.
 - `output_is_empty` / `output_not_empty`: be an empty / non-empty string, list or dict.
 - `output_equals_argument`: strictly match one named input argument in JSON type and value; set `argument_name`.
+- `raises_exception`: require the function to raise exactly the selected allowlisted exception class; set `exception_name`.
 
-No caller-supplied Python expression, lambda, module, or command is evaluated as an oracle. The property contract is serialized as JSON and evaluated by fixed generated helper code. A function exception is still recorded as an unexpected counterexample, not interpreted as an expected exception.
+No caller-supplied Python expression, lambda, module, or command is evaluated as an oracle. The property contract is serialized as JSON and evaluated by fixed generated helper code. For `raises_exception`, only the selected exact exception type passes. A different exception type or a normal return emits a counterexample marker. For every other property kind, any function exception remains an unexpected counterexample.
+ 
+The exception allowlist is `ValueError`, `TypeError`, `KeyError`, `IndexError`, `ZeroDivisionError`, `OverflowError`, `AssertionError`, `RuntimeError`, `LookupError`, `FileNotFoundError`, `PermissionError`, and `TimeoutError`. No module import, lookup or dynamic class construction is driven by caller text.
 
 ## 2A. Bounded property-oracle shrinking
 
