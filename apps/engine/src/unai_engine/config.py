@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
+import json
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -17,6 +20,34 @@ def _path_setting(name: str, default: str) -> Path:
 
 def _csv(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _oracle_public_keys_from_env() -> dict[str, str]:
+    """Load reviewer key IDs mapped to base64 raw Ed25519 public keys."""
+    raw = os.getenv("UNAI_ORACLE_TRUSTED_PUBLIC_KEYS", "{}")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("UNAI_ORACLE_TRUSTED_PUBLIC_KEYS must be a JSON object.") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("UNAI_ORACLE_TRUSTED_PUBLIC_KEYS must be a JSON object.")
+
+    validated: dict[str, str] = {}
+    for key_id, public_key_b64 in parsed.items():
+        if (
+            not isinstance(key_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", key_id) is None
+            or not isinstance(public_key_b64, str)
+        ):
+            raise ValueError("Trusted oracle key entries require safe string IDs and base64 public keys.")
+        try:
+            public_key = base64.b64decode(public_key_b64, validate=True)
+        except (ValueError, base64.binascii.Error) as exc:
+            raise ValueError(f"Trusted oracle public key {key_id!r} is not valid base64.") from exc
+        if len(public_key) != 32:
+            raise ValueError(f"Trusted oracle public key {key_id!r} must decode to 32 bytes.")
+        validated[key_id] = public_key_b64
+    return validated
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +68,9 @@ class Settings:
     test_max_files: int = int(os.getenv("UNAI_TEST_MAX_FILES", "5000"))
     test_max_bytes: int = int(os.getenv("UNAI_TEST_MAX_BYTES", str(50 * 1024 * 1024)))
     brain_write_token: str = os.getenv("UNAI_BRAIN_WRITE_TOKEN", "")
+    oracle_trusted_public_keys: dict[str, str] = field(
+        default_factory=_oracle_public_keys_from_env
+    )
 
     def __post_init__(self) -> None:
         if self.api_token and len(self.api_token) < 32:
