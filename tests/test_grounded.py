@@ -371,7 +371,7 @@ def test_trusted_publisher_signature_binds_issuer_and_records_publisher_provenan
     assert attestation["key_id"] == "publisher-2026"
     assert attestation["key_revoked"] is False
     assert attestation["issued_at"].startswith("2026-11-01T09:00:00")
-    assert runner.calls[0]["metadata"]["oracle_references"][0]["oracle_attestation"]["key_role"] == "publisher"
+    assert metadata["oracle_attestation"]["key_role"] == "publisher"
 
 
 def test_publisher_attestation_rejects_wrong_issuer_before_execution(tmp_path: Path) -> None:
