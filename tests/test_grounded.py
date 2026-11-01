@@ -825,6 +825,80 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
     assert any(item.source == "grounded-oracle-shrink-sandbox" for item in saved.evidence)
     assert any(item.source == "grounded-shrink-trace" for item in saved.evidence)
 
+def test_cumulative_shrinking_reduces_two_integer_arguments_across_rounds(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def combine(left, right):" + chr(10)
+        + "    return -(abs(left) + abs(right))" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="combine",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="two-argument-property",
+                arguments={"left": 5, "right": 4},
+                oracle_property=GroundedPropertyOracle(kind="output_non_negative"),
+                oracle_kind="user",
+                oracle_reference="Combined result must be non-negative",
+            )
+        ],
+    )
+
+    def evaluate_generated_cases(generated_source, evidence_source, evidence_metadata):
+        markers = []
+        for case in _generated_cases(generated_source):
+            args = case["arguments"]
+            actual = -(abs(args["left"]) + abs(args["right"]))
+            if actual < 0:
+                markers.append(
+                    "UNAI_COUNTEREXAMPLE:" + json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "actual_type": "int",
+                            "actual_summary": str(actual),
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+        if markers:
+            return "failed", chr(10).join(markers), ""
+        return "passed", "", ""
+
+    runner.generated_responder = evaluate_generated_cases
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "failed"
+    assert len(result.counterexamples) == 1
+    assert len(runner.calls) == 4
+    rounds = [
+        _generated_cases(call["content"])
+        for call in runner.calls[1:]
+    ]
+    assert [len(items) for items in rounds] == [8, 4, 1]
+    assert all(item["oracle_property"]["kind"] == "output_non_negative" for items in rounds for item in items)
+    shrink = result.shrinking_results[0]
+    assert shrink.status == "smaller_failure_observed"
+    assert shrink.attempts == 13
+    assert shrink.smallest_observed_arguments == {"left": 0, "right": 1}
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    evidence = next(
+        item for item in saved.evidence
+        if item.kind == "shrink" and item.metadata.get("case_id") == "two-argument-property"
+    )
+    assert evidence.metadata["iteration_count"] == 3
+    assert len(evidence.metadata["iteration_history"]) == 3
+    bundle = build_proof_bundle(saved)
+    assert bundle.shrink_attempt_count == 13
+    assert bundle.shrunk_counterexample_count == 1
+
+
 def test_property_contract_rejects_expected_output_and_requires_argument_reference(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
     with pytest.raises(GroundedVerificationError, match="must omit expected_output"):
