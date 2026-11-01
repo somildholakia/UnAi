@@ -1375,7 +1375,7 @@ class GroundedTestVerifier:
                     and attestation.issued_at < publisher_key.not_before
                 ):
                     raise GroundedVerificationError(
-                        f"Oracle publisher key {attestation.key_id!r} was not valid when this attestation was issued.",
+                        f"Oracle publisher key {attestation.key_id!r} was outside its validity window when this attestation was issued.",
                         403,
                     )
                 if (
