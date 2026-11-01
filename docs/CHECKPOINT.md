@@ -90,7 +90,7 @@
 - The verifier records oracle provenance, source and generated-test hashes, execution status, output hashes and bounded redacted traces. It does not store the raw oracle arguments/expected values in the ledger.
 - Specification cases may optionally pin a workspace Markdown/text artifact to a SHA-256 fingerprint. The verifier re-reads it before generating tests, checks it again before staging, and the generated harness verifies the copied artifact (and target source) before importing the target.
 - A specification case may include an Ed25519 reviewer attestation. The Engine verifies it against the operator-configured UNAI_ORACLE_TRUSTED_PUBLIC_KEYS keyring and binds it to the exact task/workspace, source hash, artifact hash, case inputs and expected output/property. Invalid/unknown signatures are rejected before oracle evidence or execution. A valid signature authenticates the configured reviewer key's approval, not logical truth or publisher identity.
-- Property-oracle cases may use one fixed non-executable predicate instead of an exact expected output. Supported predicates include allowlisted expected-exception types: the exact selected built-in exception class must be raised; a wrong exception or a normal return is a counterexample. On a sandboxed property counterexample, unAI tries at most 24 deterministic integer-argument reductions over at most 6 separate Docker rounds per request. The smallest observed failing input becomes the base for the next round, allowing cumulative reduction across multiple integer arguments. Exact-output cases are never shrunk; the result is not a global-minimality proof.
+- Property-oracle cases may use one fixed non-executable predicate instead of an exact expected output. Supported predicates include allowlisted expected-exception types: the exact selected built-in exception class must be raised; a wrong exception or a normal return is a counterexample. On a sandboxed property counterexample, unAI tries deterministic integer, finite-float, string and collection reductions over at most 24 candidate executions and 6 separate Docker rounds per request. Reductions can reach nested JSON values to depth 4, with at most 128 visited nodes and 12 candidates per argument per round. Exact-output cases are never shrunk; the result is not a global-minimality proof.
 - Return mismatches and unexpected function exceptions that emit the generated case marker are recorded as counterexample evidence tied to the exact execution evidence ID and source SHA-256. Async functions are invoked using asyncio.run inside the generated sync pytest wrapper.
 - GET /api/tasks/{task_id}/proof-bundle combines task patch/test freshness, oracle events, counterexamples, traces, unverified probe candidates and unresolved risks.
 - The typed Engine client and read-only task MCP bridge expose proof-bundle retrieval; the MCP server does not gain test execution, patch-apply or arbitrary-code tools.
@@ -139,6 +139,10 @@
 - M4 collection-shrinking PR CI: https://github.com/somildholakia/UnAi/actions/runs/41294275727
 - M4 collection-shrinking post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41294344686
 - Both PR #13 workflows reported 175 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 recursive nested-value shrinking PR #16 was squash-merged as beea101073df8abb2d0c7bd50095658862d5e0ec.
+- M4 recursive-shrinking PR CI: https://github.com/somildholakia/UnAi/actions/runs/41295629226
+- M4 recursive-shrinking post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41295688338
+- Both PR #16 workflows reported 182 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
@@ -156,10 +160,10 @@
 
 ## Next work after this checkpoint
 
-1. Strengthen specification provenance beyond byte integrity: add trusted publisher signatures or explicit human-review attestations; a workspace SHA-256 pin does not identify the author or authority.
-2. Consider recursive nested-value shrinking only with explicit per-type reduction semantics and resource budgets; keep smallest-observed versus globally-minimal claims distinct.
-3. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
-4. Expand grounded tests to supported class/static methods, exception oracles and more languages only with dedicated invocation rules, execution isolation and tests.
+1. Define external publisher identity, key rotation, revocation and issuer policy before accepting publisher-signed specifications; current Ed25519 reviewer attestations authenticate only operator-configured reviewer keys.
+2. Add richer execution traces and independent/discriminating checks for stateful functions, side effects and more than JSON-returning pure functions.
+3. Expand grounded verification to class/static methods, decorated functions and broader Python signatures with explicit invocation and isolation rules.
+4. Add coverage-guided and mutation-based verification only with deterministic budgets, Docker restrictions and evidence provenance.
 5. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
 6. Design per-user/scoped Engine credentials, revocation, rate limits and tenant isolation before network-facing Engine deployment.
 7. Deploy Brain to a real Cloudflare D1 account with read/write secrets, access controls and quotas, then connect the remote MCP bridge.
