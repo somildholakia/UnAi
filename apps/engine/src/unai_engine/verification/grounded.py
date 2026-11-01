@@ -1664,10 +1664,30 @@ class GroundedTestVerifier:
                     marker_values[case_id] = {
                         "actual_type": str(marker.get("actual_type", "unknown"))[:120],
                         "actual_summary": str(marker.get("actual_summary", ""))[:500],
-                        "actual_sha256": marker.get("actual_sha256"),
-                        "exception_message_sha256": marker.get("exception_message_sha256"),
-                        "target_line": marker.get("target_line"),
-                        "target_function": marker.get("target_function"),
+                        "actual_sha256": (
+                            marker.get("actual_sha256")
+                            if isinstance(marker.get("actual_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["actual_sha256"])
+                            else None
+                        ),
+                        "exception_message_sha256": (
+                            marker.get("exception_message_sha256")
+                            if isinstance(marker.get("exception_message_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["exception_message_sha256"])
+                            else None
+                        ),
+                        "target_line": (
+                            marker.get("target_line")
+                            if isinstance(marker.get("target_line"), int)
+                            and not isinstance(marker.get("target_line"), bool)
+                            and marker["target_line"] > 0
+                            else None
+                        ),
+                        "target_function": (
+                            marker.get("target_function")[:128]
+                            if isinstance(marker.get("target_function"), str)
+                            else None
+                        ),
                     }
         # Fallback for test doubles and legacy evidence without structured marker metadata.
         for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", output):
@@ -1680,8 +1700,18 @@ class GroundedTestVerifier:
                 marker_values[case_id] = {
                     "actual_type": str(marker.get("actual_type", "unknown"))[:120],
                     "actual_summary": str(marker.get("actual_summary", ""))[:500],
-                    "actual_sha256": marker.get("actual_sha256"),
-                    "exception_message_sha256": marker.get("exception_message_sha256"),
+                    "actual_sha256": (
+                        marker.get("actual_sha256")
+                        if isinstance(marker.get("actual_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["actual_sha256"])
+                        else None
+                    ),
+                    "exception_message_sha256": (
+                        marker.get("exception_message_sha256")
+                        if isinstance(marker.get("exception_message_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["exception_message_sha256"])
+                        else None
+                    ),
                     "target_line": None,
                     "target_function": None,
                 }
@@ -1733,6 +1763,10 @@ class GroundedTestVerifier:
                         "oracle_reference": case["oracle_reference"],
                         "actual_type": marker["actual_type"],
                         "actual_summary": marker["actual_summary"],
+                        "actual_sha256": counterexample.actual_sha256,
+                        "exception_message_sha256": counterexample.exception_message_sha256,
+                        "target_line": counterexample.target_line,
+                        "target_function": counterexample.target_function,
                     },
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
