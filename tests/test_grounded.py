@@ -1529,7 +1529,7 @@ def _execute_replay_harness(
 def test_replay_divergence_is_a_structured_counterexample_without_input_shrinking(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
-        "def next_value(value):" + chr(10) + "    return value" + chr(10),
+        "def clamp(value):" + chr(10) + "    return value" + chr(10),
         encoding="utf-8",
     )
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
@@ -1579,7 +1579,7 @@ def test_replay_stability_detects_same_process_global_state_changes(tmp_path: Pa
         tmp_path,
         source=(
             "counter = 0\\n"
-            "def next_value(value):\\n"
+            "def clamp(value):\\n"
             "    global counter\\n"
             "    counter += 1\\n"
             "    return value + counter\\n"
@@ -1595,7 +1595,7 @@ def test_replay_stability_resets_mutable_json_inputs_but_preserves_module_state(
     record = _execute_replay_harness(
         tmp_path,
         source=(
-            "def append_and_count(value):\\n"
+            "def clamp(value):\\n"
             "    value.append('new')\\n"
             "    return len(value)\\n"
         ),
