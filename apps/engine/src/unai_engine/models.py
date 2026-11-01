@@ -262,7 +262,9 @@ class GroundedPropertyOracle(BaseModel):
         "output_not_empty",
         "output_equals_argument",
         "raises_exception",
+        "output_stable_across_replays",
     ]
+    replay_count: int = Field(default=1, ge=1, le=4)
     argument_name: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
     ] | None = None
@@ -397,6 +399,8 @@ class GroundedCounterexample(BaseModel):
     exception_message_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
     target_line: int | None = Field(default=None, ge=1)
     target_function: Annotated[str, StringConstraints(max_length=128)] | None = None
+    replay_count: int | None = Field(default=None, ge=2, le=4)
+    replay_trace_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
 
 
 class GroundedShrinkResult(BaseModel):

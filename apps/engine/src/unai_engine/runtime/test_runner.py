@@ -159,6 +159,137 @@ def _redact_preview(value: str, limit: int = 2_000) -> str:
     return redacted[-limit:]
 
 
+def _validated_replay_trace(
+    workspace: Path,
+    relative_path: str,
+    expected_case_ids: list[str],
+) -> tuple[list[dict[str, Any]], str]:
+    """Load only the small, hash-only replay trace written by the generated harness."""
+    relative = PurePosixPath(relative_path)
+    if (
+        relative.is_absolute()
+        or relative.as_posix() != relative_path
+        or len(relative.parts) != 2
+        or relative.parts[0] != "unai_generated_tests"
+        or relative.suffix != ".json"
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        return [], "invalid_path"
+    expected = {
+        item for item in expected_case_ids
+        if isinstance(item, str) and item
+    }
+    if not expected or len(expected) > 20:
+        return [], "invalid_case_ids"
+    workspace_root = workspace.resolve()
+    trace_directory = workspace / relative.parts[0]
+    if trace_directory.is_symlink() or not trace_directory.is_dir():
+        return [], "unsafe_directory"
+    try:
+        resolved_directory = trace_directory.resolve(strict=True)
+        if not resolved_directory.is_relative_to(workspace_root):
+            return [], "unsafe_directory"
+        trace_path = trace_directory / relative.parts[1]
+        if trace_path.is_symlink() or not trace_path.is_file():
+            return [], "missing"
+        resolved_trace_path = trace_path.resolve(strict=True)
+        if not resolved_trace_path.is_relative_to(resolved_directory):
+            return [], "unsafe_path"
+        if resolved_trace_path.stat().st_size > 16_384:
+            return [], "oversized"
+        payload = json.loads(resolved_trace_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return [], "invalid"
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema") != "unai.replay-trace.v1"
+        or not isinstance(payload.get("records"), list)
+        or len(payload["records"]) > 20
+    ):
+        return [], "invalid"
+
+    seen: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for record in payload["records"]:
+        if (
+            not isinstance(record, dict)
+            or record.get("kind") != "output_stable_across_replays"
+            or not isinstance(record.get("case_id"), str)
+            or record["case_id"] not in expected
+            or record["case_id"] in seen
+            or not isinstance(record.get("replay_count"), int)
+            or isinstance(record.get("replay_count"), bool)
+            or not 2 <= record["replay_count"] <= 4
+            or not isinstance(record.get("stable"), bool)
+            or not isinstance(record.get("results"), list)
+            or len(record["results"]) != record["replay_count"]
+        ):
+            return [], "invalid"
+        seen.add(record["case_id"])
+        results: list[dict[str, Any]] = []
+        result_hashes: list[str] = []
+        all_returned = True
+        for index, item in enumerate(record["results"], start=1):
+            if (
+                not isinstance(item, dict)
+                or item.get("replay_index") != index
+                or item.get("status") not in {"returned", "raised", "non_json_return"}
+                or not isinstance(item.get("actual_type"), str)
+            ):
+                return [], "invalid"
+            normalized_item: dict[str, Any] = {
+                "replay_index": index,
+                "status": item["status"],
+                "actual_type": item["actual_type"][:120],
+            }
+            digest = item.get("actual_sha256")
+            if digest is not None:
+                if not isinstance(digest, str) or re.fullmatch(r"[a-fA-F0-9]{64}", digest) is None:
+                    return [], "invalid"
+                normalized_item["actual_sha256"] = digest.lower()
+            if item["status"] == "returned":
+                if digest is None:
+                    return [], "invalid"
+                result_hashes.append(digest.lower())
+            else:
+                all_returned = False
+            exception_digest = item.get("exception_message_sha256")
+            if exception_digest is not None:
+                if not isinstance(exception_digest, str) or re.fullmatch(r"[a-fA-F0-9]{64}", exception_digest) is None:
+                    return [], "invalid"
+                normalized_item["exception_message_sha256"] = exception_digest.lower()
+            frame = item.get("target_frame")
+            if frame is not None:
+                if (
+                    not isinstance(frame, dict)
+                    or not isinstance(frame.get("line"), int)
+                    or isinstance(frame.get("line"), bool)
+                    or frame["line"] < 1
+                    or not isinstance(frame.get("function"), str)
+                ):
+                    return [], "invalid"
+                normalized_item["target_frame"] = {
+                    "line": frame["line"],
+                    "function": frame["function"][:128],
+                }
+            results.append(normalized_item)
+        computed_stable = (
+            all_returned
+            and len(result_hashes) == record["replay_count"]
+            and len(set(result_hashes)) == 1
+        )
+        if computed_stable != record["stable"]:
+            return [], "invalid"
+        normalized.append({
+            "case_id": record["case_id"],
+            "kind": "output_stable_across_replays",
+            "replay_count": record["replay_count"],
+            "stable": computed_stable,
+            "results": results,
+        })
+    return normalized, "complete" if seen == expected else "partial"
+
+
 class IsolatedPythonTestRunner:
     """Runs only pytest in Docker, with no network and a filtered temporary copy."""
 
@@ -228,10 +359,13 @@ class IsolatedPythonTestRunner:
                             str(marker.get("actual_summary", "")), 500
                         ),
                     }
-                    for digest_field in ("actual_sha256", "exception_message_sha256"):
+                    for digest_field in ("actual_sha256", "exception_message_sha256", "replay_trace_sha256"):
                         digest_value = marker.get(digest_field)
                         if isinstance(digest_value, str) and re.fullmatch(r"[a-fA-F0-9]{64}", digest_value):
                             normalized_marker[digest_field] = digest_value.lower()
+                    replay_count = marker.get("replay_count")
+                    if isinstance(replay_count, int) and not isinstance(replay_count, bool) and 2 <= replay_count <= 4:
+                        normalized_marker["replay_count"] = replay_count
                     target_frame = marker.get("target_frame")
                     if isinstance(target_frame, dict):
                         line_number = target_frame.get("line")
@@ -357,6 +491,22 @@ class IsolatedPythonTestRunner:
                 result = self.sandbox.run(stage_path, COMMAND)
                 stdout = result.stdout or ""
                 stderr = result.stderr or ""
+                effective_evidence_metadata = dict(evidence_metadata or {})
+                replay_trace_relative_path = effective_evidence_metadata.get("replay_trace_relative_path")
+                if replay_trace_relative_path is not None:
+                    generated_relative = PurePosixPath(relative_text)
+                    expected_trace_path = generated_relative.with_suffix(".replay.json").as_posix()
+                    if replay_trace_relative_path != expected_trace_path:
+                        effective_evidence_metadata["replay_trace_records"] = []
+                        effective_evidence_metadata["replay_trace_status"] = "invalid_path"
+                    else:
+                        replay_records, replay_status = _validated_replay_trace(
+                            stage_path,
+                            replay_trace_relative_path,
+                            effective_evidence_metadata.get("replay_case_ids", []),
+                        )
+                        effective_evidence_metadata["replay_trace_records"] = replay_records
+                        effective_evidence_metadata["replay_trace_status"] = replay_status
                 if result.exit_code != 0 and (
                     "No module named pytest" in stderr
                     or "No module named pytest" in stdout
@@ -374,7 +524,7 @@ class IsolatedPythonTestRunner:
                         error="pytest_missing_from_sandbox_image",
                         sandboxed=True,
                         evidence_source=evidence_source,
-                        evidence_metadata=evidence_metadata,
+                        evidence_metadata=effective_evidence_metadata,
                         artifact_ref=artifact_ref,
                     )
                 if result.exit_code == 125:
@@ -391,7 +541,7 @@ class IsolatedPythonTestRunner:
                         error="docker_container_unavailable",
                         sandboxed=False,
                         evidence_source=evidence_source,
-                        evidence_metadata=evidence_metadata,
+                        evidence_metadata=effective_evidence_metadata,
                         artifact_ref=artifact_ref,
                     )
                 status = "passed" if result.exit_code == 0 and not result.timed_out else "failed"
@@ -407,7 +557,7 @@ class IsolatedPythonTestRunner:
                     stderr=stderr,
                     sandboxed=True,
                     evidence_source=evidence_source,
-                    evidence_metadata=evidence_metadata,
+                    evidence_metadata=effective_evidence_metadata,
                     artifact_ref=artifact_ref,
                 )
         except (SandboxUnavailable, WorkspaceStagingError, OSError) as exc:

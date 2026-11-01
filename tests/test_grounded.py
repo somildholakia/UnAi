@@ -5,6 +5,8 @@ import base64
 import hashlib
 import json
 import math
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -839,7 +841,18 @@ def test_generated_oracle_code_serializes_untrusted_text_in_json_string(tmp_path
         if isinstance(node, ast.Import)
         for alias in node.names
     ]
-    assert "os" not in imported
+    # The generated harness imports os for its fixed, no-follow replay trace writer.
+    # Caller text is serialized as JSON and must never become an os.remove call.
+    assert "os" in imported
+    generated_tree = ast.parse(generated)
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+        and node.func.attr == "remove"
+        for node in ast.walk(generated_tree)
+    )
 
 
 class FakeSandbox:
@@ -1012,7 +1025,7 @@ def test_async_grounded_function_uses_asyncio_run_in_generated_harness(tmp_path:
     assert result.status == "passed"
     generated = runner.calls[0]["content"]
     ast.parse(generated)
-    assert "import asyncio\nimport hashlib\nimport importlib.util" in generated
+    assert "import asyncio\nimport atexit\nimport copy\nimport hashlib\nimport importlib.util" in generated
     assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
@@ -1384,6 +1397,7 @@ def _property_request(
     property_kind="output_non_negative",
     argument_name=None,
     exception_name=None,
+    replay_count=1,
 ):
     return GroundedTestApprovalRequest(
         confirm="run-grounded-oracle-tests",
@@ -1398,6 +1412,7 @@ def _property_request(
                     kind=property_kind,
                     argument_name=argument_name,
                     exception_name=exception_name,
+                    replay_count=replay_count,
                 ),
                 oracle_kind="user",
                 oracle_reference="User supplied non-negative return-value property",
@@ -1415,6 +1430,214 @@ def _generated_cases(generated_source: str) -> list[dict]:
     )
     payload = ast.literal_eval(assignment.value.args[0])
     return json.loads(payload)
+
+
+def test_replay_count_model_rejects_values_above_per_case_limit() -> None:
+    with pytest.raises(ValidationError):
+        GroundedPropertyOracle(
+            kind="output_stable_across_replays",
+            replay_count=5,
+        )
+
+
+def test_replay_stability_contract_requires_explicit_bounded_invocations(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    request = _property_request(
+        snapshot,
+        property_kind="output_stable_across_replays",
+        replay_count=1,
+    )
+    with pytest.raises(GroundedVerificationError, match="at least 2 invocations"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+    request = _property_request(
+        snapshot,
+        property_kind="output_non_negative",
+        replay_count=2,
+    )
+    with pytest.raises(GroundedVerificationError, match="can set replay_count only"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+
+def test_replay_stability_contract_enforces_request_wide_invocation_budget(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    cases = [
+        GroundedOracleCase(
+            case_id=f"replay-case-{index}",
+            arguments={"value": index},
+            oracle_property=GroundedPropertyOracle(
+                kind="output_stable_across_replays",
+                replay_count=4,
+            ),
+            oracle_kind="user",
+            oracle_reference="User supplied repeatability invariant",
+        )
+        for index in range(7)
+    ]
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=cases,
+    )
+
+    with pytest.raises(GroundedVerificationError, match="24 function invocations per request"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+
+def _execute_replay_harness(
+    tmp_path: Path,
+    *,
+    source: str,
+    value,
+    expected_stable: bool,
+):
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        value=value,
+        property_kind="output_stable_across_replays",
+        replay_count=3,
+    )
+    result = verifier.run(task_id, request, workspace_root)
+    assert result.status == "passed"
+
+    generated_call = runner.calls[0]
+    staged_root = tmp_path / "replay-harness-workspace"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    trace_relative = generated_call["metadata"]["replay_trace_relative_path"]
+    trace_path = staged_root / trace_relative
+    assert trace_path.is_file()
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    record = trace["records"][0]
+    assert record["kind"] == "output_stable_across_replays"
+    assert record["replay_count"] == 3
+    assert record["stable"] is expected_stable
+    assert len(record["results"]) == 3
+    assert "actual_summary" not in json.dumps(record)
+    if expected_stable:
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert len({item["actual_sha256"] for item in record["results"]}) == 1
+    else:
+        assert completed.returncode != 0
+        assert "UNAI_COUNTEREXAMPLE:" in completed.stdout + completed.stderr
+        assert len({item["actual_sha256"] for item in record["results"]}) == 3
+    return record
+
+
+def test_replay_divergence_is_a_structured_counterexample_without_input_shrinking(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return value" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    runner.status = "failed"
+    runner.stdout = (
+        "FAILED unai_generated_tests/test_oracle.py::test_grounded_oracle_case[property-negative]\\n"
+        + "UNAI_COUNTEREXAMPLE:"
+        + json.dumps(
+            {
+                "case_id": "property-negative",
+                "actual_type": "ReplayDivergence",
+                "actual_summary": "Repeated identical inputs returned different results.",
+                "actual_sha256": "a" * 64,
+                "replay_count": 3,
+                "replay_trace_sha256": "b" * 64,
+            },
+            separators=(",", ":"),
+        )
+    )
+
+    result = verifier.run(
+        task_id,
+        _property_request(
+            fresh,
+            property_kind="output_stable_across_replays",
+            replay_count=3,
+        ),
+        workspace_root,
+    )
+
+    assert result.status == "failed"
+    assert len(result.counterexamples) == 1
+    counterexample = result.counterexamples[0]
+    assert counterexample.actual_summary.startswith("ReplayDivergence:")
+    assert counterexample.replay_count == 3
+    assert counterexample.replay_trace_sha256 == "b" * 64
+    assert result.shrinking_results == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    evidence = next(item for item in saved.evidence if item.kind == "counterexample")
+    assert evidence.metadata["replay_count"] == 3
+    assert evidence.metadata["replay_trace_sha256"] == "b" * 64
+
+
+def test_replay_stability_detects_same_process_global_state_changes(tmp_path: Path) -> None:
+    record = _execute_replay_harness(
+        tmp_path,
+        source=(
+            "counter = 0\n"
+            "def clamp(value):\n"
+            "    global counter\n"
+            "    counter += 1\n"
+            "    return value + counter\n"
+        ),
+        value=10,
+        expected_stable=False,
+    )
+    assert [item["replay_index"] for item in record["results"]] == [1, 2, 3]
+    assert all(item["status"] == "returned" for item in record["results"])
+
+
+def test_replay_stability_resets_mutable_json_inputs_but_preserves_module_state(tmp_path: Path) -> None:
+    record = _execute_replay_harness(
+        tmp_path,
+        source=(
+            "def clamp(value):\n"
+            "    value.append('new')\n"
+            "    return len(value)\n"
+        ),
+        value=["start"],
+        expected_stable=True,
+    )
+    assert len({item["actual_sha256"] for item in record["results"]}) == 1
+
+
+def test_async_replay_stability_detects_module_state_changes(tmp_path: Path) -> None:
+    record = _execute_replay_harness(
+        tmp_path,
+        source=(
+            "counter = 0\n"
+            "async def clamp(value):\n"
+            "    global counter\n"
+            "    counter += 1\n"
+            "    return value + counter\n"
+        ),
+        value=5,
+        expected_stable=False,
+    )
+    assert len({item["actual_sha256"] for item in record["results"]}) == 3
 
 
 def test_property_oracle_harness_uses_fixed_predicates_without_expected_value(tmp_path: Path) -> None:
