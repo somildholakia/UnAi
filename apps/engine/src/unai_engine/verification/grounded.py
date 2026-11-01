@@ -51,7 +51,7 @@ _LIMITATIONS = [
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
-    "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
+    "Grounded targets include undecorated module-level functions and explicitly decorated top-level-class @staticmethod/@classmethod methods; ordinary instance methods, nested classes and all other decorators remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
     "Return-value oracles require JSON-compatible results; an explicit raises_exception property may require only one of the fixed allowlisted built-in exception types, never an arbitrary caller-supplied class name.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
@@ -1087,6 +1087,7 @@ class GroundedTestVerifier:
                     "target_file": request.file_path,
                     "target_function": request.symbol_name,
                     "target_is_async": is_async,
+                    "target_invocation_kind": target_invocation_kind,
                     "target_sha256": source_sha256,
                     "generated_test_sha256": generated_sha256,
                     "parent_execution_evidence_id": parent_execution_id,
@@ -1433,6 +1434,14 @@ class GroundedTestVerifier:
             oracle_events.append(event)
 
         is_async = isinstance(function, ast.AsyncFunctionDef)
+        target_invocation_kind = "module_function"
+        if "." in request.symbol_name:
+            target_invocation_kind = (
+                "classmethod"
+                if len(function.decorator_list) == 1
+                and _decorator_name(function.decorator_list[0]) == "classmethod"
+                else "staticmethod"
+            )
         generated_content = _generated_pytest(
             request.file_path,
             request.symbol_name,
@@ -1445,6 +1454,7 @@ class GroundedTestVerifier:
             "target_file": request.file_path,
             "target_function": request.symbol_name,
             "target_is_async": is_async,
+            "target_invocation_kind": target_invocation_kind,
             "target_sha256": source_snapshot.sha256,
             "generated_test_sha256": hashlib.sha256(
                 generated_content.encode("utf-8")
