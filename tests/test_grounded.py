@@ -18,6 +18,7 @@ from unai_engine.cognition.task_compiler import compile_task
 from unai_engine.models import (
     EvidenceRecord,
     GroundedOracleAttestation,
+    GroundedOraclePublisherAttestation,
     GroundedOracleCase,
     GroundedPropertyOracle,
     GroundedTestApprovalRequest,
@@ -29,6 +30,7 @@ from unai_engine.runtime.sandbox import ExecutionResult
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, WorkspaceStagingError
 from unai_engine.verification.attestations import (
     build_oracle_attestation_statement,
+    build_publisher_artifact_statement,
     canonical_attestation_message,
 )
 from unai_engine.verification.grounded import (
@@ -243,6 +245,207 @@ def _signed_specification_request(
         ],
     )
     return request, public_key_b64, signature_b64
+
+
+def _publisher_signed_request(task_id: str, snapshot, *, spec_content: str):
+    request, _reviewer_public, _reviewer_signature = _signed_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    request.cases[0].oracle_attestation = None
+    private_key = Ed25519PrivateKey.generate()
+    issued_at = datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc)
+    artifact_uri = "https://specs.acme.example/releases/2026-11/product-spec.md"
+    artifact_revision = "release-2026.11"
+    artifact_sha256 = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
+    statement = build_publisher_artifact_statement(
+        key_id="acme-specs-2026",
+        issuer="Acme Specifications",
+        issued_at=issued_at,
+        artifact_uri=artifact_uri,
+        artifact_revision=artifact_revision,
+        artifact_sha256=artifact_sha256,
+    )
+    signature_b64 = base64.b64encode(
+        private_key.sign(canonical_attestation_message(statement))
+    ).decode("ascii")
+    public_key_b64 = base64.b64encode(
+        private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    ).decode("ascii")
+    request.cases[0].oracle_publisher_attestation = GroundedOraclePublisherAttestation(
+        key_id="acme-specs-2026",
+        issuer="Acme Specifications",
+        artifact_uri=artifact_uri,
+        artifact_revision=artifact_revision,
+        issued_at=issued_at,
+        signature_b64=signature_b64,
+    )
+    trust_entry = {
+        "public_key_b64": public_key_b64,
+        "issuer": "Acme Specifications",
+        "allowed_domains": ["specs.acme.example"],
+    }
+    return request, trust_entry, signature_b64
+
+
+def test_trusted_publisher_signature_authenticates_exact_specification_artifact(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, trust_entry, signature_b64 = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": trust_entry}
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    oracle_metadata = result.oracle_evidence[0].metadata
+    assert oracle_metadata["oracle_artifact_integrity"] == "trusted-ed25519-publisher-signature"
+    publisher = oracle_metadata["oracle_publisher_attestation"]
+    assert publisher["verified"] is True
+    assert publisher["algorithm"] == "Ed25519"
+    assert publisher["key_id"] == "acme-specs-2026"
+    assert publisher["issuer"] == "Acme Specifications"
+    assert publisher["artifact_revision"] == "release-2026.11"
+    assert publisher["artifact_sha256"] == hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
+    assert oracle_metadata["oracle_publisher_attestation_signature_b64"] == signature_b64
+    assert signature_b64 not in runner.calls[0]["content"]
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    bundle = build_proof_bundle(saved)
+    assert not any("lack a valid signature from an operator-configured trusted publisher key" in risk for risk in bundle.unresolved_risks)
+    assert any("lack a valid signature from an operator-configured trusted reviewer key" in risk for risk in bundle.unresolved_risks)
+
+
+def test_publisher_attestation_rejects_untrusted_issuer_or_domain_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    trust_entry["issuer"] = "Different Publisher"
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": trust_entry}
+
+    with pytest.raises(GroundedVerificationError, match="issuer does not match") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_publisher_attestation_rejects_artifact_uri_outside_domain_allowlist(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    trust_entry["allowed_domains"] = ["other.example"]
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": trust_entry}
+
+    with pytest.raises(GroundedVerificationError, match="not allowed") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+
+
+def test_publisher_signature_is_bound_to_revision_and_artifact_bytes(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": trust_entry}
+    request.cases[0].oracle_publisher_attestation.artifact_revision = "release-2026.12"
+
+    with pytest.raises(GroundedVerificationError, match="Publisher signature .* is invalid") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+@pytest.mark.parametrize(
+    "artifact_uri,error_match",
+    [
+        ("http://specs.acme.example/product-spec.md", "public HTTPS URL"),
+        ("https://127.0.0.1/product-spec.md", "public DNS hostname"),
+        ("https://user:pass@specs.acme.example/product-spec.md", "public HTTPS URL"),
+    ],
+)
+def test_publisher_attestation_rejects_non_public_or_unsafe_urls(artifact_uri, error_match) -> None:
+    signature_b64 = base64.b64encode(b"x" * 64).decode("ascii")
+    with pytest.raises(ValidationError, match=error_match):
+        GroundedOraclePublisherAttestation(
+            key_id="acme-specs-2026",
+            issuer="Acme Specifications",
+            artifact_uri=artifact_uri,
+            artifact_revision="release-2026.11",
+            issued_at=datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc),
+            signature_b64=signature_b64,
+        )
+
+
+def test_removed_publisher_key_id_is_revoked_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, _trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_publisher_keys = {}
+
+    with pytest.raises(GroundedVerificationError, match="not in the configured trusted publisher keyring"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_publisher_trust_config_requires_valid_keys_and_exact_domains(monkeypatch) -> None:
+    from unai_engine.config import _oracle_publisher_keys_from_env
+
+    public_key_b64 = base64.b64encode(b"x" * 32).decode("ascii")
+    monkeypatch.setenv(
+        "UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS",
+        json.dumps({
+            "acme-specs-2026": {
+                "public_key_b64": public_key_b64,
+                "issuer": "Acme Specifications",
+                "allowed_domains": ["specs.acme.example"],
+            }
+        }),
+    )
+    trust = _oracle_publisher_keys_from_env()
+    assert trust["acme-specs-2026"]["issuer"] == "Acme Specifications"
+    assert trust["acme-specs-2026"]["allowed_domains"] == ["specs.acme.example"]
+
+    monkeypatch.setenv(
+        "UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS",
+        json.dumps({
+            "acme-specs-2026": {
+                "public_key_b64": public_key_b64,
+                "issuer": "Acme Specifications",
+                "allowed_domains": ["https://specs.acme.example"],
+            }
+        }),
+    )
+    with pytest.raises(ValueError, match="invalid exact hostname"):
+        _oracle_publisher_keys_from_env()
 
 
 def test_trusted_ed25519_attestation_authenticates_exact_specification_case(tmp_path: Path) -> None:
