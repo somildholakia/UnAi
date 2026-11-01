@@ -216,7 +216,7 @@ def _generated_pytest(
     is_async: bool = False,
 ) -> str:
     payload = _json_text(cases, "Oracle cases")
-    asyncio_import = "import asyncio\\n" if is_async else ""
+    asyncio_import = "import asyncio\n" if is_async else ""
     invocation = (
         "asyncio.run(_FUNCTION(**case['arguments']))"
         if is_async
