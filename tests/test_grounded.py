@@ -437,6 +437,52 @@ def test_publisher_key_revocation_and_issuance_window_are_enforced(
     assert runner.calls == []
 
 
+def test_publisher_issuer_is_cryptographically_bound_to_signature(tmp_path: Path) -> None:
+    from unai_engine.config import TrustedOraclePublisherKey
+
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Publisher requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, public_key_b64, _issued_at = _signed_publisher_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    request.cases[0].oracle_attestation.issuer_id = "publisher-substituted.example"
+    verifier.trusted_oracle_publisher_keys = {
+        "publisher-2026": TrustedOraclePublisherKey(
+            issuer_id="publisher-substituted.example",
+            public_key_b64=public_key_b64,
+        )
+    }
+
+    with pytest.raises(GroundedVerificationError, match="signature .* is invalid") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_unknown_publisher_key_is_rejected_before_oracle_evidence(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Publisher requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, _public_key_b64, _issued_at = _signed_publisher_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_publisher_keys = {}
+
+    with pytest.raises(GroundedVerificationError, match="not in the configured trusted publisher keyring") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
 def test_publisher_keyring_supports_rotation_and_strict_issuer_metadata(monkeypatch) -> None:
     from unai_engine.config import _publisher_keys_from_env
 
