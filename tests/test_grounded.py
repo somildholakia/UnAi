@@ -1526,6 +1526,54 @@ def _execute_replay_harness(
     return record
 
 
+def test_replay_divergence_is_a_structured_counterexample_without_input_shrinking(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def next_value(value):" + chr(10) + "    return value" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    runner.status = "failed"
+    runner.stdout = (
+        "FAILED unai_generated_tests/test_oracle.py::test_grounded_oracle_case[property-negative]\\n"
+        + "UNAI_COUNTEREXAMPLE:"
+        + json.dumps(
+            {
+                "case_id": "property-negative",
+                "actual_type": "ReplayDivergence",
+                "actual_summary": "Repeated identical inputs returned different results.",
+                "actual_sha256": "a" * 64,
+                "replay_count": 3,
+                "replay_trace_sha256": "b" * 64,
+            },
+            separators=(",", ":"),
+        )
+    )
+
+    result = verifier.run(
+        task_id,
+        _property_request(
+            fresh,
+            property_kind="output_stable_across_replays",
+            replay_count=3,
+        ),
+        workspace_root,
+    )
+
+    assert result.status == "failed"
+    assert len(result.counterexamples) == 1
+    counterexample = result.counterexamples[0]
+    assert counterexample.actual_summary.startswith("ReplayDivergence:")
+    assert counterexample.replay_count == 3
+    assert counterexample.replay_trace_sha256 == "b" * 64
+    assert result.shrinking_results == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    evidence = next(item for item in saved.evidence if item.kind == "counterexample")
+    assert evidence.metadata["replay_count"] == 3
+    assert evidence.metadata["replay_trace_sha256"] == "b" * 64
+
+
 def test_replay_stability_detects_same_process_global_state_changes(tmp_path: Path) -> None:
     record = _execute_replay_harness(
         tmp_path,
