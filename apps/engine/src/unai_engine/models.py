@@ -399,6 +399,8 @@ class GroundedCounterexample(BaseModel):
     exception_message_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
     target_line: int | None = Field(default=None, ge=1)
     target_function: Annotated[str, StringConstraints(max_length=128)] | None = None
+    replay_count: int | None = Field(default=None, ge=2, le=4)
+    replay_trace_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
 
 
 class GroundedShrinkResult(BaseModel):
