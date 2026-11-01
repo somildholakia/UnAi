@@ -530,7 +530,7 @@ def test_specification_artifact_hash_is_recorded_and_verified(tmp_path: Path) ->
     assert metadata["oracle_artifact_integrity"] == "workspace-file-sha256-verified"
     assert metadata["oracle_artifact_size_bytes"] == len(spec_content.encode("utf-8"))
     assert runner.calls[0]["metadata"]["oracle_references"][0]["oracle_artifact_sha256"] == expected_hash
-    assert runner.calls[0]["metadata"]["source_fingerprint_checked_in_staged_workspace"] is True
+    assert runner.calls[0]["metadata"]["staged_fingerprint_assertions_embedded"] is True
     generated = runner.calls[0]["content"]
     staged_root = tmp_path / "staged"
     staged_root.mkdir()
