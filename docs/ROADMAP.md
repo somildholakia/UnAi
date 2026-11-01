@@ -49,7 +49,8 @@
 - [x] Add bounded recursive shrinking inside JSON-compatible nested lists/dictionaries, with 4-level depth, 128-node traversal and 12-candidate-per-argument limits under the global 24-candidate/6-round Docker budget.
 - [ ] Extend deeper or broader recursive reductions only with additional per-type correctness/resource policies; add trace/discriminating analysis.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
-- [ ] Extend grounded tests to class methods, decorated functions and broader Python signatures with explicit invocation rules.
+- [x] Support explicitly decorated top-level-class @staticmethod and @classmethod targets with bound invocation, async support, signature validation and generated-harness tests.
+- [ ] Extend grounded tests to ordinary instance methods, nested classes, other decorators and broader Python signatures only with explicit construction/invocation rules.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
 
 ## M5 — Specialist training
