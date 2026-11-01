@@ -998,8 +998,8 @@ def test_finite_float_arguments_are_shrunk_under_round_and_candidate_budgets(tmp
         if item.kind == "shrink" and item.metadata.get("case_id") == "property-negative"
     )
     assert shrink_event.metadata["iteration_count"] <= 6
-    assert bundle_or_none := build_proof_bundle(saved)
-    assert bundle_or_none.shrink_attempt_count == 24
+    bundle = build_proof_bundle(saved)
+    assert bundle.shrink_attempt_count == 24
 
 
 def test_string_arguments_are_shrunk_cumulatively(tmp_path: Path) -> None:
