@@ -1520,6 +1520,7 @@ class GroundedTestVerifier:
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
                     "oracle_property_sha256": case["oracle_property_sha256"],
                     "oracle_property": case["oracle_property"],
+                    "oracle_attestation": case["oracle_attestation_provenance"],
                     "probe_candidate_id": case["probe_candidate_id"],
                 }
                 for case in normalized
