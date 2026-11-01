@@ -108,6 +108,68 @@ def test_runner_uses_filtered_temporary_copy_and_appends_execution_evidence(tmp_
     assert snapshot.evidence[-1].passed is True
 
 
+def test_runner_loads_only_bounded_validated_replay_trace_artifacts(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _make_workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _make_task(ledger)
+
+    class ReplayTraceSandbox(FakeSandbox):
+        def run(self, workspace: Path, command: str) -> ExecutionResult:
+            result = super().run(workspace, command)
+            trace_path = workspace / "unai_generated_tests" / "test_oracle.replay.json"
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            trace_path.write_text(
+                json.dumps({
+                    "schema": "unai.replay-trace.v1",
+                    "records": [{
+                        "case_id": "repeatable-case",
+                        "kind": "output_stable_across_replays",
+                        "replay_count": 2,
+                        "stable": False,
+                        "results": [
+                            {
+                                "replay_index": 1,
+                                "status": "returned",
+                                "actual_type": "int",
+                                "actual_sha256": "1" * 64,
+                            },
+                            {
+                                "replay_index": 2,
+                                "status": "returned",
+                                "actual_type": "int",
+                                "actual_sha256": "2" * 64,
+                            },
+                        ],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            return result
+
+    runner = IsolatedPythonTestRunner(ledger, ReplayTraceSandbox())
+    result = runner.run_generated_test(
+        task_id,
+        root,
+        "unai_generated_tests/test_oracle.py",
+        "def test_placeholder():\\n    assert True\\n",
+        {
+            "replay_case_ids": ["repeatable-case"],
+            "replay_trace_relative_path": "unai_generated_tests/test_oracle.replay.json",
+        },
+    )
+
+    assert result.status == "passed"
+    records = result.evidence.metadata["replay_trace_records"]
+    assert result.evidence.metadata["replay_trace_status"] == "complete"
+    assert records[0]["case_id"] == "repeatable-case"
+    assert records[0]["stable"] is False
+    assert [item["actual_sha256"] for item in records[0]["results"]] == [
+        "1" * 64,
+        "2" * 64,
+    ]
+
+
 def test_runner_rejects_execution_without_explicit_run_tests_permission(tmp_path: Path) -> None:
     root = tmp_path / "workspaces"
     _make_workspace(root)
