@@ -8,6 +8,8 @@
 **M4 first-milestone merge commit:** 1c0e82d1bb2a75789170278e4e31c81f68d74297
 **M4 async extension PR:** https://github.com/somildholakia/UnAi/pull/3 (merged)
 **M4 async extension merge commit:** 6a95421d171433fe52d6f54722dc8924e33f3c66
+**M4 pinned-specification artifact PR:** https://github.com/somildholakia/UnAi/pull/4 (merged)
+**M4 pinned-specification artifact merge commit:** b4ce3fae5030c95bbc0ff4b509d37626d89707ff
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
 
@@ -78,13 +80,13 @@
 - Caller data is JSON-serialized into a fixed generated pytest harness. The generated test is added only to the disposable filtered workspace under unai_generated_tests; it is never written to the original workspace. Per-value and aggregate oracle payload sizes are bounded.
 - Execution requires both workspace_read and run_tests permissions already approved on the task, as well as the separate exact run-grounded-oracle-tests confirmation. Only the fixed python -m pytest -q command runs in the Docker sandbox; no model-supplied shell command is accepted.
 - The verifier records oracle provenance, source and generated-test hashes, execution status, output hashes and bounded redacted traces. It does not store the raw oracle arguments/expected values in the ledger.
-- Specification cases may optionally pin a workspace Markdown/text artifact to a SHA-256 fingerprint; the verifier re-reads the file and records the verified hash. This confirms document-byte integrity, not authorship, publisher authority or truth.
+- Specification cases may optionally pin a workspace Markdown/text artifact to a SHA-256 fingerprint. The verifier re-reads it before generating tests, checks it again before staging, and the generated harness verifies the copied artifact (and target source) before importing the target. This confirms document-byte integrity in the sandboxed copy, not authorship, publisher authority or truth.
 - Return mismatches and unexpected function exceptions that emit the generated case marker are recorded as counterexample evidence tied to the exact execution evidence ID and source SHA-256. Async functions are invoked using asyncio.run inside the generated sync pytest wrapper.
 - GET /api/tasks/{task_id}/proof-bundle combines task patch/test freshness, oracle events, counterexamples, traces, unverified probe candidates and unresolved risks.
 - The typed Engine client and read-only task MCP bridge expose proof-bundle retrieval; the MCP server does not gain test execution, patch-apply or arbitrary-code tools.
 - Proof summaries keep historical counterexamples while deriving the current overall status from the latest grounded run. A candidate is only marked verified when a completed sandbox run actually exercises its linked oracle case; an unavailable run leaves it unverified.
 - Grounded tests currently support JSON-compatible return values from synchronous and async, undecorated, module-level Python functions with keyword-addressable parameters. Async calls use asyncio.run in the generated synchronous pytest wrapper. Methods, decorators and expected-exception cases remain unsupported.
-- Oracle references remain requester-supplied. A workspace artifact hash can pin document bytes but does not authenticate authorship or publisher authority. A mismatch is evidence against the implementation *assuming the oracle is correct*; passing examples are not a proof of general correctness.
+- Oracle references remain requester-supplied. A workspace artifact hash can pin document bytes and ensure the staged document matches that pin, but does not authenticate authorship or publisher authority. A mismatch is evidence against the implementation *assuming the oracle is correct*; passing examples are not a proof of general correctness.
 
 ## CI verification
 
@@ -99,6 +101,9 @@
 - M4 async extension PR CI: https://github.com/somildholakia/UnAi/actions/runs/41290095843
 - M4 async extension post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41290137057
 - Both PR #3 workflows reported 149 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 pinned-specification artifact PR #4 was squash-merged as b4ce3fae5030c95bbc0ff4b509d37626d89707ff.
+- M4 pinned-specification artifact PR CI: https://github.com/somildholakia/UnAi/actions/runs/41290776370
+- PR #4 CI reported 155 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
@@ -116,7 +121,7 @@
 
 ## Next work after this checkpoint
 
-1. Improve source/specification oracle provenance: support durable specification artifacts or human review attestations without treating a URL/string reference as authenticated.
+1. Strengthen specification provenance beyond byte integrity: add trusted publisher signatures or explicit human-review attestations; a workspace SHA-256 pin does not identify the author or authority.
 2. Add an explicit property-oracle contract before implementing automatic input shrinking; do not reuse one exact expected output for changed inputs unless the oracle says that property is invariant.
 3. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
 4. Expand grounded tests to supported class/static methods, exception oracles and more languages only with dedicated invocation rules, execution isolation and tests.
