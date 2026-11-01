@@ -281,7 +281,11 @@ def _validate_cases(
             {
                 "case_id": case.case_id,
                 "arguments": arguments,
-                "expected_output": case.expected_output if case.oracle_property is None else None,
+                **(
+                    {"expected_output": case.expected_output}
+                    if case.oracle_property is None
+                    else {}
+                ),
                 "oracle_property": case.oracle_property.model_dump() if case.oracle_property else None,
                 "oracle_kind": case.oracle_kind,
                 "oracle_reference": case.oracle_reference,
@@ -502,7 +506,6 @@ class GroundedTestVerifier:
                             "original_case_id": case_id,
                             "arguments": candidate_arguments,
                             "arguments_sha256": _digest(candidate_arguments, "Shrink candidate arguments"),
-                            "expected_output": None,
                             "expected_sha256": None,
                         }
                     )
