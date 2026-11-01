@@ -167,7 +167,7 @@ def test_grounded_case_turns_exact_probe_into_specification_backed_test(tmp_path
 
 
 def test_failed_grounded_case_records_counterexample_and_proof_bundle(tmp_path: Path) -> None:
-    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    task_id, workspace_root, _target, _source, ledger, snapshot, probes, runner, verifier = _setup(tmp_path)
     runner.status = "failed"
     runner.stdout = (
         "FAILED unai_generated_tests/test_oracle.py::test_grounded_oracle_case[lower-edge]\n"
