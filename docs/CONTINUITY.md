@@ -24,7 +24,7 @@ Read these in order before extending unAI:
 - Counterexamples mean observed mismatch against a supplied oracle, not automatic proof that the code or specification is wrong.
 - Oracle references are requester-supplied and are not independently authenticated. Passing examples are not a semantic proof; keep acceptance gaps and unknowns visible.
 - Execution trace hashes and redacted previews are bounded evidence, not full deterministic replay. Do not include secrets in oracle inputs or expected outputs.
-- Current grounded testing supports only synchronous, undecorated module-level Python functions and JSON-compatible return values. Methods, async functions, decorators and expected-exception cases remain unsupported.
+- Current grounded testing supports synchronous and async, undecorated module-level Python functions and JSON-compatible return values. Async calls are executed via asyncio.run in the fixed harness. Methods, decorators and expected-exception cases remain unsupported.
 - Do not describe a Cloudflare scaffold as deployed until a D1 database, secrets, access policy and live URL have been verified.
 - Do not claim weights have been trained unless an adapter artifact and reproducible training manifest exist.
 - Keep Markdown as the portable Brain source of truth; SQLite indexes are rebuildable.
