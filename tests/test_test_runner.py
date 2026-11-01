@@ -155,7 +155,7 @@ def test_runner_loads_only_bounded_validated_replay_trace_artifacts(tmp_path: Pa
         "unai_generated_tests/test_oracle.py",
         "def test_placeholder():\\n    assert True\\n",
         {
-            "replay_case_ids": ["repeatable-case"],
+            "trace_case_ids": ["repeatable-case"],
             "replay_trace_relative_path": "unai_generated_tests/test_oracle.replay.json",
         },
     )
@@ -194,7 +194,7 @@ def test_runner_rejects_symlinked_replay_trace_directory(tmp_path: Path) -> None
         "unai_generated_tests/test_oracle.py",
         "def test_placeholder():\\n    assert True\\n",
         {
-            "replay_case_ids": ["repeatable-case"],
+            "trace_case_ids": ["repeatable-case"],
             "replay_trace_relative_path": "unai_generated_tests/test_oracle.replay.json",
         },
     )
