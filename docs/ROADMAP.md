@@ -40,7 +40,8 @@
 - [x] Expose proof-bundle retrieval through the typed Engine client and read-only MCP bridge.
 - [ ] Independently authenticate external specification references; current oracle references are caller-supplied.
 - [ ] Add automatic counterexample shrinking and broader trace/discriminating analysis.
-- [ ] Extend grounded tests beyond synchronous, undecorated, module-level Python functions.
+- [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
+- [ ] Extend grounded tests to class methods, decorated functions and broader Python signatures with explicit invocation rules.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
 
 ## M5 — Specialist training
