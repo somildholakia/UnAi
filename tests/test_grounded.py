@@ -714,8 +714,7 @@ def _generated_cases(generated_source: str) -> list[dict]:
 def test_property_oracle_harness_uses_fixed_predicates_without_expected_value(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
-        "def clamp(value):\\n"
-        "    return -abs(value)\\n",
+        "def clamp(value):" + chr(10) + "    return -abs(value)" + chr(10),
         encoding="utf-8",
     )
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
@@ -733,8 +732,7 @@ def test_property_oracle_harness_uses_fixed_predicates_without_expected_value(tm
 def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
-        "def clamp(value):\\n"
-        "    return -abs(value)\\n",
+        "def clamp(value):" + chr(10) + "    return -abs(value)" + chr(10),
         encoding="utf-8",
     )
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
@@ -743,7 +741,7 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
     )
     candidate_ids = {
         value: "sh-" + hashlib.sha256(
-            f"property-negative\\x00value\\x00{value}".encode("utf-8")
+            ("property-negative" + chr(0) + "value" + chr(0) + str(value)).encode("utf-8")
         ).hexdigest()[:24]
         for value in (0, 1, 2, 4, 8)
     }
@@ -761,7 +759,7 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
     runner.response_queue.extend(
         [
             ("failed", initial_marker, ""),
-            ("failed", "\\n".join(shrink_markers), ""),
+            ("failed", chr(10).join(shrink_markers), ""),
         ]
     )
 
