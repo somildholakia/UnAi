@@ -146,6 +146,7 @@ def _validate_cases(
     )
     seen: set[str] = set()
     normalized: list[dict[str, Any]] = []
+    total_payload_bytes = 0
 
     for case in request.cases:
         if case.case_id in seen:
@@ -179,8 +180,19 @@ def _validate_cases(
                     f"Oracle case {case.case_id} must preserve all inputs from probe {case.probe_candidate_id}."
                 )
 
-        _json_text(arguments, f"Arguments for case {case.case_id}")
-        _json_text(case.expected_output, f"Expected output for case {case.case_id}")
+        arguments_json = _json_text(arguments, f"Arguments for case {case.case_id}")
+        expected_json = _json_text(case.expected_output, f"Expected output for case {case.case_id}")
+        arguments_bytes = len(arguments_json.encode("utf-8"))
+        expected_bytes = len(expected_json.encode("utf-8"))
+        if arguments_bytes > 10_000 or expected_bytes > 10_000:
+            raise GroundedVerificationError(
+                f"Oracle case {case.case_id} exceeds the 10 KB per-value limit."
+            )
+        total_payload_bytes += arguments_bytes + expected_bytes
+        if total_payload_bytes > 200_000:
+            raise GroundedVerificationError(
+                "Grounded oracle payload exceeds the 200 KB aggregate limit."
+            )
         normalized.append(
             {
                 "case_id": case.case_id,

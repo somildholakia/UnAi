@@ -393,3 +393,28 @@ def test_old_counterexample_remains_historical_but_latest_pass_controls_status(t
     assert bundle.overall_status == "grounded_tests_passed"
     assert bundle.grounded_counterexample_count == 1
     assert bundle.counterexamples[0].case_id == "lower-edge"
+
+
+def test_grounded_oracle_payload_has_per_value_size_limit(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="oversized-output",
+                arguments={"value": 9},
+                expected_output="x" * 10_001,
+                oracle_kind="user",
+                oracle_reference="Oversized user-supplied expected value",
+                probe_candidate_id="probe-1",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="10 KB per-value limit"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
