@@ -39,9 +39,15 @@ UNAI_MCP_ALLOW_WORKSPACE_READ=true
 
 The model cannot choose another workspace or supply its own permission grant. Keep the Engine API token in the MCP host's server-side environment, never in a browser bundle or prompt. The grant applies to the configured workspace for every client able to invoke this MCP server; use a separate local process/configuration for a different workspace. Patch application and test execution remain separate, explicit host actions through the Engine API.
 
-## M4 probe generation — early prototype
+## M4 grounded verification — early prototype
 
-The verification subsystem can propose boundary inputs from selected Python \`if\`, \`while\` and \`assert\` conditions, including simple numeric, string, truthiness, membership and \`len()\` boundaries. These are unverified candidate inputs, not detected bugs or confirmed counterexamples. No candidate is executed and no expected result is fabricated. See [verification notes](docs/VERIFICATION.md).
+AST-generated boundary candidates remain unverified until a caller supplies explicit expected outputs and an oracle reference. The grounded workflow checks the source SHA-256, validates the function signature and probe origin, generates a fixed pytest harness and runs it only in the existing disposable Docker staging copy.
+
+- Generate unverified candidates: \`POST /api/tasks/{task_id}/probes\`.
+- Supply user/specification cases and the exact \`run-grounded-oracle-tests\` confirmation: \`POST /api/tasks/{task_id}/grounded-tests\`.
+- Retrieve the evidence bundle: \`GET /api/tasks/{task_id}/proof-bundle\`.
+
+A mismatching return value is recorded as a counterexample against the supplied oracle and the exact source hash. Execution records include output fingerprints and bounded redacted previews. The proof bundle preserves unresolved risks. Oracle references are not independently authenticated, and passing cases are not a proof of general correctness. See [verification notes](docs/VERIFICATION.md) for the schema, constraints and limitations.
 
 ## Repository code graph — Python AST prototype
 

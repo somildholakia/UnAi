@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, StringConstraints
 
 
@@ -90,7 +90,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace"]
     source: str
     claim: str
     passed: bool | None = None
@@ -242,6 +242,72 @@ class TaskProofResponse(BaseModel):
     acceptance_checks: list[str] = Field(default_factory=list)
     remaining_unknowns: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+
+class GroundedOracleCase(BaseModel):
+    case_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")]
+    arguments: dict[str, Any]
+    expected_output: Any
+    oracle_kind: Literal["user", "specification"]
+    oracle_reference: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=5, max_length=500)
+    ]
+    probe_candidate_id: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+    ] | None = None
+
+
+class GroundedTestApprovalRequest(BaseModel):
+    confirm: Literal["run-grounded-oracle-tests"]
+    file_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
+    symbol_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    source_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    cases: list[GroundedOracleCase] = Field(min_length=1, max_length=20)
+
+
+class GroundedCounterexample(BaseModel):
+    case_id: str
+    probe_candidate_id: str | None = None
+    oracle_kind: Literal["user", "specification"]
+    oracle_reference: str
+    actual_summary: str
+
+
+class GroundedTestResponse(BaseModel):
+    task_id: str
+    file_path: str
+    symbol_name: str
+    source_sha256: str
+    status: Literal["passed", "failed", "unavailable"]
+    case_count: int = Field(ge=1)
+    passed_cases: int | None = Field(default=None, ge=0)
+    counterexamples: list[GroundedCounterexample] = Field(default_factory=list)
+    execution_evidence: EvidenceRecord
+    trace_evidence: EvidenceRecord
+    oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+
+
+class TaskProofBundleResponse(BaseModel):
+    task_id: str
+    generated_at: str
+    overall_status: Literal[
+        "no_grounded_tests",
+        "grounded_tests_passed",
+        "grounded_tests_failed",
+        "grounded_tests_unavailable",
+        "counterexamples_found",
+    ]
+    task_proof: TaskProofResponse
+    grounded_case_count: int = Field(ge=0)
+    grounded_run_count: int = Field(ge=0)
+    grounded_counterexample_count: int = Field(ge=0)
+    unverified_probe_candidate_count: int = Field(ge=0)
+    counterexamples: list[GroundedCounterexample] = Field(default_factory=list)
+    oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    execution_traces: list[EvidenceRecord] = Field(default_factory=list)
+    unresolved_risks: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
 
 

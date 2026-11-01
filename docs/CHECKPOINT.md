@@ -1,9 +1,13 @@
 # Development checkpoint
 
-**Checkpoint:** M3.2 — read-only task workflow MCP bridge merged
+**Checkpoint:** M4 — grounded oracle verification first milestone implemented
 **Date:** 2026-11-01
 **Repository:** https://github.com/somildholakia/UnAi
-**Branch:** main
+**Implementation branch:** feat/m4-grounded-verification
+**Implementation PR:** https://github.com/somildholakia/UnAi/pull/2
+**Latest implementation commit:** 3778cab22767d8e554928807279fb44d695e220f
+**PR validation:** 146 tests passed; Python compileall passed
+**Base branch at implementation start:** main
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
 **Implementation PR:** https://github.com/somildholakia/UnAi/pull/1
 **Implementation commit before squash merge:** 7b10caccd780658a12619b331075da82e3e45fad
@@ -65,13 +69,32 @@
 - The MCP server intentionally does not expose patch proposals/application, test execution, shell access or permission escalation. Those remain host-mediated actions through the Engine API with separate approval.
 - The bridge is local tooling; it does not make a website or model automatically connected. An MCP-compatible host must launch/configure the server.
 
+
+### M4 — grounded adversarial verification (first milestone implemented)
+
+- The AST probe generator still produces unverified candidates; it never infers expected outputs.
+- POST /api/tasks/{task_id}/grounded-tests accepts explicit user- or specification-supplied expected JSON outputs, a human-readable oracle reference, exact source SHA-256, and optional probe candidate IDs.
+- A case linked to a probe must preserve that candidate's parameter assignments and exact JSON types. The selected synchronous, undecorated, module-level Python function's signature is inspected; unknown/missing arguments are rejected.
+- The target is re-read and its source fingerprint is checked immediately before test generation. A stale source/probe returns a conflict and does not execute.
+- Caller data is JSON-serialized into a fixed generated pytest harness. The generated test is added only to the disposable filtered workspace under unai_generated_tests; it is never written to the original workspace. Per-value and aggregate oracle payload sizes are bounded.
+- Execution requires both workspace_read and run_tests permissions already approved on the task, as well as the separate exact run-grounded-oracle-tests confirmation. Only the fixed python -m pytest -q command runs in the Docker sandbox; no model-supplied shell command is accepted.
+- The verifier records oracle provenance, source and generated-test hashes, execution status, output hashes and bounded redacted traces. It does not store the raw oracle arguments/expected values in the ledger.
+- Return mismatches and unexpected function exceptions that emit the generated case marker are recorded as counterexample evidence tied to the exact execution evidence ID and source SHA-256.
+- GET /api/tasks/{task_id}/proof-bundle combines task patch/test freshness, oracle events, counterexamples, traces, unverified probe candidates and unresolved risks.
+- The typed Engine client and read-only task MCP bridge expose proof-bundle retrieval; the MCP server does not gain test execution, patch-apply or arbitrary-code tools.
+- Proof summaries keep historical counterexamples while deriving the current overall status from the latest grounded run. A candidate is only marked verified when a completed sandbox run actually exercises its linked oracle case; an unavailable run leaves it unverified.
+- Grounded tests currently support JSON-compatible return values from synchronous, undecorated, module-level Python functions with keyword-addressable parameters. Methods, async functions, decorators and expected-exception cases are unsupported.
+- Oracle references are requester-supplied and are not independently authenticated. A mismatch is evidence against the implementation *assuming the oracle is correct*; passing examples are not a proof of general correctness.
+
 ## CI verification
 
-- PR #1 (Add read-only task workflow MCP bridge) passed the Engine test workflow on commit 7b10caccd780658a12619b331075da82e3e45fad.
-- PR GitHub Actions run: https://github.com/somildholakia/UnAi/actions/runs/41287213961
-- Post-merge GitHub Actions run: https://github.com/somildholakia/UnAi/actions/runs/41287275378
-- Both runs reported 131 tests passed; python -m compileall -q apps/engine/src training passed.
-- PR #1 was squash-merged to main as 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa.
+- M3.2 PR #1 was squash-merged to main as 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa. Its PR and post-merge workflows each reported 131 tests passed.
+- M3.2 PR CI: https://github.com/somildholakia/UnAi/actions/runs/41287213961
+- M3.2 post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41287275378
+- M4 implementation is proposed in PR #2: https://github.com/somildholakia/UnAi/pull/2
+- M4 latest PR workflow on commit 3778cab22767d8e554928807279fb44d695e220f: https://github.com/somildholakia/UnAi/actions/runs/41289312841
+- M4 latest PR workflow reported 146 tests passed; python -m compileall -q apps/engine/src training passed.
+- Earlier M4 CI failures were fixed: generated-source injection assertion now inspects AST imports, and the proof test retains the probe fixture. Do not treat those superseded commits as the final result.
 
 ## Important limits and safety boundaries
 
@@ -88,14 +111,16 @@
 
 ## Next work after this checkpoint
 
-1. Design per-user/scoped Engine credentials, revocation, rate limits and tenant isolation before any network-facing Engine deployment.
-2. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
-3. Turn unverified AST boundary candidates into reproducible tests only when expected outcomes come from specifications, existing tests or user-approved oracles.
-4. Add trace capture, failure minimization and independent/discriminating checks; keep unknowns explicit.
-5. Build a reviewed dependency-aware test image and expand safe language/test support only with dedicated tests.
-6. Deploy Brain to a real Cloudflare D1 account with read/write secrets, access controls and quotas, then connect the remote MCP bridge.
-7. Curate consented/licensed verified trajectories, train specialist adapters on appropriate GPU compute, and compare them against matched baselines.
-8. Benchmark inference, memory, energy and thermals on physical Android hardware.
+1. Merge and post-merge-verify PR #2 before describing the M4 implementation as part of main.
+2. Improve source/specification oracle provenance: support durable specification artifacts or human review attestations without treating a URL/string reference as authenticated.
+3. Add an explicit property-oracle contract before implementing automatic input shrinking; do not reuse one exact expected output for changed inputs unless the oracle says that property is invariant.
+4. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
+5. Expand grounded tests to supported methods, async functions, exceptions and more languages only with dedicated execution isolation and tests.
+6. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
+7. Design per-user/scoped Engine credentials, revocation, rate limits and tenant isolation before network-facing Engine deployment.
+8. Deploy Brain to a real Cloudflare D1 account with read/write secrets, access controls and quotas, then connect the remote MCP bridge.
+9. Curate consented/licensed verified trajectories, train specialist adapters on suitable GPU compute, and compare them against matched baselines.
+10. Benchmark inference, memory, energy and thermals on physical Android hardware.
 
 ## Local setup reminders
 

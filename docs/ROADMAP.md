@@ -24,17 +24,24 @@
 - [x] Separately confirmed fixed pytest runner in Docker, using a filtered temporary copy and appended execution evidence.
 - [x] Task-scoped source snapshots and SHA-256-bound, one-file patch proposals with a separate apply confirmation.
 - [x] Evidence summary that requires a passing test event newer than the latest applied patch.
-- [x] Post-patch Python parse-quality refresh; the proof summary treats pre-patch quality events as stale.
-- [x] Typed Engine client and local read-only task MCP bridge for compilation, configured inspection, file snapshots, boundary probes, evidence and proof.
+- [x] Post-patch Python parse-quality refresh; the proof summary treats pre-patch quality results as stale.
+- [x] Typed Engine client and local read-only task MCP bridge for compilation, configured inspection, file snapshots, boundary probes, evidence and proof bundles.
 - [x] Isolated temporary Docker test workspace for fixed Python pytest invocation.
 - [x] Append-only patch and test evidence with explicit approval gates; arbitrary commands and multi-file patch application remain disabled.
 - [x] Explicit read/write/test permissions and a second confirmation for patch apply/test run.
 
-## M4 — Adversarial verification
+## M4 — Adversarial verification (grounded first milestone delivered)
 - [x] Conservative Python AST boundary-probe candidate generation for simple branch conditions (unverified only).
-- [ ] Turn unverified AST boundary candidates into grounded tests and targeted counterexamples.
-- [ ] Verify claims against execution traces and independent checks.
-- [ ] Return proof bundles with unresolved risks, never just a confidence score.
+- [x] Attach explicit user/specification expected outputs to candidate probes without inferring expected values.
+- [x] Bind grounded cases to the exact source SHA-256, selected file/function and probe-candidate provenance.
+- [x] Run fixed generated pytest cases in the disposable Docker staging copy after workspace_read, run_tests and a separate exact confirmation.
+- [x] Record output mismatches as source-hash-bound counterexample evidence.
+- [x] Preserve bounded execution traces, output fingerprints and unresolved assumptions in proof bundles.
+- [x] Expose proof-bundle retrieval through the typed Engine client and read-only MCP bridge.
+- [ ] Independently authenticate external specification references; current oracle references are caller-supplied.
+- [ ] Add automatic counterexample shrinking and broader trace/discriminating analysis.
+- [ ] Extend grounded tests beyond synchronous, undecorated, module-level Python functions.
+- [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
 
 ## M5 — Specialist training
 - [ ] Collect consented, licensed and verified trajectories.

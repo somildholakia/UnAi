@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
@@ -188,6 +189,9 @@ class IsolatedPythonTestRunner:
         stderr: str = "",
         error: str | None = None,
         sandboxed: bool = False,
+        evidence_source: str = "docker-sandbox",
+        evidence_metadata: dict[str, Any] | None = None,
+        artifact_ref: str | None = None,
     ) -> TaskTestRunResponse:
         now = datetime.now(timezone.utc).isoformat()
         stdout_bytes = stdout.encode("utf-8", errors="replace")
@@ -196,6 +200,7 @@ class IsolatedPythonTestRunner:
             "command": COMMAND,
             "exit_code": exit_code,
             "timed_out": timed_out,
+            "sandboxed": sandboxed,
             "staged_files": staged.files if staged else 0,
             "staged_bytes": staged.bytes_copied if staged else 0,
             "skipped_files": staged.skipped_files if staged else 0,
@@ -204,14 +209,36 @@ class IsolatedPythonTestRunner:
         }
         if error:
             metadata["error"] = error
+        if evidence_metadata:
+            metadata.update(evidence_metadata)
+        if evidence_source == "grounded-oracle-sandbox":
+            markers: list[dict[str, str]] = []
+            captured_output = "\n".join([stdout, stderr])
+            for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", captured_output):
+                try:
+                    marker = json.loads(match)
+                except json.JSONDecodeError:
+                    continue
+                case_id = marker.get("case_id")
+                if isinstance(case_id, str):
+                    markers.append(
+                        {
+                            "case_id": case_id[:80],
+                            "actual_type": str(marker.get("actual_type", "unknown"))[:120],
+                            "actual_summary": _redact_preview(
+                                str(marker.get("actual_summary", "")), 500
+                            ),
+                        }
+                    )
+            metadata["counterexample_markers"] = markers
         evidence = EvidenceRecord(
             evidence_id=uuid4().hex,
             task_id=snapshot.task_id,
             kind="execution",
-            source="docker-sandbox",
+            source=evidence_source,
             claim=claim,
             passed=passed,
-            artifact_ref=f"task:{snapshot.task_id}/python-tests",
+            artifact_ref=artifact_ref or f"task:{snapshot.task_id}/python-tests",
             metadata=metadata,
             created_at=now,
         )
@@ -226,12 +253,43 @@ class IsolatedPythonTestRunner:
             staged_files=staged.files if staged else 0,
             staged_bytes=staged.bytes_copied if staged else 0,
             skipped_files=staged.skipped_files if staged else 0,
-            stdout_preview=_redact_preview(stdout),
-            stderr_preview=_redact_preview(stderr),
+            stdout_preview=_redact_preview(
+                stdout, limit=10_000 if evidence_source == "grounded-oracle-sandbox" else 2_000
+            ),
+            stderr_preview=_redact_preview(
+                stderr, limit=10_000 if evidence_source == "grounded-oracle-sandbox" else 2_000
+            ),
             evidence=evidence,
         )
 
-    def run(self, task_id: str, workspace_root: Path) -> TaskTestRunResponse:
+    def run_generated_test(
+        self,
+        task_id: str,
+        workspace_root: Path,
+        generated_test_path: str,
+        generated_test_content: str,
+        evidence_metadata: dict[str, Any],
+    ) -> TaskTestRunResponse:
+        """Run one server-generated oracle test alongside the filtered workspace copy."""
+        return self.run(
+            task_id,
+            workspace_root,
+            generated_test=(generated_test_path, generated_test_content),
+            evidence_source="grounded-oracle-sandbox",
+            evidence_metadata=evidence_metadata,
+            artifact_ref=f"task:{task_id}/grounded-oracle-tests",
+        )
+
+    def run(
+        self,
+        task_id: str,
+        workspace_root: Path,
+        *,
+        generated_test: tuple[str, str] | None = None,
+        evidence_source: str = "docker-sandbox",
+        evidence_metadata: dict[str, Any] | None = None,
+        artifact_ref: str | None = None,
+    ) -> TaskTestRunResponse:
         snapshot = self.ledger.get_snapshot(task_id)
         if snapshot is None:
             raise KeyError(task_id)
@@ -260,6 +318,27 @@ class IsolatedPythonTestRunner:
                     max_files=self.max_files,
                     max_bytes=self.max_bytes,
                 )
+                if generated_test is not None:
+                    relative_text, generated_content = generated_test
+                    relative = PurePosixPath(relative_text)
+                    if (
+                        relative.is_absolute()
+                        or len(relative.parts) != 2
+                        or relative.parts[0] != "unai_generated_tests"
+                        or relative.suffix != ".py"
+                        or any(part in {"", ".", ".."} for part in relative.parts)
+                        or len(generated_content.encode("utf-8")) > 300_000
+                    ):
+                        raise WorkspaceStagingError("Generated test path or size is outside the allowed boundary.")
+                    generated_path = stage_path.joinpath(*relative.parts)
+                    generated_path.parent.mkdir(parents=True, exist_ok=True)
+                    with generated_path.open("x", encoding="utf-8", newline="") as handle:
+                        handle.write(generated_content)
+                    staged = StagedWorkspace(
+                        staged.files + 1,
+                        staged.bytes_copied + len(generated_content.encode("utf-8")),
+                        staged.skipped_files,
+                    )
                 result = self.sandbox.run(stage_path, COMMAND)
                 stdout = result.stdout or ""
                 stderr = result.stderr or ""
@@ -279,6 +358,9 @@ class IsolatedPythonTestRunner:
                         stderr=stderr,
                         error="pytest_missing_from_sandbox_image",
                         sandboxed=True,
+                        evidence_source=evidence_source,
+                        evidence_metadata=evidence_metadata,
+                        artifact_ref=artifact_ref,
                     )
                 if result.exit_code == 125:
                     return self._response(
@@ -293,6 +375,9 @@ class IsolatedPythonTestRunner:
                         stderr=stderr,
                         error="docker_container_unavailable",
                         sandboxed=False,
+                        evidence_source=evidence_source,
+                        evidence_metadata=evidence_metadata,
+                        artifact_ref=artifact_ref,
                     )
                 status = "passed" if result.exit_code == 0 and not result.timed_out else "failed"
                 return self._response(
@@ -306,6 +391,9 @@ class IsolatedPythonTestRunner:
                     stdout=stdout,
                     stderr=stderr,
                     sandboxed=True,
+                    evidence_source=evidence_source,
+                    evidence_metadata=evidence_metadata,
+                    artifact_ref=artifact_ref,
                 )
         except (SandboxUnavailable, WorkspaceStagingError, OSError) as exc:
             return self._response(
@@ -317,4 +405,7 @@ class IsolatedPythonTestRunner:
                 stdout=stdout,
                 stderr=stderr,
                 error=type(exc).__name__,
+                evidence_source=evidence_source,
+                evidence_metadata=evidence_metadata,
+                artifact_ref=artifact_ref,
             )

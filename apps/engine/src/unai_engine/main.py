@@ -17,7 +17,8 @@ from unai_engine.models import (
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
     WorkspaceFileSnapshot, TaskProofResponse, ProbeRequest, ProbeResponse,
-    TaskQualityCheckResponse, EvidenceRecord,
+    TaskQualityCheckResponse, EvidenceRecord, GroundedTestApprovalRequest,
+    GroundedTestResponse, TaskProofBundleResponse,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
 from unai_engine.plugins.builtin import build_registry
@@ -31,6 +32,11 @@ from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchReject
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 from unai_engine.verification.proof import summarize_proof
 from unai_engine.verification.probes import BoundaryProbeGenerator, ProbeTargetError
+from unai_engine.verification.grounded import (
+    GroundedTestVerifier,
+    GroundedVerificationError,
+    build_proof_bundle,
+)
 from unai_engine.security import api_access_error
 
 provider = OpenAICompatibleProvider(
@@ -52,6 +58,11 @@ task_test_runner = IsolatedPythonTestRunner(
 )
 patch_manager = PatchManager(evidence_ledger)
 probe_generator = BoundaryProbeGenerator(evidence_ledger)
+grounded_test_verifier = GroundedTestVerifier(
+    evidence_ledger,
+    patch_manager,
+    task_test_runner,
+)
 
 app = FastAPI(
     title="unAI Engine",
@@ -222,6 +233,31 @@ def generate_task_probes(task_id: str, request: ProbeRequest) -> ProbeResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/tasks/{task_id}/grounded-tests", response_model=GroundedTestResponse)
+async def run_grounded_task_tests(
+    task_id: str,
+    request: GroundedTestApprovalRequest,
+) -> GroundedTestResponse:
+    """Run explicitly grounded expected-output cases in the disposable Docker sandbox."""
+    if request.confirm != "run-grounded-oracle-tests":
+        raise HTTPException(status_code=422, detail="Explicit grounded-test confirmation is required.")
+    try:
+        return await asyncio.to_thread(
+            grounded_test_verifier.run,
+            task_id,
+            request,
+            settings.workspace_root,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+    except PatchRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GroundedVerificationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @app.post("/api/tasks/{task_id}/quality-check", response_model=TaskQualityCheckResponse)
 async def refresh_task_quality(task_id: str) -> TaskQualityCheckResponse:
     """Re-index the approved workspace after changes and append fresh parse evidence."""
@@ -277,6 +313,15 @@ def task_proof(task_id: str) -> TaskProofResponse:
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Task evidence not found.")
     return summarize_proof(snapshot)
+
+
+@app.get("/api/tasks/{task_id}/proof-bundle", response_model=TaskProofBundleResponse)
+def task_proof_bundle(task_id: str) -> TaskProofBundleResponse:
+    """Return grounded oracle cases, counterexamples, execution traces and unresolved risks."""
+    snapshot = evidence_ledger.get_snapshot(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Task evidence not found.")
+    return build_proof_bundle(snapshot)
 
 
 @app.get("/api/tasks/{task_id}/evidence", response_model=TaskEvidenceSnapshot)
