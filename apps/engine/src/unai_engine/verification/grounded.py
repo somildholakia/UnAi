@@ -844,18 +844,18 @@ _FILESYSTEM_AUDIT_REQUEST_BYTES = 0
 _FILESYSTEM_AUDIT_MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _FILESYSTEM_AUDIT_MAX_FILE_BYTES = 2 * 1024 * 1024
 _FILESYSTEM_AUDIT_MAX_ENTRIES = 1024
-_FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES = {
+_FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES = {{
     "__pycache__",
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
-}
+}}
 
 
 def _workspace_filesystem_snapshot():
     """Hash a bounded manifest of the disposable workspace without following symlinks."""
     global _FILESYSTEM_AUDIT_REQUEST_BYTES
-    manifest = {}
+    manifest = {{}}
     snapshot_bytes = 0
     entry_count = 0
 
@@ -884,16 +884,16 @@ def _workspace_filesystem_snapshot():
                 info = candidate.lstat()
                 if stat.S_ISLNK(info.st_mode):
                     target = os.readlink(candidate)
-                    if not add_entry(relative_path, {
+                    if not add_entry(relative_path, {{
                         "kind": "symlink",
                         "target_sha256": hashlib.sha256(
                             target.encode("utf-8", errors="replace")
                         ).hexdigest(),
-                    }):
+                    }}):
                         return unavailable("entry_limit_exceeded")
                     dirs.remove(name)
                 elif stat.S_ISDIR(info.st_mode):
-                    if not add_entry(relative_path, {"kind": "directory"}):
+                    if not add_entry(relative_path, {{"kind": "directory"}}):
                         return unavailable("entry_limit_exceeded")
                 else:
                     dirs.remove(name)
@@ -905,12 +905,12 @@ def _workspace_filesystem_snapshot():
                 info = candidate.lstat()
                 if stat.S_ISLNK(info.st_mode):
                     target = os.readlink(candidate)
-                    record = {
+                    record = {{
                         "kind": "symlink",
                         "target_sha256": hashlib.sha256(
                             target.encode("utf-8", errors="replace")
                         ).hexdigest(),
-                    }
+                    }}
                 elif stat.S_ISREG(info.st_mode):
                     if info.st_size > _FILESYSTEM_AUDIT_MAX_FILE_BYTES:
                         return unavailable("file_size_limit_exceeded")
@@ -945,11 +945,11 @@ def _workspace_filesystem_snapshot():
                     if bytes_read != opened.st_size:
                         return unavailable("file_changed_during_snapshot")
                     snapshot_bytes += bytes_read
-                    record = {
+                    record = {{
                         "kind": "file",
                         "size_bytes": bytes_read,
                         "sha256": digest.hexdigest(),
-                    }
+                    }}
                 else:
                     return unavailable("unsupported_file_type")
                 if not add_entry(relative_path, record):
@@ -971,13 +971,13 @@ def _workspace_filesystem_delta(before, after):
         for path in set(before) | set(after)
         if before.get(path) != after.get(path)
     )
-    return {
+    return {{
         "before_sha256": _workspace_filesystem_digest(before),
         "after_sha256": _workspace_filesystem_digest(after),
         "changed_entry_count": len(changed_paths),
         "changed_paths_sha256": _json_sha256(changed_paths),
         "entry_count": len(after),
-    }
+    }}
 
 
 def _record_replay_trace(record):
