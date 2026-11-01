@@ -807,6 +807,24 @@ def _target_exception_frame(exc):
     return target_frames[-1] if target_frames else None
 
 
+def _is_native_json_value(value, depth=0):
+    if depth > 24:
+        return False
+    value_type = type(value)
+    if value is None or value_type in (str, bool, int):
+        return True
+    if value_type is float:
+        return math.isfinite(value)
+    if value_type is list:
+        return all(_is_native_json_value(item, depth + 1) for item in value)
+    if value_type is dict:
+        return all(
+            type(key) is str and _is_native_json_value(item, depth + 1)
+            for key, item in value.items()
+        )
+    return False
+
+
 def _record_replay_trace(record):
     if _REPLAY_TRACE_PATH is not None and len(_REPLAY_TRACE_RECORDS) < 20:
         _REPLAY_TRACE_RECORDS.append(record)
@@ -879,6 +897,8 @@ def test_grounded_oracle_case(case):
     ):
         replay_results = []
         first_result_sha256 = None
+        first_result_value = None
+        first_result_recorded = False
         first_exception_frame = None
         stable = True
         replay_count = property_spec["replay_count"]
@@ -901,7 +921,7 @@ def test_grounded_oracle_case(case):
                 }})
                 continue
             actual_sha256 = _json_sha256(actual)
-            if actual_sha256 is None:
+            if actual_sha256 is None or not _is_native_json_value(actual):
                 stable = False
                 replay_results.append({{
                     "replay_index": replay_index + 1,
@@ -916,9 +936,15 @@ def test_grounded_oracle_case(case):
                 "actual_type": type(actual).__name__[:120],
                 "actual_sha256": actual_sha256,
             }})
-            if first_result_sha256 is None:
+            captured_result = copy.deepcopy(actual)
+            if not first_result_recorded:
                 first_result_sha256 = actual_sha256
-            elif actual_sha256 != first_result_sha256:
+                first_result_value = captured_result
+                first_result_recorded = True
+            elif (
+                actual_sha256 != first_result_sha256
+                or not _strict_equal(captured_result, first_result_value)
+            ):
                 stable = False
 
         replay_record = {{
