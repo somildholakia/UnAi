@@ -406,6 +406,8 @@ class GroundedCounterexample(BaseModel):
     filesystem_after_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
     filesystem_changed_entry_count: int | None = Field(default=None, ge=0)
     filesystem_changed_paths_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+    filesystem_entry_count: int | None = Field(default=None, ge=0)
+    filesystem_bytes_hashed: int | None = Field(default=None, ge=0)
 
 
 class GroundedShrinkResult(BaseModel):
