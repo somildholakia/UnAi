@@ -130,6 +130,10 @@
 - M4 finite-float PR CI: https://github.com/somildholakia/UnAi/actions/runs/41293595602
 - M4 finite-float post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41293647015
 - Both PR #9 workflows reported 171 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 bounded string shrinking PR #11 was squash-merged as 6773b22ca7df5b64d70f86d94179b4e247d339e6.
+- M4 string-shrinking PR CI: https://github.com/somildholakia/UnAi/actions/runs/41294014101
+- M4 string-shrinking post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41294070349
+- Both PR #11 workflows reported 173 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
