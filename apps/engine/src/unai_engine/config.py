@@ -6,6 +6,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -70,20 +71,51 @@ def _oracle_publisher_keys_from_env() -> dict[str, dict[str, Any]]:
             or not isinstance(entry, dict)
         ):
             raise ValueError("Publisher key entries require safe string IDs and object values.")
+        allowed_fields = {
+            "public_key_b64", "issuer", "allowed_domains",
+            "not_before", "not_after", "revoked",
+        }
         public_key_b64 = entry.get("public_key_b64")
         issuer = entry.get("issuer")
         domains = entry.get("allowed_domains")
+        revoked = entry.get("revoked", False)
         if (
-            not isinstance(public_key_b64, str)
+            set(entry) - allowed_fields
+            or not isinstance(public_key_b64, str)
             or not isinstance(issuer, str)
             or not 2 <= len(issuer.strip()) <= 128
             or not isinstance(domains, list)
             or not 1 <= len(domains) <= 20
             or not all(isinstance(domain, str) for domain in domains)
+            or not isinstance(revoked, bool)
         ):
             raise ValueError(
-                f"Publisher key {key_id!r} requires public_key_b64, issuer and 1-20 allowed_domains."
+                f"Publisher key {key_id!r} requires public_key_b64, issuer, 1-20 allowed_domains and a boolean revoked flag."
             )
+
+        def parse_window_bound(value: object, field_name: str) -> datetime | None:
+            if value is None:
+                return None
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"Publisher key {key_id!r} {field_name} must be a timezone-aware ISO-8601 timestamp."
+                )
+            try:
+                parsed_time = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Publisher key {key_id!r} {field_name} is not a valid ISO-8601 timestamp."
+                ) from exc
+            if parsed_time.tzinfo is None or parsed_time.utcoffset() is None:
+                raise ValueError(
+                    f"Publisher key {key_id!r} {field_name} must include a timezone."
+                )
+            return parsed_time
+
+        not_before = parse_window_bound(entry.get("not_before"), "not_before")
+        not_after = parse_window_bound(entry.get("not_after"), "not_after")
+        if not_before is not None and not_after is not None and not_before >= not_after:
+            raise ValueError(f"Publisher key {key_id!r} has an invalid issuance window.")
         try:
             public_key = base64.b64decode(public_key_b64, validate=True)
         except (ValueError, binascii.Error) as exc:
@@ -117,6 +149,9 @@ def _oracle_publisher_keys_from_env() -> dict[str, dict[str, Any]]:
             "public_key_b64": public_key_b64,
             "issuer": issuer.strip(),
             "allowed_domains": normalized_domains,
+            "not_before": not_before,
+            "not_after": not_after,
+            "revoked": revoked,
         }
     return validated
 
