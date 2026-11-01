@@ -765,33 +765,28 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
         encoding="utf-8",
     )
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
-    initial_marker = (
-        'UNAI_COUNTEREXAMPLE:{"case_id":"property-negative","actual_type":"int","actual_summary":"-9"}'
-    )
-    candidate_ids = {
-        value: "sh-" + hashlib.sha256(
-            ("property-negative" + chr(0) + "value" + chr(0) + str(value)).encode("utf-8")
-        ).hexdigest()[:24]
-        for value in (0, 1, 2, 4, 8)
-    }
-    shrink_markers = [
-        "UNAI_COUNTEREXAMPLE:" + json.dumps(
-            {
-                "case_id": candidate_ids[value],
-                "actual_type": "int",
-                "actual_summary": str(-value),
-            },
-            separators=(",", ":"),
-        )
-        for value in (1, 2, 4, 8)
-    ]
-    runner.response_queue.extend(
-        [
-            ("failed", initial_marker, ""),
-            ("failed", chr(10).join(shrink_markers), ""),
-        ]
-    )
 
+    def evaluate_generated_cases(generated_source, evidence_source, evidence_metadata):
+        markers = []
+        for case in _generated_cases(generated_source):
+            value = case["arguments"]["value"]
+            actual = -abs(value)
+            if actual < 0:
+                markers.append(
+                    "UNAI_COUNTEREXAMPLE:" + json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "actual_type": "int",
+                            "actual_summary": str(actual),
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+        if markers:
+            return "failed", chr(10).join(markers), ""
+        return "passed", "", ""
+
+    runner.generated_responder = evaluate_generated_cases
     result = verifier.run(task_id, _property_request(fresh), workspace_root)
 
     assert result.status == "failed"
@@ -805,9 +800,8 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
     assert runner.calls[1]["metadata"]["parent_execution_evidence_id"] == result.execution_evidence.evidence_id
     next_round = _generated_cases(runner.calls[2]["content"])
     assert [item["arguments"]["value"] for item in next_round] == [0]
-    assert runner.calls[2]["metadata"]["previous_shrink_execution_evidence_id"] == (
-        runner.calls[1]["metadata"].get("execution_evidence_id")
-    ) or runner.calls[2]["metadata"]["shrink_round"] == 2
+    assert runner.calls[2]["metadata"]["previous_shrink_execution_evidence_id"] == "run-2"
+    assert runner.calls[2]["metadata"]["shrink_round"] == 2
     shrink = result.shrinking_results[0]
     assert shrink.status == "smaller_failure_observed"
     assert shrink.attempts == 6
@@ -820,10 +814,11 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
     assert saved is not None
     bundle = build_proof_bundle(saved)
     assert bundle.overall_status == "counterexamples_found"
-    assert bundle.shrink_attempt_count == 5
+    assert bundle.shrink_attempt_count == 6
     assert bundle.shrunk_counterexample_count == 1
     assert any(item.source == "grounded-oracle-shrink-sandbox" for item in saved.evidence)
     assert any(item.source == "grounded-shrink-trace" for item in saved.evidence)
+
 
 def test_cumulative_shrinking_reduces_two_integer_arguments_across_rounds(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
