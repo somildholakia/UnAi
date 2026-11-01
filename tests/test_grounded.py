@@ -1421,6 +1421,14 @@ def _generated_cases(generated_source: str) -> list[dict]:
     return json.loads(payload)
 
 
+def test_replay_count_model_rejects_values_above_per_case_limit() -> None:
+    with pytest.raises(ValidationError):
+        GroundedPropertyOracle(
+            kind="output_stable_across_replays",
+            replay_count=5,
+        )
+
+
 def test_replay_stability_contract_requires_explicit_bounded_invocations(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
 
@@ -1603,6 +1611,22 @@ def test_replay_stability_resets_mutable_json_inputs_but_preserves_module_state(
         expected_stable=True,
     )
     assert len({item["actual_sha256"] for item in record["results"]}) == 1
+
+
+def test_async_replay_stability_detects_module_state_changes(tmp_path: Path) -> None:
+    record = _execute_replay_harness(
+        tmp_path,
+        source=(
+            "counter = 0\\n"
+            "async def clamp(value):\\n"
+            "    global counter\\n"
+            "    counter += 1\\n"
+            "    return value + counter\\n"
+        ),
+        value=5,
+        expected_stable=False,
+    )
+    assert len({item["actual_sha256"] for item in record["results"]}) == 3
 
 
 def test_property_oracle_harness_uses_fixed_predicates_without_expected_value(tmp_path: Path) -> None:
