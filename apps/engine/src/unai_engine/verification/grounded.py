@@ -36,7 +36,7 @@ _MAX_SHRINK_ROUNDS = 6
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
-    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to integer arguments and at most 24 deterministic candidates per run; it reports the smallest observed failure, not a globally minimal input.",
+    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to integer arguments, 24 deterministic candidates and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
