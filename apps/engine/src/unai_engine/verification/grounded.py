@@ -1064,6 +1064,92 @@ def test_grounded_oracle_case(case):
     property_spec = case.get("oracle_property")
     if (
         property_spec is not None
+        and property_spec["kind"] == "workspace_filesystem_unchanged"
+    ):
+        before_manifest, before_bytes, before_reason = _workspace_filesystem_snapshot()
+        if before_manifest is None:
+            _record_replay_trace({{
+                "case_id": case["case_id"],
+                "kind": "workspace_filesystem_unchanged",
+                "status": "unavailable",
+                "reason_code": before_reason,
+            }})
+            return
+
+        invocation_exception = None
+        try:
+            actual = {invocation}
+        except Exception as exc:
+            invocation_exception = exc
+
+        after_manifest, after_bytes, after_reason = _workspace_filesystem_snapshot()
+        if after_manifest is None:
+            _record_replay_trace({{
+                "case_id": case["case_id"],
+                "kind": "workspace_filesystem_unchanged",
+                "status": "unavailable",
+                "reason_code": after_reason,
+            }})
+            return
+
+        filesystem_delta = _workspace_filesystem_delta(
+            before_manifest, after_manifest
+        )
+        unchanged = filesystem_delta["changed_entry_count"] == 0
+        audit_record = {{
+            "case_id": case["case_id"],
+            "kind": "workspace_filesystem_unchanged",
+            "status": "complete",
+            "unchanged": unchanged,
+            "before_sha256": filesystem_delta["before_sha256"],
+            "after_sha256": filesystem_delta["after_sha256"],
+            "changed_entry_count": filesystem_delta["changed_entry_count"],
+            "changed_paths_sha256": filesystem_delta["changed_paths_sha256"],
+            "entry_count": filesystem_delta["entry_count"],
+            "bytes_hashed": before_bytes + after_bytes,
+        }}
+        _record_replay_trace(audit_record)
+
+        if invocation_exception is not None or not unchanged:
+            details = {{
+                "case_id": case["case_id"],
+                "actual_type": (
+                    type(invocation_exception).__name__
+                    if invocation_exception is not None
+                    else "WorkspaceMutation"
+                ),
+                "actual_summary": (
+                    "The target changed the disposable workspace filesystem."
+                    if invocation_exception is None
+                    else "The target raised an exception during the workspace filesystem audit."
+                ),
+                "actual_sha256": filesystem_delta["after_sha256"],
+                "exception_message_sha256": (
+                    hashlib.sha256(
+                        str(invocation_exception).encode("utf-8", errors="replace")
+                    ).hexdigest()
+                    if invocation_exception is not None
+                    else None
+                ),
+                "target_frame": (
+                    _target_exception_frame(invocation_exception)
+                    if invocation_exception is not None
+                    else None
+                ),
+                "filesystem_before_sha256": filesystem_delta["before_sha256"],
+                "filesystem_after_sha256": filesystem_delta["after_sha256"],
+                "filesystem_changed_entry_count": filesystem_delta["changed_entry_count"],
+                "filesystem_changed_paths_sha256": filesystem_delta["changed_paths_sha256"],
+                "filesystem_entry_count": filesystem_delta["entry_count"],
+                "filesystem_bytes_hashed": before_bytes + after_bytes,
+            }}
+            raise AssertionError(
+                "UNAI_COUNTEREXAMPLE:" + json.dumps(details, sort_keys=True, separators=(",", ":"))
+            ) from invocation_exception
+        return
+
+    if (
+        property_spec is not None
         and property_spec["kind"] == "output_stable_across_replays"
     ):
         replay_results = []
