@@ -377,17 +377,43 @@ def test_publisher_signature_is_bound_to_revision_and_artifact_bytes(tmp_path: P
     assert not any(item.kind == "oracle" for item in saved.evidence)
 
 
-def test_publisher_attestation_rejects_non_https_or_private_style_urls() -> None:
+@pytest.mark.parametrize(
+    "artifact_uri,error_match",
+    [
+        ("http://specs.acme.example/product-spec.md", "public HTTPS URL"),
+        ("https://127.0.0.1/product-spec.md", "public DNS hostname"),
+        ("https://user:pass@specs.acme.example/product-spec.md", "public HTTPS URL"),
+    ],
+)
+def test_publisher_attestation_rejects_non_public_or_unsafe_urls(artifact_uri, error_match) -> None:
     signature_b64 = base64.b64encode(b"x" * 64).decode("ascii")
-    with pytest.raises(ValidationError, match="public HTTPS URL"):
+    with pytest.raises(ValidationError, match=error_match):
         GroundedOraclePublisherAttestation(
             key_id="acme-specs-2026",
             issuer="Acme Specifications",
-            artifact_uri="http://specs.acme.example/product-spec.md",
+            artifact_uri=artifact_uri,
             artifact_revision="release-2026.11",
             issued_at=datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc),
             signature_b64=signature_b64,
         )
+
+
+def test_removed_publisher_key_id_is_revoked_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, _trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_publisher_keys = {}
+
+    with pytest.raises(GroundedVerificationError, match="not in the configured trusted publisher keyring"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
 
 
 def test_publisher_trust_config_requires_valid_keys_and_exact_domains(monkeypatch) -> None:
