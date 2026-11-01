@@ -1012,6 +1012,7 @@ class GroundedTestVerifier:
                         "arguments_sha256": case["arguments_sha256"],
                         "expected_sha256": case["expected_sha256"],
                         "oracle_property_sha256": case["oracle_property_sha256"],
+                        "oracle_property": case["oracle_property"],
                         "oracle_property_kind": (
                             case["oracle_property"]["kind"]
                             if case["oracle_property"]
@@ -1181,6 +1182,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
             probe_candidate_id=item.metadata.get("probe_candidate_id"),
             oracle_kind=item.metadata.get("oracle_kind", "user"),
             oracle_reference=str(item.metadata.get("oracle_reference", "Unspecified oracle reference")),
+            oracle_property=item.metadata.get("oracle_property"),
             actual_summary=(
                 f"{item.metadata.get('actual_type', 'unknown')}: "
                 f"{item.metadata.get('actual_summary', '')}"
