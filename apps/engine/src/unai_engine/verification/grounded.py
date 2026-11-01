@@ -1594,15 +1594,29 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     if not oracle_events:
         risks.append("No user- or specification-referenced exact or property oracle contracts have been executed.")
     else:
-        risks.append(
-            "Oracle provenance is requester-supplied; a workspace artifact hash proves content integrity only, not publisher identity, authorship, authority or correctness."
-        )
-        if any(
-            item.metadata.get("oracle_kind") == "specification"
-            and not item.metadata.get("oracle_artifact_sha256")
-            for item in oracle_events
-        ):
+        specification_oracles = [
+            item for item in oracle_events
+            if item.metadata.get("oracle_kind") == "specification"
+        ]
+        user_oracles = [
+            item for item in oracle_events
+            if item.metadata.get("oracle_kind") == "user"
+        ]
+        if user_oracles:
+            risks.append("One or more user oracle contracts remain requester-supplied rather than independently reviewed.")
+        if any(not item.metadata.get("oracle_artifact_sha256") for item in specification_oracles):
             risks.append("One or more specification references are not bound to a SHA-256-pinned workspace document.")
+        unattested_specifications = [
+            item for item in specification_oracles
+            if not (
+                isinstance(item.metadata.get("oracle_attestation"), dict)
+                and item.metadata["oracle_attestation"].get("verified") is True
+            )
+        ]
+        if unattested_specifications:
+            risks.append("One or more specification oracle cases lack a valid signature from an operator-configured trusted reviewer key.")
+        elif specification_oracles:
+            risks.append("Trusted reviewer signatures authenticate the configured key's approval of exact test assertions; they do not prove the underlying specification is logically correct.")
     if unverified_count:
         risks.append(
             f"{unverified_count} AST-generated probe candidate(s) have not been tied to a grounded oracle case."
@@ -1616,7 +1630,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     risks.extend(
         [
             "Existing passing tests and a clean Python parse are evidence, not proof of complete semantic correctness.",
-            "Shrinking only tries bounded integer reductions under a caller-supplied fixed property; it does not prove global minimality or support floats, strings, collections, symbolic execution or independent model review.",
+            "Shrinking tries bounded integer, finite-float, string and top-level list/dictionary reductions under fixed properties; it does not prove global minimality or support recursive nested reductions, symbolic execution or complete semantic review.",
         ]
     )
 
