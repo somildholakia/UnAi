@@ -40,7 +40,8 @@
 - [x] Expose proof-bundle retrieval through the typed Engine client and read-only MCP bridge.
 - [x] Allow specification cases to bind an optional workspace Markdown/text artifact to a SHA-256 fingerprint and verify its bytes before execution.
 - [x] Verify optional Ed25519 human-review attestations against an operator-configured trusted public-key ring; bind each signature to the exact task, workspace, target source, artifact, case inputs and expected output/property.
-- [ ] Support external publisher signatures with a defined issuer identity/rotation policy; reviewer signatures authenticate configured reviewer keys, not publisher identity or the logical correctness of requirements.
+- [x] Verify optional external publisher Ed25519 artifact manifests against operator-configured issuer identities and exact HTTPS hostname allowlists; support key rotation/revocation through stable key IDs.
+- [ ] Add organizational certificate/identity discovery or signed key-transparency records; configured publisher keys authenticate a key/issuer mapping, not a public legal entity or the logical correctness of requirements.
 - [x] Add fixed, non-executable property-oracle contracts, including allowlisted expected-exception checks with exact built-in type identity, and opt-in Docker-isolated integer shrinking capped at 24 candidates per request; report smallest observed failures without claiming global minimality.
 - [x] Add greedy cumulative reduction across multiple integer arguments using successive, source/specification-pinned Docker rounds; cap at 24 candidate executions and 6 rounds per request.
 - [x] Add finite-float shrinking with deterministic toward-zero candidates, finite-value checks and the existing 24-candidate/6-round sandbox budgets.
