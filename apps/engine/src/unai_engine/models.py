@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -344,6 +345,12 @@ class GroundedOraclePublisherAttestation(BaseModel):
                 "Publisher artifact_uri must be a public HTTPS URL without credentials, query, fragment or non-standard port."
             )
         host = parsed.hostname
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("Publisher artifact_uri must use a public DNS hostname, not an IP address.")
         if host.casefold() in {"localhost"} or host.endswith(".localhost") or "." not in host:
             raise ValueError("Publisher artifact_uri must use a public hostname.")
         return value
