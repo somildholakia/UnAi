@@ -46,7 +46,8 @@
 - [x] Add finite-float shrinking with deterministic toward-zero candidates, finite-value checks and the existing 24-candidate/6-round sandbox budgets.
 - [x] Add bounded string shrinking by deterministic contiguous-chunk deletion, with strict length reduction and the existing global candidate/round budgets.
 - [x] Add bounded top-level list and string-keyed dictionary shrinking by deterministic contiguous chunk deletion, preserving nested values and existing global candidate/round budgets.
-- [ ] Add recursive nested-value shrinking or broader trace/discriminating analysis only with explicit per-type correctness/resource policies.
+- [x] Add bounded recursive shrinking inside JSON-compatible nested lists/dictionaries, with 4-level depth, 128-node traversal and 12-candidate-per-argument limits under the global 24-candidate/6-round Docker budget.
+- [ ] Extend deeper or broader recursive reductions only with additional per-type correctness/resource policies; add trace/discriminating analysis.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [ ] Extend grounded tests to class methods, decorated functions and broader Python signatures with explicit invocation rules.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.

@@ -1464,6 +1464,96 @@ def test_property_counterexample_shrinks_strings_in_bounded_sandbox_rounds(tmp_p
 
 
 
+
+
+def test_nested_shrink_candidates_reduce_values_inside_json_containers() -> None:
+    from unai_engine.verification.grounded import (
+        _argument_measure,
+        _nested_argument_shrink_candidates,
+    )
+
+    original = {
+        "payload": {
+            "items": [1, 2, 3],
+            "caption": "abcdef",
+        }
+    }
+    candidates = _nested_argument_shrink_candidates(original)
+
+    assert 0 < len(candidates) <= 12
+    assert all(_argument_measure(item) < _argument_measure(original) for item in candidates)
+    assert any(
+        item.get("payload", {}).get("items") != original["payload"]["items"]
+        for item in candidates
+    )
+    assert any(
+        item.get("payload", {}).get("caption") != original["payload"]["caption"]
+        for item in candidates
+    )
+    assert all(isinstance(item, dict) for item in candidates)
+
+
+def test_nested_collection_counterexample_is_shrunk_inside_disposable_sandbox(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10)
+        + "    items = value.get('payload', {}).get('items', [])" + chr(10)
+        + "    return -len(items)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+
+    def evaluate_generated_cases(generated_source, evidence_source, evidence_metadata):
+        markers = []
+        for case in _generated_cases(generated_source):
+            items = case["arguments"]["value"].get("payload", {}).get("items", [])
+            actual = -len(items)
+            if actual < 0:
+                markers.append(
+                    "UNAI_COUNTEREXAMPLE:" + json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "actual_type": "int",
+                            "actual_summary": str(actual),
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+        if markers:
+            return "failed", chr(10).join(markers), ""
+        return "passed", "", ""
+
+    runner.generated_responder = evaluate_generated_cases
+    original_value = {"payload": {"items": ["a", "b", "c"]}}
+    result = verifier.run(
+        task_id,
+        _property_request(fresh, value=original_value),
+        workspace_root,
+    )
+
+    assert result.status == "failed"
+    shrink = result.shrinking_results[0]
+    assert shrink.status == "smaller_failure_observed"
+    assert shrink.smallest_observed_arguments is not None
+    smallest_value = shrink.smallest_observed_arguments["value"]
+    assert set(smallest_value) <= {"payload"}
+    assert len(smallest_value.get("payload", {}).get("items", [])) == 1
+    assert shrink.attempts <= 24
+    assert 1 <= len(runner.calls) - 1 <= 6
+    assert all(call["metadata"]["sandboxed"] if "sandboxed" in call["metadata"] else True for call in runner.calls[1:])
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    shrink_events = [
+        item for item in saved.evidence
+        if item.kind == "shrink" and item.source == "grounded-property-shrinker"
+    ]
+    assert len(shrink_events) == 1
+    assert shrink_events[0].metadata["attempts"] == shrink.attempts
+    assert shrink_events[0].metadata["iteration_count"] <= 6
+    assert build_proof_bundle(saved).shrink_attempt_count == shrink.attempts
+
+
 def test_collection_shrink_candidates_only_remove_top_level_items() -> None:
     from unai_engine.verification.grounded import _collection_shrink_candidates
 
@@ -1534,15 +1624,20 @@ def test_property_counterexample_shrinks_list_arguments_in_bounded_sandbox_round
     candidates = [case for round_cases in rounds for case in round_cases]
     assert candidates
     assert len(candidates) <= 24
+    from unai_engine.verification.grounded import _argument_measure
+
+    original_value = [1, 2, 3, 4, 5, 6, 7, 8]
     assert all(
         isinstance(case["arguments"]["value"], list)
-        and len(case["arguments"]["value"]) < 8
+        and len(case["arguments"]["value"]) <= len(original_value)
+        and _argument_measure(case["arguments"]["value"]) < _argument_measure(original_value)
         for case in candidates
     )
     shrink = result.shrinking_results[0]
     assert shrink.status == "smaller_failure_observed"
     assert isinstance(shrink.smallest_observed_arguments["value"], list)
-    assert 0 < len(shrink.smallest_observed_arguments["value"]) < 8
+    assert 0 < len(shrink.smallest_observed_arguments["value"]) <= 8
+    assert _argument_measure(shrink.smallest_observed_arguments["value"]) < _argument_measure(original_value)
     assert shrink.attempts == len(candidates)
 
     saved = ledger.get_snapshot(task_id)
