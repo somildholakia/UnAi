@@ -681,7 +681,14 @@ def test_user_oracle_does_not_create_missing_specification_pin_risk(tmp_path: Pa
 
 
 
-def _property_request(snapshot, *, value=9, property_kind="output_non_negative", argument_name=None):
+def _property_request(
+    snapshot,
+    *,
+    value=9,
+    property_kind="output_non_negative",
+    argument_name=None,
+    exception_name=None,
+):
     return GroundedTestApprovalRequest(
         confirm="run-grounded-oracle-tests",
         file_path="service.py",
@@ -694,6 +701,7 @@ def _property_request(snapshot, *, value=9, property_kind="output_non_negative",
                 oracle_property=GroundedPropertyOracle(
                     kind=property_kind,
                     argument_name=argument_name,
+                    exception_name=exception_name,
                 ),
                 oracle_kind="user",
                 oracle_reference="User supplied non-negative return-value property",
@@ -890,3 +898,88 @@ def test_property_shrinking_skips_float_arguments_and_records_non_applicability(
         and item.metadata.get("status") == "no_supported_integer_arguments"
         for item in saved.evidence
     )
+
+
+
+def test_expected_exception_property_accepts_only_the_selected_allowlisted_exception(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return int(value)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        value="not-an-integer",
+        property_kind="raises_exception",
+        exception_name="ValueError",
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    assert '"raises_exception"' in generated
+    assert '"ValueError"' in generated
+    staged_root = tmp_path / "exception-staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        target.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+    namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
+
+
+def test_expected_exception_property_reports_wrong_or_missing_exception(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return int(value)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        value="not-an-integer",
+        property_kind="raises_exception",
+        exception_name="TypeError",
+    )
+
+    verifier.run(task_id, request, workspace_root)
+    generated = runner.calls[0]["content"]
+    staged_root = tmp_path / "wrong-exception-staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        target.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+
+    with pytest.raises(AssertionError, match="UNAI_COUNTEREXAMPLE"):
+        namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
+
+
+def test_expected_exception_property_requires_allowlisted_exception_name(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    with pytest.raises(GroundedVerificationError, match="must select an allowlisted exception_name"):
+        verifier.run(
+            task_id,
+            _property_request(snapshot, property_kind="raises_exception"),
+            workspace_root,
+        )
+
+    with pytest.raises(GroundedVerificationError, match="cannot set exception_name"):
+        verifier.run(
+            task_id,
+            _property_request(snapshot, exception_name="ValueError"),
+            workspace_root,
+        )
+
+    assert runner.calls == []
