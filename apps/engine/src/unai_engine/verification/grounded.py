@@ -853,7 +853,7 @@ class GroundedTestVerifier:
                 )
                 # Keep descriptor storage light: copy the complete argument map
                 # only for the at-most-24 candidates selected for a sandbox round.
-                descriptors: list[tuple[str, int | float | str, Decimal]] = []
+                descriptors: list[tuple[str, Any, Decimal]] = []
                 for argument_name in sorted(current_arguments):
                     value = current_arguments[argument_name]
                     if isinstance(value, bool):
@@ -877,7 +877,11 @@ class GroundedTestVerifier:
                         descriptors.append((argument_name, reduced_value, score))
 
                 descriptors.sort(
-                    key=lambda item: (item[2], item[0], item[1])
+                    key=lambda item: (
+                        item[2],
+                        item[0],
+                        _json_text(item[1], "Shrink candidate ordering"),
+                    )
                 )
 
                 if not descriptors:
