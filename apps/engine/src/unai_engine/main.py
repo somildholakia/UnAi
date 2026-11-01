@@ -63,6 +63,7 @@ grounded_test_verifier = GroundedTestVerifier(
     patch_manager,
     task_test_runner,
     trusted_oracle_public_keys=settings.oracle_trusted_public_keys,
+    trusted_oracle_publisher_keys=settings.oracle_trusted_publisher_keys,
 )
 
 app = FastAPI(
