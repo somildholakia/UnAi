@@ -51,7 +51,7 @@ _LIMITATIONS = [
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
-    "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
+    "Grounded targets include undecorated module-level functions and explicitly decorated top-level-class @staticmethod/@classmethod methods; ordinary instance methods, nested classes and all other decorators remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
     "Return-value oracles require JSON-compatible results; an explicit raises_exception property may require only one of the fixed allowlisted built-in exception types, never an arbitrary caller-supplied class name.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
@@ -319,9 +319,21 @@ def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
     return numeric_magnitude, len(encoded.encode("utf-8")), encoded
 
 
-def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
-    if not symbol_name.isidentifier():
-        raise GroundedVerificationError("Only a simple module-level function name is supported.")
+def _decorator_name(decorator: ast.expr) -> str | None:
+    return decorator.id if isinstance(decorator, ast.Name) else None
+
+
+def _target_function(
+    source: str, symbol_name: str
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    parts = symbol_name.split(".")
+    if (
+        len(parts) not in {1, 2}
+        or any(not part.isidentifier() for part in parts)
+    ):
+        raise GroundedVerificationError(
+            "Use a module-level function name or one ClassName.method name."
+        )
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
@@ -329,22 +341,60 @@ def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.Asy
             f"Target Python source does not parse at line {exc.lineno}.", 409
         ) from exc
 
-    matches = [
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == symbol_name
-    ]
-    if len(matches) != 1:
-        if not matches:
+    if len(parts) == 1:
+        matches = [
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == parts[0]
+        ]
+        if len(matches) != 1:
+            if not matches:
+                raise GroundedVerificationError(
+                    f"Top-level Python function not found: {symbol_name}.", 404
+                )
             raise GroundedVerificationError(
-                f"Top-level Python function not found: {symbol_name}.", 404
+                f"Function name is ambiguous: {symbol_name}.", 409
             )
-        raise GroundedVerificationError(
-            f"Function name is ambiguous: {symbol_name}.", 409
-        )
+        function = matches[0]
+        if function.decorator_list:
+            raise GroundedVerificationError(
+                "Decorated functions are not supported at module level."
+            )
+    else:
+        owner_name, method_name = parts
+        classes = [
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == owner_name
+        ]
+        if len(classes) != 1:
+            if not classes:
+                raise GroundedVerificationError(
+                    f"Top-level class not found: {owner_name}.", 404
+                )
+            raise GroundedVerificationError(
+                f"Class name is ambiguous: {owner_name}.", 409
+            )
+        methods = [
+            node for node in classes[0].body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == method_name
+        ]
+        if len(methods) != 1:
+            if not methods:
+                raise GroundedVerificationError(
+                    f"Class method not found: {symbol_name}.", 404
+                )
+            raise GroundedVerificationError(
+                f"Class method name is ambiguous: {symbol_name}.", 409
+            )
+        function = methods[0]
+        decorators = [_decorator_name(item) for item in function.decorator_list]
+        if decorators not in ([ "staticmethod" ], [ "classmethod" ]):
+            raise GroundedVerificationError(
+                "Only explicitly decorated @staticmethod and @classmethod targets are supported; "
+                "ordinary instance methods and other decorators are rejected."
+            )
 
-    function = matches[0]
-    if function.decorator_list:
-        raise GroundedVerificationError("Decorated functions are not yet supported for grounded tests.")
     if function.args.posonlyargs or function.args.vararg or function.args.kwarg:
         raise GroundedVerificationError(
             "Positional-only, *args and **kwargs signatures are not supported."
@@ -352,8 +402,18 @@ def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.Asy
     return function
 
 
-def _signature(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], set[str]]:
+def _signature(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    drop_first_parameter: bool = False,
+) -> tuple[set[str], set[str]]:
     positional = list(function.args.args)
+    if drop_first_parameter:
+        if not positional:
+            raise GroundedVerificationError(
+                "A classmethod must declare its bound class parameter."
+            )
+        positional = positional[1:]
     defaults_start = len(positional) - len(function.args.defaults)
     required = {
         arg.arg for index, arg in enumerate(positional)
@@ -395,7 +455,14 @@ def _validate_cases(
     request: GroundedTestApprovalRequest,
     function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> list[dict[str, Any]]:
-    allowed, required = _signature(function)
+    is_classmethod = (
+        "." in request.symbol_name
+        and len(function.decorator_list) == 1
+        and _decorator_name(function.decorator_list[0]) == "classmethod"
+    )
+    allowed, required = _signature(
+        function, drop_first_parameter=is_classmethod
+    )
     candidates = _candidate_index(
         snapshot, request.file_path, request.symbol_name, request.source_sha256
     )
@@ -572,6 +639,16 @@ def _generated_pytest(
     payload_literal = repr(payload)
     file_literal = repr(file_path)
     symbol_literal = repr(symbol_name)
+    if "." in symbol_name:
+        owner_name, method_name = symbol_name.split(".", 1)
+        target_resolution = (
+            f"_OWNER = {owner_name!r}\n"
+            f"_METHOD = {method_name!r}\n"
+            "_CLASS = getattr(_MODULE, _OWNER, None)\n"
+            "_FUNCTION = getattr(_CLASS, _METHOD, None)\n"
+        )
+    else:
+        target_resolution = "_FUNCTION = getattr(_MODULE, _SYMBOL, None)\n"
     return f'''"""Generated by unAI from explicit, supplied oracle cases. Do not edit."""
 from __future__ import annotations
 
@@ -625,7 +702,7 @@ if _SPEC is None or _SPEC.loader is None:
 _MODULE = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _MODULE
 _SPEC.loader.exec_module(_MODULE)
-_FUNCTION = getattr(_MODULE, _SYMBOL, None)
+{target_resolution}
 if not callable(_FUNCTION):
     raise RuntimeError("Grounded test target is not callable.")
 
@@ -745,6 +822,7 @@ class GroundedTestVerifier:
         counterexample_case_ids: set[str],
         source_sha256: str,
         is_async: bool,
+        target_invocation_kind: str,
         artifact_fingerprints: dict[str, dict[str, Any]],
         workspace_root,
         parent_execution_id: str,
@@ -1010,6 +1088,7 @@ class GroundedTestVerifier:
                     "target_file": request.file_path,
                     "target_function": request.symbol_name,
                     "target_is_async": is_async,
+                    "target_invocation_kind": target_invocation_kind,
                     "target_sha256": source_sha256,
                     "generated_test_sha256": generated_sha256,
                     "parent_execution_evidence_id": parent_execution_id,
@@ -1356,6 +1435,14 @@ class GroundedTestVerifier:
             oracle_events.append(event)
 
         is_async = isinstance(function, ast.AsyncFunctionDef)
+        target_invocation_kind = "module_function"
+        if "." in request.symbol_name:
+            target_invocation_kind = (
+                "classmethod"
+                if len(function.decorator_list) == 1
+                and _decorator_name(function.decorator_list[0]) == "classmethod"
+                else "staticmethod"
+            )
         generated_content = _generated_pytest(
             request.file_path,
             request.symbol_name,
@@ -1368,6 +1455,7 @@ class GroundedTestVerifier:
             "target_file": request.file_path,
             "target_function": request.symbol_name,
             "target_is_async": is_async,
+            "target_invocation_kind": target_invocation_kind,
             "target_sha256": source_snapshot.sha256,
             "generated_test_sha256": hashlib.sha256(
                 generated_content.encode("utf-8")
@@ -1516,6 +1604,7 @@ class GroundedTestVerifier:
                 counterexample_case_ids,
                 source_snapshot.sha256,
                 is_async,
+                target_invocation_kind,
                 artifact_fingerprints,
                 workspace_root,
                 execution.evidence.evidence_id,

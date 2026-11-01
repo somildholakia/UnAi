@@ -674,6 +674,161 @@ def test_sync_grounded_harness_records_target_kind(tmp_path: Path) -> None:
     assert runner.calls[0]["metadata"]["target_is_async"] is False
 
 
+def test_staticmethod_grounded_target_uses_explicit_class_binding(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class Calculator:" + chr(10)
+        + "    @staticmethod" + chr(10)
+        + "    def add(value, offset=1):" + chr(10)
+        + "        return value + offset" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Calculator.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="static-add",
+                arguments={"value": 9},
+                expected_output=10,
+                oracle_kind="user",
+                oracle_reference="User supplied static method result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "_OWNER = 'Calculator'" in generated
+    assert "_METHOD = 'add'" in generated
+    assert "_CLASS = getattr(_MODULE, _OWNER, None)" in generated
+    assert "_FUNCTION = getattr(_CLASS, _METHOD, None)" in generated
+    assert "_FUNCTION(**case['arguments'])" in generated
+    assert runner.calls[0]["metadata"]["target_is_async"] is False
+
+
+def test_async_classmethod_uses_bound_cls_and_asyncio_run(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class AsyncCalculator:" + chr(10)
+        + "    @classmethod" + chr(10)
+        + "    async def add(cls, value):" + chr(10)
+        + "        return value + 1" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="AsyncCalculator.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="async-class-add",
+                arguments={"value": 9},
+                expected_output=10,
+                oracle_kind="user",
+                oracle_reference="User supplied async classmethod result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
+    assert "_OWNER = 'AsyncCalculator'" in generated
+    assert runner.calls[0]["metadata"]["target_is_async"] is True
+
+
+@pytest.mark.parametrize(
+    "source,symbol_name,error",
+    [
+        (
+            "class Calculator:" + chr(10) + "    def add(self, value):" + chr(10) + "        return value" + chr(10),
+            "Calculator.add",
+            "Only explicitly decorated @staticmethod and @classmethod",
+        ),
+        (
+            "class Calculator:" + chr(10) + "    @property" + chr(10) + "    def add(self):" + chr(10) + "        return 1" + chr(10),
+            "Calculator.add",
+            "Only explicitly decorated @staticmethod and @classmethod",
+        ),
+        (
+            "def marker(fn):" + chr(10) + "    return fn" + chr(10) + "@marker" + chr(10) + "def add(value):" + chr(10) + "    return value" + chr(10),
+            "add",
+            "Decorated functions are not supported at module level",
+        ),
+    ],
+)
+def test_unsupported_method_and_decorator_invocation_forms_are_rejected(
+    tmp_path: Path, source: str, symbol_name: str, error: str
+) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name=symbol_name,
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="unsupported-invocation",
+                arguments={"value": 1},
+                expected_output=1,
+                oracle_kind="user",
+                oracle_reference="User supplied invocation result",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match=error):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_classmethod_bound_parameter_is_not_exposed_as_oracle_argument(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class Calculator:" + chr(10)
+        + "    @classmethod" + chr(10)
+        + "    def add(cls, value):" + chr(10)
+        + "        return value" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Calculator.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="class-parameter-rejected",
+                arguments={"cls": "caller-controlled", "value": 1},
+                expected_output=1,
+                oracle_kind="user",
+                oracle_reference="User supplied classmethod result",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="unknown parameters: cls"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
 def test_decorated_async_function_remains_rejected(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
