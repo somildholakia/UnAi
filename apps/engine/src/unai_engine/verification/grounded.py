@@ -833,10 +833,10 @@ def _record_replay_trace(record):
 def _write_replay_trace_file():
     if _REPLAY_TRACE_PATH is None or not _REPLAY_TRACE_RECORDS:
         return
-    payload = {
+    payload = {{
         "schema": "unai.replay-trace.v1",
         "records": _REPLAY_TRACE_RECORDS,
-    }
+    }}
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
     if len(encoded.encode("utf-8")) > 16_384:
         return
