@@ -181,13 +181,23 @@ def _validated_replay_trace(
     }
     if not expected or len(expected) > 20:
         return [], "invalid_case_ids"
-    trace_path = workspace.joinpath(*relative.parts)
+    workspace_root = workspace.resolve()
+    trace_directory = workspace / relative.parts[0]
+    if trace_directory.is_symlink() or not trace_directory.is_dir():
+        return [], "unsafe_directory"
     try:
+        resolved_directory = trace_directory.resolve(strict=True)
+        if not resolved_directory.is_relative_to(workspace_root):
+            return [], "unsafe_directory"
+        trace_path = trace_directory / relative.parts[1]
         if trace_path.is_symlink() or not trace_path.is_file():
             return [], "missing"
-        if trace_path.stat().st_size > 16_384:
+        resolved_trace_path = trace_path.resolve(strict=True)
+        if not resolved_trace_path.is_relative_to(resolved_directory):
+            return [], "unsafe_path"
+        if resolved_trace_path.stat().st_size > 16_384:
             return [], "oversized"
-        payload = json.loads(trace_path.read_text(encoding="utf-8"))
+        payload = json.loads(resolved_trace_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         return [], "invalid"
     if (
