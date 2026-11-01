@@ -513,36 +513,49 @@ class GroundedTestVerifier:
                     break
 
             if not attempts_by_case[case_id]:
-                results.append(
-                    GroundedShrinkResult(
-                        case_id=case_id,
-                        status="no_supported_integer_arguments",
-                        attempts=0,
-                        original_arguments_sha256=case["arguments_sha256"],
-                        note="Shrinking currently changes integer arguments only; booleans, floats, strings and collections are left unchanged.",
-                    )
+                has_integer_input = any(
+                    isinstance(value, int) and not isinstance(value, bool) and value != 0
+                    for value in case["arguments"].values()
                 )
-
-        if not candidate_map:
-            for result in results:
+                status = (
+                    "budget_exhausted"
+                    if has_integer_input and used >= _MAX_SHRINK_CANDIDATES
+                    else "no_supported_integer_arguments"
+                )
+                note = (
+                    "The global 24-candidate shrink budget was consumed by earlier counterexamples."
+                    if status == "budget_exhausted"
+                    else "Shrinking currently changes integer arguments only; booleans, floats, strings and collections are left unchanged."
+                )
+                result = GroundedShrinkResult(
+                    case_id=case_id,
+                    status=status,
+                    attempts=0,
+                    original_arguments_sha256=case["arguments_sha256"],
+                    note=note,
+                )
+                results.append(result)
                 self.ledger.append_evidence(
                     EvidenceRecord(
                         evidence_id=uuid4().hex,
                         task_id=task_id,
                         kind="shrink",
                         source="grounded-property-shrinker",
-                        claim=f"Counterexample shrinking was not applicable to case {result.case_id}.",
+                        claim=f"Counterexample shrinking was not run for case {case_id}: {status}.",
                         passed=None,
-                        artifact_ref=f"oracle-case:{task_id}:{result.case_id}",
+                        artifact_ref=f"oracle-case:{task_id}:{case_id}",
                         metadata={
-                            "case_id": result.case_id,
-                            "status": result.status,
+                            "case_id": case_id,
+                            "status": status,
                             "attempts": 0,
                             "source_sha256": source_sha256,
+                            "original_arguments_sha256": case["arguments_sha256"],
                         },
                         created_at=datetime.now(timezone.utc).isoformat(),
                     )
                 )
+
+        if not candidate_map:
             return results
 
         candidate_cases = list(candidate_map.values())
