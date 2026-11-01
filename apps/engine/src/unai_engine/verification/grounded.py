@@ -443,6 +443,8 @@ class GroundedTestVerifier:
                         "workspace-file-sha256-verified"
                         if case["oracle_artifact_path"]
                         else "requester-reference-only"
+                        if case["oracle_kind"] == "specification"
+                        else "user-supplied-oracle"
                     ),
                     "probe_candidate_id": case["probe_candidate_id"],
                 },
@@ -503,7 +505,7 @@ class GroundedTestVerifier:
                     409,
                 )
         run_metadata["source_fingerprint_rechecked_before_staging"] = True
-        run_metadata["source_fingerprint_checked_in_staged_workspace"] = True
+        run_metadata["staged_fingerprint_assertions_embedded"] = True
         run_metadata["oracle_artifact_fingerprints_rechecked_before_staging"] = sorted(
             artifact_fingerprints
         )
@@ -731,7 +733,11 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         risks.append(
             "Oracle provenance is requester-supplied; a workspace artifact hash proves content integrity only, not publisher identity, authorship, authority or correctness."
         )
-        if any(not item.metadata.get("oracle_artifact_sha256") for item in oracle_events):
+        if any(
+            item.metadata.get("oracle_kind") == "specification"
+            and not item.metadata.get("oracle_artifact_sha256")
+            for item in oracle_events
+        ):
             risks.append("One or more specification references are not bound to a SHA-256-pinned workspace document.")
     if unverified_count:
         risks.append(
