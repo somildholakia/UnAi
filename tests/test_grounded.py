@@ -965,6 +965,80 @@ def test_property_shrinking_rejects_non_finite_float_arguments(tmp_path: Path) -
     assert runner.calls == []
 
 
+@pytest.mark.parametrize(
+    "initial_value,expected_smallest,expected_attempts",
+    [
+        ("abcdef", "a", 5),
+        (["a", "b", "c"], ["a"], 4),
+        ({"a": 1, "b": 2, "c": 3}, {"a": 1}, 4),
+    ],
+)
+def test_strings_lists_and_dicts_are_shrunk_cumulatively(
+    tmp_path: Path,
+    initial_value,
+    expected_smallest,
+    expected_attempts: int,
+) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return -len(value)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+
+    def evaluate_generated_cases(generated_source, evidence_source, evidence_metadata):
+        markers = []
+        for case in _generated_cases(generated_source):
+            value = case["arguments"]["value"]
+            actual = -len(value)
+            if actual < 0:
+                markers.append(
+                    "UNAI_COUNTEREXAMPLE:" + json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "actual_type": "int",
+                            "actual_summary": str(actual),
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+        if markers:
+            return "failed", chr(10).join(markers), ""
+        return "passed", "", ""
+
+    runner.generated_responder = evaluate_generated_cases
+    result = verifier.run(
+        task_id,
+        _property_request(fresh, value=initial_value),
+        workspace_root,
+    )
+
+    assert result.status == "failed"
+    assert len(runner.calls) == 3
+    rounds = [_generated_cases(call["content"]) for call in runner.calls[1:]]
+    assert [len(items) for items in rounds] == (
+        [4, 1] if isinstance(initial_value, str) else [3, 1]
+    )
+    assert result.shrinking_results[0].status == "smaller_failure_observed"
+    assert result.shrinking_results[0].attempts == expected_attempts
+    assert result.shrinking_results[0].smallest_observed_arguments == {
+        "value": expected_smallest
+    }
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert build_proof_bundle(saved).shrink_attempt_count == expected_attempts
+
+
+def test_top_level_shrink_candidates_cover_strings_lists_dictionaries_and_skip_bool_null() -> None:
+    from unai_engine.verification.grounded import _argument_shrink_candidates
+
+    assert _argument_shrink_candidates("abc") == ["", "a", "ab"]
+    assert _argument_shrink_candidates([1, 2, 3]) == [[], [1], [1, 2]]
+    assert _argument_shrink_candidates({"b": 2, "a": 1}) == [{}, {"a": 1}]
+    assert _argument_shrink_candidates(True) == []
+    assert _argument_shrink_candidates(None) == []
+
+
 def test_expected_exception_property_accepts_only_the_selected_allowlisted_exception(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
