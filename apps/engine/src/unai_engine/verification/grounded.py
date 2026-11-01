@@ -20,6 +20,7 @@ from uuid import uuid4
 from unai_engine.models import (
     EvidenceRecord,
     GroundedCounterexample,
+    GroundedOracleAttestation,
     GroundedTestApprovalRequest,
     GroundedShrinkResult,
     GroundedTestResponse,
@@ -28,6 +29,12 @@ from unai_engine.models import (
 )
 from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchRejected
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
+from unai_engine.verification.attestations import (
+    attestation_statement_sha256,
+    build_oracle_attestation_statement,
+    canonical_attestation_message,
+    verify_ed25519_attestation,
+)
 from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.proof import summarize_proof
 
@@ -36,7 +43,8 @@ _MAX_SHRINK_CANDIDATES = 24
 _MAX_SHRINK_ROUNDS = 6
 
 _LIMITATIONS = [
-    "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
+    "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated only when a configured Ed25519 reviewer key signs the exact source/artifact/input/expectation assertion.",
+    "Trusted reviewer identities are local operator configuration; a valid signature authenticates the configured key's approval, not the logical correctness of the reviewed requirement.",
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "Collection shrinking removes only top-level list elements or string-keyed mapping entries; it does not recursively shrink nested values or reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
@@ -309,6 +317,14 @@ def _validate_cases(
             raise GroundedVerificationError(
                 f"Oracle case {case.case_id} must supply both oracle_artifact_path and oracle_artifact_sha256."
             )
+        if case.oracle_attestation is not None and (
+            case.oracle_kind != "specification"
+            or artifact_path is None
+            or artifact_sha256 is None
+        ):
+            raise GroundedVerificationError(
+                f"Oracle case {case.case_id} requires a pinned specification artifact for a trusted reviewer attestation."
+            )
         if artifact_path is not None:
             artifact_relative = PurePosixPath(artifact_path)
             if (
@@ -420,6 +436,11 @@ def _validate_cases(
                 "oracle_reference": case.oracle_reference,
                 "oracle_artifact_path": artifact_path,
                 "oracle_artifact_sha256": artifact_sha256.lower() if artifact_sha256 else None,
+                "oracle_attestation": (
+                    case.oracle_attestation.model_dump(mode="json")
+                    if case.oracle_attestation is not None
+                    else None
+                ),
                 "probe_candidate_id": case.probe_candidate_id,
                 "arguments_sha256": _digest(arguments, "Arguments"),
                 "expected_sha256": (
@@ -616,10 +637,12 @@ class GroundedTestVerifier:
         ledger: EvidenceLedger,
         patch_manager: PatchManager,
         test_runner: IsolatedPythonTestRunner,
+        trusted_oracle_public_keys: dict[str, str] | None = None,
     ) -> None:
         self.ledger = ledger
         self.patch_manager = patch_manager
         self.test_runner = test_runner
+        self.trusted_oracle_public_keys = dict(trusted_oracle_public_keys or {})
 
     def _shrink_property_counterexamples(
         self,
@@ -1143,6 +1166,58 @@ class GroundedTestVerifier:
                 )
             case["oracle_artifact_size_bytes"] = fingerprint["size_bytes"]
 
+        # An optional signature is trusted only when its key ID is in the
+        # operator-configured keyring. Signatures bind the exact test assertion.
+        for case in normalized:
+            attestation_data = case.get("oracle_attestation")
+            if not attestation_data:
+                case["oracle_attestation_provenance"] = None
+                continue
+            attestation = GroundedOracleAttestation.model_validate(attestation_data)
+            public_key_b64 = self.trusted_oracle_public_keys.get(attestation.key_id)
+            if public_key_b64 is None:
+                raise GroundedVerificationError(
+                    f"Oracle attestation key {attestation.key_id!r} is not in the configured trusted keyring.",
+                    403,
+                )
+            statement = build_oracle_attestation_statement(
+                key_id=attestation.key_id,
+                issued_at=attestation.issued_at,
+                task_id=task_id,
+                workspace=snapshot.workspace,
+                file_path=request.file_path,
+                symbol_name=request.symbol_name,
+                source_sha256=source_snapshot.sha256,
+                case_id=case["case_id"],
+                oracle_kind=case["oracle_kind"],
+                oracle_reference=case["oracle_reference"],
+                oracle_artifact_path=case["oracle_artifact_path"],
+                oracle_artifact_sha256=case["oracle_artifact_sha256"],
+                arguments_sha256=case["arguments_sha256"],
+                expected_output_sha256=case["expected_sha256"],
+                oracle_property_sha256=case["oracle_property_sha256"],
+            )
+            message = canonical_attestation_message(statement)
+            if not verify_ed25519_attestation(
+                public_key_b64=public_key_b64,
+                signature_b64=attestation.signature_b64,
+                message=message,
+            ):
+                raise GroundedVerificationError(
+                    f"Oracle attestation signature for case {case['case_id']} is invalid.",
+                    403,
+                )
+            case["oracle_attestation_provenance"] = {
+                "verified": True,
+                "algorithm": "Ed25519",
+                "key_id": attestation.key_id,
+                "issued_at": statement["issued_at"],
+                "statement_sha256": attestation_statement_sha256(statement),
+                "signature_b64": attestation.signature_b64,
+            }
+            # Signature is evidence, not test input. Do not embed it in generated pytest.
+            case["oracle_attestation"] = None
+
         # Record every supplied oracle before executing it. A source/reference is
         # provenance, not an independently authenticated oracle.
         oracle_events: list[EvidenceRecord] = []
@@ -1175,12 +1250,15 @@ class GroundedTestVerifier:
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
                     "oracle_artifact_size_bytes": case.get("oracle_artifact_size_bytes"),
                     "oracle_artifact_integrity": (
-                        "workspace-file-sha256-verified"
+                        "trusted-ed25519-review-attestation"
+                        if case["oracle_attestation_provenance"]
+                        else "workspace-file-sha256-verified"
                         if case["oracle_artifact_path"]
                         else "requester-reference-only"
                         if case["oracle_kind"] == "specification"
                         else "user-supplied-oracle"
                     ),
+                    "oracle_attestation": case["oracle_attestation_provenance"],
                     "probe_candidate_id": case["probe_candidate_id"],
                 },
                 created_at=now,
