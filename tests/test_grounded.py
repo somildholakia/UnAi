@@ -691,6 +691,69 @@ def test_failed_grounded_case_records_counterexample_and_proof_bundle(tmp_path: 
     assert any("lack a valid signature from an operator-configured trusted reviewer key" in risk for risk in bundle.unresolved_risks)
 
 
+def test_counterexample_trace_records_actual_result_hash_and_proof_metadata(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    actual_sha256 = hashlib.sha256(b"1").hexdigest()
+    runner.status = "failed"
+    runner.stdout = (
+        'UNAI_COUNTEREXAMPLE:{"case_id":"lower-edge","actual_type":"int",'
+        '"actual_summary":"1","actual_sha256":"' + actual_sha256 + '"}' + chr(10)
+    )
+
+    result = verifier.run(task_id, _request(snapshot, expected=0), workspace_root)
+
+    assert result.status == "failed"
+    counterexample = result.counterexamples[0]
+    assert counterexample.actual_sha256 == actual_sha256
+    assert counterexample.exception_message_sha256 is None
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    event = next(item for item in saved.evidence if item.kind == "counterexample")
+    assert event.metadata["actual_sha256"] == actual_sha256
+    assert event.metadata["target_line"] is None
+
+
+def test_exception_counterexample_trace_records_target_frame_and_message_hash(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    message_sha256 = hashlib.sha256(b"bad value").hexdigest()
+    runner.status = "failed"
+    runner.stdout = (
+        'UNAI_COUNTEREXAMPLE:{"case_id":"lower-edge","actual_type":"ValueError",'
+        '"actual_summary":"ValueError: bad value","exception_message_sha256":"'
+        + message_sha256
+        + '","target_frame":{"line":7,"function":"clamp"}}' + chr(10)
+    )
+
+    result = verifier.run(task_id, _request(snapshot, expected=0), workspace_root)
+
+    assert result.status == "failed"
+    counterexample = result.counterexamples[0]
+    assert counterexample.exception_message_sha256 == message_sha256
+    assert counterexample.target_line == 7
+    assert counterexample.target_function == "clamp"
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    event = next(item for item in saved.evidence if item.kind == "counterexample")
+    assert event.metadata["exception_message_sha256"] == message_sha256
+    assert event.metadata["target_line"] == 7
+    assert event.metadata["target_function"] == "clamp"
+
+
+def test_generated_oracle_harness_emits_structured_trace_fields(tmp_path: Path) -> None:
+    _task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    verifier.run(snapshot.task_id, _request(snapshot), workspace_root)
+
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "def _json_sha256(value):" in generated
+    assert "def _target_exception_frame(exc):" in generated
+    assert "exception_message_sha256" in generated
+    assert "actual_sha256" in generated
+    assert "target_frame" in generated
+    assert "traceback.extract_tb(exc.__traceback__)" in generated
+
+
 def test_grounded_request_rejects_stale_source_fingerprint(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
     request = _request(snapshot, source_hash="0" * 64)
