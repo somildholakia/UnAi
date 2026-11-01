@@ -1,16 +1,14 @@
 # Development checkpoint
 
-**Checkpoint:** M4 — grounded oracle verification first milestone implemented
+**Checkpoint:** M4 — grounded oracle verification first milestone merged
 **Date:** 2026-11-01
 **Repository:** https://github.com/somildholakia/UnAi
-**Implementation branch:** feat/m4-grounded-verification
-**Implementation PR:** https://github.com/somildholakia/UnAi/pull/2
-**Latest implementation commit:** 3778cab22767d8e554928807279fb44d695e220f
-**PR validation:** 146 tests passed; Python compileall passed
-**Base branch at implementation start:** main
+**Branch:** main
+**Latest main commit at checkpoint:** 1c0e82d1bb2a75789170278e4e31c81f68d74297
+**M4 implementation PR:** https://github.com/somildholakia/UnAi/pull/2 (merged)
+**M4 code commit before squash merge:** 3778cab22767d8e554928807279fb44d695e220f
+**M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
-**Implementation PR:** https://github.com/somildholakia/UnAi/pull/1
-**Implementation commit before squash merge:** 7b10caccd780658a12619b331075da82e3e45fad
 
 ## What is implemented
 
@@ -91,10 +89,11 @@
 - M3.2 PR #1 was squash-merged to main as 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa. Its PR and post-merge workflows each reported 131 tests passed.
 - M3.2 PR CI: https://github.com/somildholakia/UnAi/actions/runs/41287213961
 - M3.2 post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41287275378
-- M4 implementation is proposed in PR #2: https://github.com/somildholakia/UnAi/pull/2
-- M4 latest PR workflow on commit 3778cab22767d8e554928807279fb44d695e220f: https://github.com/somildholakia/UnAi/actions/runs/41289312841
-- M4 latest PR workflow reported 146 tests passed; python -m compileall -q apps/engine/src training passed.
-- Earlier M4 CI failures were fixed: generated-source injection assertion now inspects AST imports, and the proof test retains the probe fixture. Do not treat those superseded commits as the final result.
+- M4 PR #2 was squash-merged to main as 1c0e82d1bb2a75789170278e4e31c81f68d74297.
+- M4 PR CI: https://github.com/somildholakia/UnAi/actions/runs/41289393795
+- M4 post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41289447443
+- Both M4 workflows reported 146 tests passed; python -m compileall -q apps/engine/src training passed.
+- Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded.
 
 ## Important limits and safety boundaries
 
@@ -111,16 +110,15 @@
 
 ## Next work after this checkpoint
 
-1. Merge and post-merge-verify PR #2 before describing the M4 implementation as part of main.
-2. Improve source/specification oracle provenance: support durable specification artifacts or human review attestations without treating a URL/string reference as authenticated.
-3. Add an explicit property-oracle contract before implementing automatic input shrinking; do not reuse one exact expected output for changed inputs unless the oracle says that property is invariant.
-4. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
-5. Expand grounded tests to supported methods, async functions, exceptions and more languages only with dedicated execution isolation and tests.
-6. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
-7. Design per-user/scoped Engine credentials, revocation, rate limits and tenant isolation before network-facing Engine deployment.
-8. Deploy Brain to a real Cloudflare D1 account with read/write secrets, access controls and quotas, then connect the remote MCP bridge.
-9. Curate consented/licensed verified trajectories, train specialist adapters on suitable GPU compute, and compare them against matched baselines.
-10. Benchmark inference, memory, energy and thermals on physical Android hardware.
+1. Improve source/specification oracle provenance: support durable specification artifacts or human review attestations without treating a URL/string reference as authenticated.
+2. Add an explicit property-oracle contract before implementing automatic input shrinking; do not reuse one exact expected output for changed inputs unless the oracle says that property is invariant.
+3. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
+4. Expand grounded tests to supported methods, async functions, exceptions and more languages only with dedicated execution isolation and tests.
+5. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
+6. Design per-user/scoped Engine credentials, revocation, rate limits and tenant isolation before network-facing Engine deployment.
+7. Deploy Brain to a real Cloudflare D1 account with read/write secrets, access controls and quotas, then connect the remote MCP bridge.
+8. Curate consented/licensed verified trajectories, train specialist adapters on suitable GPU compute, and compare them against matched baselines.
+9. Benchmark inference, memory, energy and thermals on physical Android hardware.
 
 ## Local setup reminders
 
