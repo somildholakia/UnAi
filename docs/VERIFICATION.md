@@ -72,7 +72,7 @@ Every case must include:
 - An explicit JSON-compatible expected return value.
 - oracle_kind of user or specification.
 - A human-readable oracle_reference such as an acceptance criterion or specification section.
-- Optionally, oracle_artifact_path and oracle_artifact_sha256 to bind a specification case to a UTF-8 Markdown/text document in the approved workspace. Obtain the fingerprint from the task file-snapshot endpoint; the verifier re-reads the file and rejects a mismatch before execution.
+- Optionally, oracle_artifact_path and oracle_artifact_sha256 to bind a specification case to a UTF-8 Markdown/text document in the approved workspace. Obtain the fingerprint from the task file-snapshot endpoint; the verifier re-reads the file, rejects a mismatch before execution, and embeds a second hash check in the generated pytest harness so the disposable staged copy is checked before the target module is imported.
 - Optionally, a probe_candidate_id to bind the case to a probe generated for the exact file, function and source hash.
 
 When a probe ID is supplied, every input/value pair generated for that candidate must be preserved exactly (including JSON type). Additional required function arguments may be supplied in the same arguments object. Cases are rejected when they use unknown parameters or omit required parameters.
