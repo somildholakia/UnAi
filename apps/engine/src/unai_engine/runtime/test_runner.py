@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -209,6 +210,26 @@ class IsolatedPythonTestRunner:
             metadata["error"] = error
         if evidence_metadata:
             metadata.update(evidence_metadata)
+        if evidence_source == "grounded-oracle-sandbox":
+            markers: list[dict[str, str]] = []
+            captured_output = "\n".join([stdout, stderr])
+            for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", captured_output):
+                try:
+                    marker = json.loads(match)
+                except json.JSONDecodeError:
+                    continue
+                case_id = marker.get("case_id")
+                if isinstance(case_id, str):
+                    markers.append(
+                        {
+                            "case_id": case_id[:80],
+                            "actual_type": str(marker.get("actual_type", "unknown"))[:120],
+                            "actual_summary": _redact_preview(
+                                str(marker.get("actual_summary", "")), 500
+                            ),
+                        }
+                    )
+            metadata["counterexample_markers"] = markers
         evidence = EvidenceRecord(
             evidence_id=uuid4().hex,
             task_id=snapshot.task_id,

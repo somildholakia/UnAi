@@ -229,6 +229,7 @@ _SPEC = importlib.util.spec_from_file_location("unai_grounded_target", _TARGET)
 if _SPEC is None or _SPEC.loader is None:
     raise RuntimeError("Could not load the grounded test target.")
 _MODULE = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _MODULE
 _SPEC.loader.exec_module(_MODULE)
 _FUNCTION = getattr(_MODULE, _SYMBOL, None)
 if not callable(_FUNCTION):
@@ -389,6 +390,18 @@ class GroundedTestVerifier:
             [execution.stdout_preview or "", execution.stderr_preview or ""]
         )
         marker_values: dict[str, dict[str, str]] = {}
+        recorded_markers = execution.evidence.metadata.get("counterexample_markers", [])
+        if isinstance(recorded_markers, list):
+            for marker in recorded_markers:
+                if not isinstance(marker, dict):
+                    continue
+                case_id = marker.get("case_id")
+                if isinstance(case_id, str) and case_id not in marker_values:
+                    marker_values[case_id] = {
+                        "actual_type": str(marker.get("actual_type", "unknown"))[:120],
+                        "actual_summary": str(marker.get("actual_summary", ""))[:500],
+                    }
+        # Fallback for test doubles and legacy evidence without structured marker metadata.
         for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", output):
             try:
                 marker = json.loads(match)

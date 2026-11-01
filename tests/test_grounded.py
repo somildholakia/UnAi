@@ -335,3 +335,23 @@ def test_runner_refuses_generated_test_outside_reserved_staging_folder(tmp_path:
 
     assert result.status == "unavailable"
     assert sandbox.seen_command is None
+
+
+def test_test_runner_extracts_counterexample_markers_before_preview_truncation(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, _snapshot, _probes, _fake, _verifier = _setup(tmp_path)
+    first = 'UNAI_COUNTEREXAMPLE:{"case_id":"one","actual_type":"int","actual_summary":"1"}'
+    second = 'UNAI_COUNTEREXAMPLE:{"case_id":"two","actual_type":"str","actual_summary":"secret=abc123"}'
+    sandbox = FakeSandbox(exit_code=1, stdout=(first + "\n") + ("trace " * 2000) + ("\n" + second))
+    runner = IsolatedPythonTestRunner(ledger, sandbox)  # type: ignore[arg-type]
+
+    result = runner.run_generated_test(
+        task_id,
+        workspace_root,
+        "unai_generated_tests/test_oracle.py",
+        "def test_placeholder():\n    assert False\n",
+        {},
+    )
+
+    markers = result.evidence.metadata["counterexample_markers"]
+    assert [item["case_id"] for item in markers] == ["one", "two"]
+    assert markers[1]["actual_summary"] == "secret=[REDACTED]"
