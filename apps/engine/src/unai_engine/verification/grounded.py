@@ -37,7 +37,7 @@ _MAX_SHRINK_ROUNDS = 6
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
-    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
+    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float and string arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
@@ -111,20 +111,47 @@ def _float_shrink_candidates(value: float) -> list[float]:
     return sorted(normalized, key=lambda item: (abs(item), item))
 
 
-def _numeric_magnitude(value: Any) -> Decimal:
+def _string_shrink_candidates(value: str) -> list[str]:
+    """Return a small deterministic set of strictly shorter string candidates."""
+    if not isinstance(value, str) or not value:
+        return []
+    length = len(value)
+    candidates = {""}
+    chunk_sizes = sorted(
+        {max(1, length // divisor) for divisor in (2, 4, 8, 16)},
+        reverse=True,
+    )
+    for chunk_size in chunk_sizes:
+        if chunk_size >= length:
+            continue
+        starts = sorted({0, (length - chunk_size) // 2, length - chunk_size})
+        for start in starts:
+            candidate = value[:start] + value[start + chunk_size:]
+            if len(candidate) < length:
+                candidates.add(candidate)
+            if len(candidates) >= 12:
+                break
+        if len(candidates) >= 12:
+            break
+    return sorted(candidates, key=lambda item: (len(item), item))[:12]
+
+
+def _argument_measure(value: Any) -> Decimal:
     if isinstance(value, bool):
         return Decimal(0)
     if isinstance(value, int):
         return Decimal(abs(value))
     if isinstance(value, float) and math.isfinite(value):
         return Decimal(str(abs(value)))
+    if isinstance(value, str):
+        return Decimal(len(value))
     return Decimal(0)
 
 
 def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
     """Score supported numeric arguments without float-sum overflow."""
     numeric_magnitude = sum(
-        (_numeric_magnitude(value) for value in arguments.values()),
+        (_argument_measure(value) for value in arguments.values()),
         Decimal(0),
     )
     encoded = _json_text(arguments, "Shrunk arguments")
@@ -661,13 +688,13 @@ class GroundedTestVerifier:
             final_note = ""
 
             while True:
-                base_numeric_magnitude = sum(
-                    (_numeric_magnitude(value) for value in current_arguments.values()),
+                base_argument_measure = sum(
+                    (_argument_measure(value) for value in current_arguments.values()),
                     Decimal(0),
                 )
                 # Keep descriptor storage light: copy the complete argument map
                 # only for the at-most-24 candidates selected for a sandbox round.
-                descriptors: list[tuple[str, int | float, Decimal]] = []
+                descriptors: list[tuple[str, int | float | str, Decimal]] = []
                 for argument_name in sorted(current_arguments):
                     value = current_arguments[argument_name]
                     if isinstance(value, bool):
@@ -676,13 +703,15 @@ class GroundedTestVerifier:
                         reductions = _integer_shrink_candidates(value)
                     elif isinstance(value, float):
                         reductions = _float_shrink_candidates(value)
+                    elif isinstance(value, str):
+                        reductions = _string_shrink_candidates(value)
                     else:
                         continue
                     for reduced_value in reductions:
                         score = (
-                            base_numeric_magnitude
-                            - _numeric_magnitude(value)
-                            + _numeric_magnitude(reduced_value)
+                            base_argument_measure
+                            - _argument_measure(value)
+                            + _argument_measure(reduced_value)
                         )
                         descriptors.append((argument_name, reduced_value, score))
 
@@ -700,8 +729,8 @@ class GroundedTestVerifier:
                     else:
                         final_status = "no_supported_numeric_arguments"
                         final_note = (
-                            "Shrinking currently changes non-zero integer and finite float arguments only; "
-                            "booleans, NaN/infinity, strings, collections and zero-valued inputs are left unchanged."
+                            "Shrinking currently changes non-zero integer/finite-float and non-empty string arguments only; "
+                            "booleans, NaN/infinity, collections and already-minimal inputs are left unchanged."
                         )
                     break
 
