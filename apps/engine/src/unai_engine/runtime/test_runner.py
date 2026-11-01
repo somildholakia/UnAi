@@ -211,7 +211,7 @@ class IsolatedPythonTestRunner:
             metadata["error"] = error
         if evidence_metadata:
             metadata.update(evidence_metadata)
-        if evidence_source == "grounded-oracle-sandbox":
+        if evidence_source in {"grounded-oracle-sandbox", "grounded-oracle-shrink-sandbox"}:
             markers: list[dict[str, str]] = []
             captured_output = "\n".join([stdout, stderr])
             for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", captured_output):
