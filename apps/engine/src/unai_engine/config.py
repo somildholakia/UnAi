@@ -5,6 +5,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -56,15 +57,13 @@ class TrustedOraclePublisherKey:
 
     issuer_id: str
     public_key_b64: str
-    not_before: object | None = None
-    not_after: object | None = None
+    not_before: datetime | None = None
+    not_after: datetime | None = None
     revoked: bool = False
 
 
 def _publisher_keys_from_env() -> dict[str, TrustedOraclePublisherKey]:
     """Load issuer-bound publisher keys, allowing multiple IDs per issuer for rotation."""
-    from datetime import datetime
-
     raw = os.getenv("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS", "{}")
     try:
         parsed = json.loads(raw)
@@ -76,7 +75,7 @@ def _publisher_keys_from_env() -> dict[str, TrustedOraclePublisherKey]:
     validated: dict[str, TrustedOraclePublisherKey] = {}
     allowed_fields = {"issuer_id", "public_key_b64", "not_before", "not_after", "revoked"}
 
-    def parse_bound(value: object, field_name: str, key_id: str):
+    def parse_bound(value: object, field_name: str, key_id: str) -> datetime | None:
         if value is None:
             return None
         if not isinstance(value, str):
