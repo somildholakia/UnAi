@@ -12,6 +12,7 @@ import json
 import math
 import re
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Any
@@ -21,6 +22,7 @@ from unai_engine.models import (
     EvidenceRecord,
     GroundedCounterexample,
     GroundedOracleAttestation,
+    GroundedOraclePublisherAttestation,
     GroundedTestApprovalRequest,
     GroundedShrinkResult,
     GroundedTestResponse,
@@ -32,6 +34,7 @@ from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
 from unai_engine.verification.attestations import (
     attestation_statement_sha256,
     build_oracle_attestation_statement,
+    build_publisher_artifact_statement,
     canonical_attestation_message,
     verify_ed25519_attestation,
 )
@@ -47,7 +50,7 @@ _MAX_NESTED_CANDIDATES_PER_ARGUMENT = 12
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated only when a configured Ed25519 reviewer key signs the exact source/artifact/input/expectation assertion.",
-    "Trusted reviewer identities are local operator configuration; a valid signature authenticates the configured key's approval, not the logical correctness of the reviewed requirement.",
+    "Trusted reviewer identities and publisher identities are local operator configuration; publisher signatures authenticate a trusted issuer's exact artifact revision, while reviewer signatures approve a test assertion. Neither proves logical correctness.",
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
@@ -485,6 +488,14 @@ def _validate_cases(
             raise GroundedVerificationError(
                 f"Oracle case {case.case_id} requires a pinned specification artifact for a trusted reviewer attestation."
             )
+        if case.oracle_publisher_attestation is not None and (
+            case.oracle_kind != "specification"
+            or artifact_path is None
+            or artifact_sha256 is None
+        ):
+            raise GroundedVerificationError(
+                f"Oracle case {case.case_id} requires a pinned specification artifact for a trusted publisher attestation."
+            )
         if artifact_path is not None:
             artifact_relative = PurePosixPath(artifact_path)
             if (
@@ -599,6 +610,11 @@ def _validate_cases(
                 "oracle_attestation": (
                     case.oracle_attestation.model_dump(mode="json")
                     if case.oracle_attestation is not None
+                    else None
+                ),
+                "oracle_publisher_attestation": (
+                    case.oracle_publisher_attestation.model_dump(mode="json")
+                    if case.oracle_publisher_attestation is not None
                     else None
                 ),
                 "probe_candidate_id": case.probe_candidate_id,
@@ -808,11 +824,13 @@ class GroundedTestVerifier:
         patch_manager: PatchManager,
         test_runner: IsolatedPythonTestRunner,
         trusted_oracle_public_keys: dict[str, str] | None = None,
+        trusted_oracle_publisher_keys: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.ledger = ledger
         self.patch_manager = patch_manager
         self.test_runner = test_runner
         self.trusted_oracle_public_keys = dict(trusted_oracle_public_keys or {})
+        self.trusted_oracle_publisher_keys = dict(trusted_oracle_publisher_keys or {})
 
     def _shrink_property_counterexamples(
         self,
@@ -1332,6 +1350,66 @@ class GroundedTestVerifier:
                 )
             case["oracle_artifact_size_bytes"] = fingerprint["size_bytes"]
 
+        # Publisher signatures authenticate a specification artifact's exact
+        # HTTPS identity/revision/hash manifest. They are distinct from reviewer
+        # signatures, which approve the derived test assertion.
+        publisher_signatures: dict[str, str] = {}
+        for case in normalized:
+            publisher_data = case.get("oracle_publisher_attestation")
+            if not publisher_data:
+                case["oracle_publisher_attestation_provenance"] = None
+                continue
+            publisher = GroundedOraclePublisherAttestation.model_validate(publisher_data)
+            trusted_entry = self.trusted_oracle_publisher_keys.get(publisher.key_id)
+            if trusted_entry is None:
+                raise GroundedVerificationError(
+                    f"Publisher attestation key {publisher.key_id!r} is not in the configured trusted publisher keyring.",
+                    403,
+                )
+            if publisher.issuer != trusted_entry["issuer"]:
+                raise GroundedVerificationError(
+                    f"Publisher issuer does not match the configured identity for key {publisher.key_id!r}.",
+                    403,
+                )
+            parsed_uri = urlsplit(publisher.artifact_uri)
+            hostname = (parsed_uri.hostname or "").casefold().rstrip(".")
+            if hostname not in set(trusted_entry["allowed_domains"]):
+                raise GroundedVerificationError(
+                    f"Publisher artifact host {hostname!r} is not allowed for key {publisher.key_id!r}.",
+                    403,
+                )
+            statement = build_publisher_artifact_statement(
+                key_id=publisher.key_id,
+                issuer=publisher.issuer,
+                issued_at=publisher.issued_at,
+                artifact_uri=publisher.artifact_uri,
+                artifact_revision=publisher.artifact_revision,
+                artifact_sha256=case["oracle_artifact_sha256"],
+            )
+            if not verify_ed25519_attestation(
+                public_key_b64=trusted_entry["public_key_b64"],
+                signature_b64=publisher.signature_b64,
+                message=canonical_attestation_message(statement),
+            ):
+                raise GroundedVerificationError(
+                    f"Publisher signature for oracle case {case['case_id']} is invalid.",
+                    403,
+                )
+            case["oracle_publisher_attestation_provenance"] = {
+                "verified": True,
+                "algorithm": "Ed25519",
+                "key_id": publisher.key_id,
+                "issuer": publisher.issuer,
+                "artifact_uri": publisher.artifact_uri,
+                "artifact_revision": publisher.artifact_revision,
+                "artifact_sha256": case["oracle_artifact_sha256"],
+                "issued_at": statement["issued_at"],
+                "statement_sha256": attestation_statement_sha256(statement),
+            }
+            publisher_signatures[case["case_id"]] = publisher.signature_b64
+            # Signatures remain in append-only evidence, not generated pytest input.
+            case["oracle_publisher_attestation"] = None
+
         # An optional signature is trusted only when its key ID is in the
         # operator-configured keyring. Signatures bind the exact test assertion.
         attestation_signatures: dict[str, str] = {}
@@ -1417,7 +1495,11 @@ class GroundedTestVerifier:
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
                     "oracle_artifact_size_bytes": case.get("oracle_artifact_size_bytes"),
                     "oracle_artifact_integrity": (
-                        "trusted-ed25519-review-attestation"
+                        "trusted-ed25519-publisher-and-reviewer"
+                        if case["oracle_publisher_attestation_provenance"] and case["oracle_attestation_provenance"]
+                        else "trusted-ed25519-publisher-signature"
+                        if case["oracle_publisher_attestation_provenance"]
+                        else "trusted-ed25519-review-attestation"
                         if case["oracle_attestation_provenance"]
                         else "workspace-file-sha256-verified"
                         if case["oracle_artifact_path"]
@@ -1427,6 +1509,8 @@ class GroundedTestVerifier:
                     ),
                     "oracle_attestation": case["oracle_attestation_provenance"],
                     "oracle_attestation_signature_b64": attestation_signatures.get(case["case_id"]),
+                    "oracle_publisher_attestation": case["oracle_publisher_attestation_provenance"],
+                    "oracle_publisher_attestation_signature_b64": publisher_signatures.get(case["case_id"]),
                     "probe_candidate_id": case["probe_candidate_id"],
                 },
                 created_at=now,
@@ -1784,6 +1868,17 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
             risks.append("One or more user oracle contracts remain requester-supplied rather than independently reviewed.")
         if any(not item.metadata.get("oracle_artifact_sha256") for item in specification_oracles):
             risks.append("One or more specification references are not bound to a SHA-256-pinned workspace document.")
+        unauthenticated_publishers = [
+            item for item in specification_oracles
+            if not (
+                isinstance(item.metadata.get("oracle_publisher_attestation"), dict)
+                and item.metadata["oracle_publisher_attestation"].get("verified") is True
+            )
+        ]
+        if unauthenticated_publishers:
+            risks.append("One or more specification artifacts lack a valid signature from an operator-configured trusted publisher key.")
+        elif specification_oracles:
+            risks.append("Publisher signatures authenticate the configured issuer's exact artifact URI, revision and bytes; they do not approve the test's expected assertion.")
         unattested_specifications = [
             item for item in specification_oracles
             if not (

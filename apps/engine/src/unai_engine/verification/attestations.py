@@ -65,6 +65,27 @@ def build_oracle_attestation_statement(
     }
 
 
+def build_publisher_artifact_statement(
+    *,
+    key_id: str,
+    issuer: str,
+    issued_at: datetime,
+    artifact_uri: str,
+    artifact_revision: str,
+    artifact_sha256: str,
+) -> dict[str, Any]:
+    """Build the signed manifest that binds a publisher identity to exact artifact bytes."""
+    return {
+        "schema": "unai.spec-publisher-manifest.v1",
+        "key_id": key_id,
+        "issuer": issuer,
+        "issued_at": _utc_timestamp(issued_at),
+        "artifact_uri": artifact_uri,
+        "artifact_revision": artifact_revision,
+        "artifact_sha256": artifact_sha256.lower(),
+    }
+
+
 def canonical_attestation_message(statement: dict[str, Any]) -> bytes:
     """Return UTF-8 canonical JSON bytes; no caller code is evaluated."""
     return json.dumps(
