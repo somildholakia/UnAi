@@ -213,80 +213,147 @@ def _validated_replay_trace(
     for record in payload["records"]:
         if (
             not isinstance(record, dict)
-            or record.get("kind") != "output_stable_across_replays"
             or not isinstance(record.get("case_id"), str)
             or record["case_id"] not in expected
             or record["case_id"] in seen
-            or not isinstance(record.get("replay_count"), int)
-            or isinstance(record.get("replay_count"), bool)
-            or not 2 <= record["replay_count"] <= 4
-            or not isinstance(record.get("stable"), bool)
-            or not isinstance(record.get("results"), list)
-            or len(record["results"]) != record["replay_count"]
         ):
             return [], "invalid"
         seen.add(record["case_id"])
-        results: list[dict[str, Any]] = []
-        result_hashes: list[str] = []
-        all_returned = True
-        for index, item in enumerate(record["results"], start=1):
+        kind = record.get("kind")
+        if kind == "output_stable_across_replays":
             if (
-                not isinstance(item, dict)
-                or item.get("replay_index") != index
-                or item.get("status") not in {"returned", "raised", "non_json_return"}
-                or not isinstance(item.get("actual_type"), str)
+                not isinstance(record.get("replay_count"), int)
+                or isinstance(record.get("replay_count"), bool)
+                or not 2 <= record["replay_count"] <= 4
+                or not isinstance(record.get("stable"), bool)
+                or not isinstance(record.get("results"), list)
+                or len(record["results"]) != record["replay_count"]
             ):
                 return [], "invalid"
-            normalized_item: dict[str, Any] = {
-                "replay_index": index,
-                "status": item["status"],
-                "actual_type": item["actual_type"][:120],
-            }
-            digest = item.get("actual_sha256")
-            if digest is not None:
-                if not isinstance(digest, str) or re.fullmatch(r"[a-fA-F0-9]{64}", digest) is None:
-                    return [], "invalid"
-                normalized_item["actual_sha256"] = digest.lower()
-            if item["status"] == "returned":
-                if digest is None:
-                    return [], "invalid"
-                result_hashes.append(digest.lower())
-            else:
-                all_returned = False
-            exception_digest = item.get("exception_message_sha256")
-            if exception_digest is not None:
-                if not isinstance(exception_digest, str) or re.fullmatch(r"[a-fA-F0-9]{64}", exception_digest) is None:
-                    return [], "invalid"
-                normalized_item["exception_message_sha256"] = exception_digest.lower()
-            frame = item.get("target_frame")
-            if frame is not None:
+            results: list[dict[str, Any]] = []
+            result_hashes: list[str] = []
+            all_returned = True
+            for index, item in enumerate(record["results"], start=1):
                 if (
-                    not isinstance(frame, dict)
-                    or not isinstance(frame.get("line"), int)
-                    or isinstance(frame.get("line"), bool)
-                    or frame["line"] < 1
-                    or not isinstance(frame.get("function"), str)
+                    not isinstance(item, dict)
+                    or item.get("replay_index") != index
+                    or item.get("status") not in {"returned", "raised", "non_json_return"}
+                    or not isinstance(item.get("actual_type"), str)
                 ):
                     return [], "invalid"
-                normalized_item["target_frame"] = {
-                    "line": frame["line"],
-                    "function": frame["function"][:128],
+                normalized_item: dict[str, Any] = {
+                    "replay_index": index,
+                    "status": item["status"],
+                    "actual_type": item["actual_type"][:120],
                 }
-            results.append(normalized_item)
-        computed_stable = (
-            all_returned
-            and len(result_hashes) == record["replay_count"]
-            and len(set(result_hashes)) == 1
-        )
-        if computed_stable != record["stable"]:
+                digest = item.get("actual_sha256")
+                if digest is not None:
+                    if not isinstance(digest, str) or re.fullmatch(r"[a-fA-F0-9]{64}", digest) is None:
+                        return [], "invalid"
+                    normalized_item["actual_sha256"] = digest.lower()
+                if item["status"] == "returned":
+                    if digest is None:
+                        return [], "invalid"
+                    result_hashes.append(digest.lower())
+                else:
+                    all_returned = False
+                exception_digest = item.get("exception_message_sha256")
+                if exception_digest is not None:
+                    if not isinstance(exception_digest, str) or re.fullmatch(r"[a-fA-F0-9]{64}", exception_digest) is None:
+                        return [], "invalid"
+                    normalized_item["exception_message_sha256"] = exception_digest.lower()
+                frame = item.get("target_frame")
+                if frame is not None:
+                    if (
+                        not isinstance(frame, dict)
+                        or not isinstance(frame.get("line"), int)
+                        or isinstance(frame.get("line"), bool)
+                        or frame["line"] < 1
+                        or not isinstance(frame.get("function"), str)
+                    ):
+                        return [], "invalid"
+                    normalized_item["target_frame"] = {
+                        "line": frame["line"],
+                        "function": frame["function"][:128],
+                    }
+                results.append(normalized_item)
+            computed_stable = (
+                all_returned
+                and len(result_hashes) == record["replay_count"]
+                and len(set(result_hashes)) == 1
+            )
+            if computed_stable != record["stable"]:
+                return [], "invalid"
+            normalized.append({
+                "case_id": record["case_id"],
+                "kind": "output_stable_across_replays",
+                "replay_count": record["replay_count"],
+                "stable": computed_stable,
+                "results": results,
+            })
+        elif kind == "workspace_filesystem_unchanged":
+            audit_status = record.get("status")
+            if audit_status == "unavailable":
+                reason_code = record.get("reason_code")
+                allowed_reasons = {
+                    "entry_limit_exceeded",
+                    "file_size_limit_exceeded",
+                    "request_byte_budget_exceeded",
+                    "unsupported_entry_type",
+                    "unsafe_file_type",
+                    "filesystem_read_error",
+                    "file_changed_during_snapshot",
+                }
+                if reason_code not in allowed_reasons:
+                    return [], "invalid"
+                normalized.append({
+                    "case_id": record["case_id"],
+                    "kind": "workspace_filesystem_unchanged",
+                    "status": "unavailable",
+                    "reason_code": reason_code,
+                })
+                continue
+            if (
+                audit_status != "complete"
+                or not isinstance(record.get("unchanged"), bool)
+                or not isinstance(record.get("before_sha256"), str)
+                or re.fullmatch(r"[a-fA-F0-9]{64}", record["before_sha256"]) is None
+                or not isinstance(record.get("after_sha256"), str)
+                or re.fullmatch(r"[a-fA-F0-9]{64}", record["after_sha256"]) is None
+                or not isinstance(record.get("changed_entry_count"), int)
+                or isinstance(record.get("changed_entry_count"), bool)
+                or record["changed_entry_count"] < 0
+                or not isinstance(record.get("changed_paths_sha256"), str)
+                or re.fullmatch(r"[a-fA-F0-9]{64}", record["changed_paths_sha256"]) is None
+                or not isinstance(record.get("entry_count"), int)
+                or isinstance(record.get("entry_count"), bool)
+                or record["entry_count"] < 0
+                or not isinstance(record.get("bytes_hashed"), int)
+                or isinstance(record.get("bytes_hashed"), bool)
+                or record["bytes_hashed"] < 0
+            ):
+                return [], "invalid"
+            unchanged = record["changed_entry_count"] == 0
+            if (
+                unchanged != record["unchanged"]
+                or (unchanged and record["before_sha256"] != record["after_sha256"])
+                or (not unchanged and record["before_sha256"] == record["after_sha256"])
+            ):
+                return [], "invalid"
+            normalized.append({
+                "case_id": record["case_id"],
+                "kind": "workspace_filesystem_unchanged",
+                "status": "complete",
+                "unchanged": unchanged,
+                "before_sha256": record["before_sha256"].lower(),
+                "after_sha256": record["after_sha256"].lower(),
+                "changed_entry_count": record["changed_entry_count"],
+                "changed_paths_sha256": record["changed_paths_sha256"].lower(),
+                "entry_count": record["entry_count"],
+                "bytes_hashed": record["bytes_hashed"],
+            })
+        else:
             return [], "invalid"
-        normalized.append({
-            "case_id": record["case_id"],
-            "kind": "output_stable_across_replays",
-            "replay_count": record["replay_count"],
-            "stable": computed_stable,
-            "results": results,
-        })
     return normalized, "complete" if seen == expected else "partial"
 
 
