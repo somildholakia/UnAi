@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 — grounded oracle verification first milestone merged
+**Checkpoint:** M4 — property-oracle shrinking delivered; broader verification remains in progress
 **Date:** 2026-11-01
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** main
@@ -10,6 +10,8 @@
 **M4 async extension merge commit:** 6a95421d171433fe52d6f54722dc8924e33f3c66
 **M4 pinned-specification artifact PR:** https://github.com/somildholakia/UnAi/pull/4 (merged)
 **M4 pinned-specification artifact merge commit:** b4ce3fae5030c95bbc0ff4b509d37626d89707ff
+**M4 property-oracle and shrinking PR:** https://github.com/somildholakia/UnAi/pull/5 (merged)
+**M4 property-oracle and shrinking merge commit:** 0b2f0736bb9162af32e1e77c09e4ef2536989913
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
 
@@ -106,6 +108,10 @@
 - M4 pinned-specification artifact PR #4 was squash-merged as b4ce3fae5030c95bbc0ff4b509d37626d89707ff.
 - M4 pinned-specification artifact PR CI: https://github.com/somildholakia/UnAi/actions/runs/41290776370
 - PR #4 CI reported 155 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 property-oracle and shrinking PR #5 was squash-merged as 0b2f0736bb9162af32e1e77c09e4ef2536989913.
+- M4 property-oracle PR CI: https://github.com/somildholakia/UnAi/actions/runs/41291943934
+- M4 property-oracle post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41292043642
+- Both PR #5 workflows reported 162 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
@@ -124,7 +130,7 @@
 ## Next work after this checkpoint
 
 1. Strengthen specification provenance beyond byte integrity: add trusted publisher signatures or explicit human-review attestations; a workspace SHA-256 pin does not identify the author or authority.
-2. Add an explicit property-oracle contract before implementing automatic input shrinking; do not reuse one exact expected output for changed inputs unless the oracle says that property is invariant.
+2. Extend shrinking to multiple-argument cumulative reduction, floats, strings and collections only with explicit per-type reduction semantics and resource budgets; keep smallest-observed versus globally-minimal claims distinct.
 3. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
 4. Expand grounded tests to supported class/static methods, exception oracles and more languages only with dedicated invocation rules, execution isolation and tests.
 5. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
