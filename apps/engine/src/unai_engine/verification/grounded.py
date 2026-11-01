@@ -161,6 +161,7 @@ def _validate_cases(
             if (
                 case.oracle_kind != "specification"
                 or artifact_relative.is_absolute()
+                or artifact_relative.as_posix() != artifact_path
                 or "\\" in artifact_path
                 or any(part in {"", ".", ".."} for part in artifact_relative.parts)
                 or artifact_relative.suffix.casefold() not in {".md", ".txt", ".rst", ".adoc"}
