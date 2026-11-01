@@ -341,14 +341,14 @@ def brain_read(note_path: str) -> dict:
 def brain_create(
     note: BrainNoteCreate,
     request: Request,
-    authorization: str | None = Header(default=None),
+    brain_write_token: str | None = Header(default=None, alias="X-Brain-Write-Token"),
 ) -> dict:
-    # Tokenless writes are restricted to loopback/test clients. Remote deployments
-    # must configure a server-side token; never expose it in the browser bundle.
+    # The Brain write secret is separate from the Engine Authorization bearer token.
+    # Tokenless writes remain restricted to loopback/test clients.
     client_host = request.client.host if request.client else ""
     is_loopback = client_host in {"127.0.0.1", "::1", "testclient"}
     if settings.brain_write_token:
-        authorized = authorization == f"Bearer {settings.brain_write_token}"
+        authorized = brain_write_token == settings.brain_write_token
     else:
         authorized = is_loopback
     if not authorized:
@@ -385,6 +385,6 @@ def brain_read_alias(note_path: str) -> dict:
 def brain_create_alias(
     note: BrainNoteCreate,
     request: Request,
-    authorization: str | None = Header(default=None),
+    brain_write_token: str | None = Header(default=None, alias="X-Brain-Write-Token"),
 ) -> dict:
-    return brain_create(note, request, authorization)
+    return brain_create(note, request, brain_write_token)
