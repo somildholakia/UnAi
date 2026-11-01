@@ -323,6 +323,7 @@ class GroundedShrinkResult(BaseModel):
         "no_smaller_failure_observed",
         "no_supported_integer_arguments",
         "no_supported_numeric_arguments",
+        "no_supported_reducible_arguments",
         "budget_exhausted",
         "unavailable",
     ]

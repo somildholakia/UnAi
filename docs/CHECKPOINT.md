@@ -96,7 +96,7 @@
 - Proof summaries keep historical counterexamples while deriving the current overall status from the latest grounded run. A candidate is only marked verified when a completed sandbox run actually exercises its linked oracle case; an unavailable run leaves it unverified.
 - Grounded tests currently support synchronous and async, undecorated, module-level Python functions with keyword-addressable parameters. Return-value oracles require JSON-compatible values; expected-exception oracles use a fixed allowlist and exact exception-type matching. Async calls use asyncio.run in the generated synchronous pytest wrapper. Methods, decorators and custom exception classes remain unsupported.
 - Oracle references and property contracts remain requester-supplied. A workspace artifact hash can pin document bytes and ensure the staged document matches that pin, but does not authenticate authorship or publisher authority. A mismatch is evidence against the implementation *assuming the oracle is correct*; passing examples are not a proof of general correctness.
-- Shrinking is opt-in and applies only to explicit property oracles; reductions support integers and finite floats, greedily cumulative across multiple arguments, capped at 24 candidate executions and 6 Docker rounds per request. Results are smallest-observed, not proven globally minimal; booleans, NaN/infinity, strings and collections are not reduced.
+- Shrinking is opt-in and applies only to explicit property oracles; reductions support integers, finite floats and non-empty strings, greedily cumulative across multiple arguments, capped at 24 candidate executions and 6 Docker rounds per request. Results are smallest-observed, not proven globally minimal; booleans, NaN/infinity and collections are not reduced.
 
 ## CI verification
 
@@ -148,7 +148,7 @@
 ## Next work after this checkpoint
 
 1. Strengthen specification provenance beyond byte integrity: add trusted publisher signatures or explicit human-review attestations; a workspace SHA-256 pin does not identify the author or authority.
-2. Extend shrinking to strings and collections only with explicit per-type reduction semantics and resource budgets; keep smallest-observed versus globally-minimal claims distinct.
+2. Extend shrinking to collections only with explicit per-type reduction semantics and resource budgets; keep smallest-observed versus globally-minimal claims distinct.
 3. Add execution-trace capture and independent/discriminating checks for more than JSON-returning pure functions.
 4. Expand grounded tests to supported class/static methods, exception oracles and more languages only with dedicated invocation rules, execution isolation and tests.
 5. Persist and incrementally refresh the repository graph; add bounded task-specific code-slice retrieval.
