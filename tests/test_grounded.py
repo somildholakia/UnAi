@@ -263,7 +263,7 @@ def test_trusted_ed25519_attestation_authenticates_exact_specification_case(tmp_
     assert attestation["verified"] is True
     assert attestation["algorithm"] == "Ed25519"
     assert attestation["key_id"] == "reviewer-release"
-    assert attestation["signature_b64"] == signature_b64
+    assert oracle_metadata["oracle_attestation_signature_b64"] == signature_b64
     assert signature_b64 not in runner.calls[0]["content"]
     saved = ledger.get_snapshot(task_id)
     assert saved is not None
@@ -400,7 +400,7 @@ def test_failed_grounded_case_records_counterexample_and_proof_bundle(tmp_path: 
     assert bundle.grounded_counterexample_count == 1
     assert bundle.unverified_probe_candidate_count == len(probes.candidates) - 1
     assert len(bundle.execution_traces) == 1
-    assert any("Oracle provenance" in risk for risk in bundle.unresolved_risks)
+    assert any("user oracle contracts remain requester-supplied" in risk for risk in bundle.unresolved_risks)
 
 
 def test_grounded_request_rejects_stale_source_fingerprint(tmp_path: Path) -> None:
