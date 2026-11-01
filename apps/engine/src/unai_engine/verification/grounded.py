@@ -1869,6 +1869,19 @@ class GroundedTestVerifier:
                             if isinstance(marker.get("target_function"), str)
                             else None
                         ),
+                        "replay_count": (
+                            marker.get("replay_count")
+                            if isinstance(marker.get("replay_count"), int)
+                            and not isinstance(marker.get("replay_count"), bool)
+                            and 2 <= marker["replay_count"] <= 4
+                            else None
+                        ),
+                        "replay_trace_sha256": (
+                            marker.get("replay_trace_sha256")
+                            if isinstance(marker.get("replay_trace_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["replay_trace_sha256"])
+                            else None
+                        ),
                     }
         # Fallback for test doubles and legacy evidence without structured marker metadata.
         for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", output):
@@ -1905,6 +1918,19 @@ class GroundedTestVerifier:
                         marker.get("target_frame", {}).get("function")[:128]
                         if isinstance(marker.get("target_frame"), dict)
                         and isinstance(marker["target_frame"].get("function"), str)
+                        else None
+                    ),
+                    "replay_count": (
+                        marker.get("replay_count")
+                        if isinstance(marker.get("replay_count"), int)
+                        and not isinstance(marker.get("replay_count"), bool)
+                        and 2 <= marker["replay_count"] <= 4
+                        else None
+                    ),
+                    "replay_trace_sha256": (
+                        marker.get("replay_trace_sha256")
+                        if isinstance(marker.get("replay_trace_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["replay_trace_sha256"])
                         else None
                     ),
                 }
