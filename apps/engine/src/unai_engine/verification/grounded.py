@@ -55,7 +55,7 @@ _LIMITATIONS = [
     "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
-    "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
+    "A workspace specification artifact can be SHA-256-pinned and optionally authenticated with an operator-configured Ed25519 publisher key; signatures authenticate configured identities, not logical correctness.",
     "Return-value oracles require JSON-compatible results; an explicit raises_exception property may require only one of the fixed allowlisted built-in exception types, never an arbitrary caller-supplied class name.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
     "Execution traces retain hashes and redacted bounded previews, not a complete deterministic replay of process state.",
@@ -1779,6 +1779,17 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
             risks.append("One or more user oracle contracts remain requester-supplied rather than independently reviewed.")
         if any(not item.metadata.get("oracle_artifact_sha256") for item in specification_oracles):
             risks.append("One or more specification references are not bound to a SHA-256-pinned workspace document.")
+        unauthenticated_publishers = [
+            item for item in specification_oracles
+            if not (
+                isinstance(item.metadata.get("oracle_publisher_attestation"), dict)
+                and item.metadata["oracle_publisher_attestation"].get("verified") is True
+            )
+        ]
+        if unauthenticated_publishers:
+            risks.append("One or more specification artifacts lack a valid signature from an operator-configured trusted publisher key.")
+        elif specification_oracles:
+            risks.append("Publisher signatures authenticate the configured issuer's exact artifact URI, revision and bytes; they do not approve the test's expected assertion.")
         unattested_specifications = [
             item for item in specification_oracles
             if not (
