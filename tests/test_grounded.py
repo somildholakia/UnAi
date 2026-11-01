@@ -583,3 +583,41 @@ def test_specification_artifact_path_rejects_traversal_and_non_text_files(tmp_pa
         )
 
     assert runner.calls == []
+
+
+
+def test_specification_artifact_is_rechecked_before_sandbox_staging(tmp_path: Path, monkeypatch) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec = workspace_root / "demo" / "product-spec.md"
+    initial_content = "# Original specification\\n"
+    spec.write_text(initial_content, encoding="utf-8")
+    expected_hash = hashlib.sha256(initial_content.encode("utf-8")).hexdigest()
+    original_read = verifier.patch_manager.read_file
+    artifact_reads = 0
+
+    def change_spec_before_second_read(read_task_id, file_path, read_workspace_root):
+        nonlocal artifact_reads
+        if file_path == "product-spec.md":
+            artifact_reads += 1
+            if artifact_reads == 2:
+                spec.write_text("# Changed after verification\\n", encoding="utf-8")
+        return original_read(read_task_id, file_path, read_workspace_root)
+
+    monkeypatch.setattr(verifier.patch_manager, "read_file", change_spec_before_second_read)
+    with pytest.raises(
+        GroundedVerificationError,
+        match="changed after test generation and before sandbox staging",
+    ) as raised:
+        verifier.run(
+            task_id,
+            _request(
+                snapshot,
+                oracle_artifact_path="product-spec.md",
+                oracle_artifact_sha256=expected_hash,
+            ),
+            workspace_root,
+        )
+
+    assert raised.value.status_code == 409
+    assert artifact_reads == 2
+    assert runner.calls == []
