@@ -4,7 +4,7 @@
 **Date:** 2026-11-01
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** main
-**Latest main commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
+**M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
 **Implementation PR:** https://github.com/somildholakia/UnAi/pull/1
 **Implementation commit before squash merge:** 7b10caccd780658a12619b331075da82e3e45fad
 
@@ -68,9 +68,10 @@
 ## CI verification
 
 - PR #1 (Add read-only task workflow MCP bridge) passed the Engine test workflow on commit 7b10caccd780658a12619b331075da82e3e45fad.
-- GitHub Actions run: https://github.com/somildholakia/UnAi/actions/runs/41287213961
-- Result: 131 tests passed; python -m compileall -q apps/engine/src training passed.
-- The PR was squash-merged to main as 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa. A push-triggered CI run for the merge commit was started separately; use GitHub Actions to confirm its final result.
+- PR GitHub Actions run: https://github.com/somildholakia/UnAi/actions/runs/41287213961
+- Post-merge GitHub Actions run: https://github.com/somildholakia/UnAi/actions/runs/41287275378
+- Both runs reported 131 tests passed; python -m compileall -q apps/engine/src training passed.
+- PR #1 was squash-merged to main as 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa.
 
 ## Important limits and safety boundaries
 
