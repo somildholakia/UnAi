@@ -761,7 +761,7 @@ def _target_exception_frame(exc):
         except OSError:
             continue
         if frame_path == _TARGET:
-            target_frames.append({"line": frame.lineno, "function": frame.name})
+            target_frames.append({{"line": frame.lineno, "function": frame.name}})
     return target_frames[-1] if target_frames else None
 
 
