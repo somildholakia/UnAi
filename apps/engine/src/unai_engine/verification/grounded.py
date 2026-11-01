@@ -853,7 +853,11 @@ class GroundedTestVerifier:
                 task_id=task_id,
                 kind="oracle",
                 source="grounded-oracle",
-                claim=f"Expected output supplied for grounded case {case['case_id']}.",
+                claim=(
+                    f"Property oracle supplied for grounded case {case['case_id']}."
+                    if case["oracle_property"] is not None
+                    else f"Expected output supplied for grounded case {case['case_id']}."
+                ),
                 passed=None,
                 artifact_ref=f"oracle-case:{task_id}:{case['case_id']}",
                 metadata={
@@ -1210,7 +1214,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
 
     risks = list(snapshot.contract.unknowns)
     if not oracle_events:
-        risks.append("No user- or specification-referenced expected outputs have been executed.")
+        risks.append("No user- or specification-referenced exact or property oracle contracts have been executed.")
     else:
         risks.append(
             "Oracle provenance is requester-supplied; a workspace artifact hash proves content integrity only, not publisher identity, authorship, authority or correctness."
