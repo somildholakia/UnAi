@@ -844,7 +844,15 @@ def test_generated_oracle_code_serializes_untrusted_text_in_json_string(tmp_path
     # The generated harness imports os for its fixed, no-follow replay trace writer.
     # Caller text is serialized as JSON and must never become an os.remove call.
     assert "os" in imported
-    assert "os.remove(" not in generated
+    generated_tree = ast.parse(generated)
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+        and node.func.attr == "remove"
+        for node in ast.walk(generated_tree)
+    )
 
 
 class FakeSandbox:
