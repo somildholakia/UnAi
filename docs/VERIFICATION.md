@@ -83,6 +83,39 @@ A matching artifact hash proves that the workspace document bytes match the supp
 
 The expected values and request fields are serialized as JSON data embedded in a fixed generated pytest template. Caller text is never interpolated as Python statements. For async targets the fixed harness imports asyncio and invokes the coroutine with asyncio.run; it does not accept caller-provided event-loop code or commands. The generated test is placed in unai_generated_tests/ inside the disposable filtered copy only; it is not written to the original workspace. The existing fixed command python -m pytest -q is executed through Docker with networking disabled and the existing CPU, memory, PID and timeout limits. There is no host-shell fallback.
 
+### Property-oracle case
+
+An exact oracle case supplies `expected_output`. A property-oracle case omits `expected_output` and supplies a fixed `oracle_property` object instead. The two forms are mutually exclusive.
+
+Example:
+
+    {
+      "case_id": "non-negative-result",
+      "arguments": {"value": 9},
+      "oracle_property": {"kind": "output_non_negative"},
+      "oracle_kind": "user",
+      "oracle_reference": "User supplied non-negative result requirement"
+    }
+
+The supported, non-executable property kinds are:
+
+- `output_non_negative`: return a finite integer/float (not bool) greater than or equal to zero.
+- `output_positive`: return a finite integer/float (not bool) greater than zero.
+- `output_truthy` / `output_falsy`: satisfy Python truthiness / falsiness.
+- `output_is_none` / `output_not_none`: be None / not None.
+- `output_is_empty` / `output_not_empty`: be an empty / non-empty string, list or dict.
+- `output_equals_argument`: strictly match one named input argument in JSON type and value; set `argument_name`.
+
+No caller-supplied Python expression, lambda, module, or command is evaluated as an oracle. The property contract is serialized as JSON and evaluated by fixed generated helper code. A function exception is still recorded as an unexpected counterexample, not interpreted as an expected exception.
+
+## 2A. Bounded property-oracle shrinking
+
+Shrinking runs only after a sandboxed initial run finds a counterexample for a property-oracle case. Exact expected-output failures are never shrunk because their exact expected output is not assumed to apply to changed inputs.
+
+The first implementation changes integer arguments only. It creates deterministic candidates toward zero (including zero, unit magnitude, divided magnitudes and the nearest smaller integer), changes one argument per candidate, and runs the whole bounded batch in one additional disposable Docker pytest staging copy. A single request is capped at 24 shrink candidates. The target source and any pinned specification artifact are rechecked before staging and in the generated harness.
+
+A candidate is retained only when the same fixed property still emits a counterexample marker. The response returns the smallest observed failing argument object from this bounded candidate batch, its hash, attempt count and status. This is not a proof of global minimality, and it does not yet shrink floats, booleans, strings, collections, or multiple arguments cumulatively. Shrink execution, hashes and outcome metadata are kept in separate append-only shrink evidence; the shrink run cannot overwrite the original grounded-test status.
+
 ## 3. Counterexamples and execution traces
 
 The generated test compares return values using strict recursive JSON type/value equality. On a mismatch or unexpected exception, it emits a case-ID marker. The verifier joins that marker to the supplied oracle record and appends a counterexample evidence event.
@@ -111,7 +144,7 @@ Retrieve the structured bundle with:
 
     GET /api/tasks/{task_id}/proof-bundle
 
-The bundle combines the existing patch/test freshness summary with the grounded oracle records, counterexamples, execution traces, unverified probe counts, unresolved risks and limitations. A grounded test run is also included in the existing /proof test-event sequence.
+The bundle combines the existing patch/test freshness summary with the grounded oracle records, counterexamples, bounded shrink evidence, execution traces, unverified probe counts, unresolved risks and limitations. A grounded test run is also included in the existing /proof test-event sequence.
 
 The local read-only task MCP server exposes task_get_proof_bundle for model-side inspection. It does not expose grounded-test execution, patch application, arbitrary commands or permission grants. An MCP host can read evidence, but an explicit caller must invoke the HTTP execution endpoint.
 
