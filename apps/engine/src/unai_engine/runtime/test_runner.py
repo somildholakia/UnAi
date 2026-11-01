@@ -200,6 +200,7 @@ class IsolatedPythonTestRunner:
             "command": COMMAND,
             "exit_code": exit_code,
             "timed_out": timed_out,
+            "sandboxed": sandboxed,
             "staged_files": staged.files if staged else 0,
             "staged_bytes": staged.bytes_copied if staged else 0,
             "skipped_files": staged.skipped_files if staged else 0,

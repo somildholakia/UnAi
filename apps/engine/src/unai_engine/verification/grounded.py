@@ -373,7 +373,12 @@ class GroundedTestVerifier:
             ).hexdigest(),
             "oracle_case_ids": [case["case_id"] for case in normalized],
             "oracle_references": [
-                {"case_id": case["case_id"], "kind": case["oracle_kind"], "reference": case["oracle_reference"]}
+                {
+                    "case_id": case["case_id"],
+                    "kind": case["oracle_kind"],
+                    "reference": case["oracle_reference"],
+                    "probe_candidate_id": case["probe_candidate_id"],
+                }
                 for case in normalized
             ],
             "generated_test_path": generated_path,
@@ -441,6 +446,7 @@ class GroundedTestVerifier:
                     metadata={
                         "case_id": case_id,
                         "probe_candidate_id": case["probe_candidate_id"],
+                        "execution_evidence_id": execution.evidence.evidence_id,
                         "source_sha256": source_snapshot.sha256,
                         "arguments_sha256": case["arguments_sha256"],
                         "expected_sha256": case["expected_sha256"],
@@ -531,19 +537,36 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         if item.kind == "probe" and item.source == "ast-boundary-probes"
     ]
     candidate_keys: set[tuple[str, str]] = set()
-    linked_candidates: set[tuple[str, str]] = set()
+    verified_candidates: set[tuple[str, str]] = set()
     for event in probes:
         source_hash = str(event.metadata.get("source_sha256", ""))
         for candidate in event.metadata.get("candidates", []):
             candidate_id = candidate.get("candidate_id")
             if isinstance(candidate_id, str):
                 candidate_keys.add((source_hash, candidate_id))
-    for event in oracle_events:
-        source_hash = str(event.metadata.get("source_sha256", ""))
-        candidate_id = event.metadata.get("probe_candidate_id")
-        if isinstance(candidate_id, str):
-            linked_candidates.add((source_hash, candidate_id))
-    unverified_count = len(candidate_keys - linked_candidates)
+
+    # A supplied oracle is not enough: only a completed sandbox run establishes
+    # that the linked probe case was actually exercised.
+    for run in grounded_runs:
+        if (
+            run.passed is None
+            or run.metadata.get("sandboxed") is not True
+            or run.metadata.get("timed_out") is True
+            or not isinstance(run.metadata.get("exit_code"), int)
+        ):
+            continue
+        source_hash = str(run.metadata.get("target_sha256", ""))
+        executed_case_ids = set(run.metadata.get("oracle_case_ids", []))
+        for oracle in oracle_events:
+            case_id = str(oracle.metadata.get("case_id", ""))
+            candidate_id = oracle.metadata.get("probe_candidate_id")
+            if (
+                case_id in executed_case_ids
+                and oracle.metadata.get("source_sha256") == source_hash
+                and isinstance(candidate_id, str)
+            ):
+                verified_candidates.add((source_hash, candidate_id))
+    unverified_count = len(candidate_keys - verified_candidates)
 
     counterexamples = [
         GroundedCounterexample(
@@ -560,12 +583,17 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     ]
 
     latest_run = grounded_runs[-1] if grounded_runs else None
+    latest_run_counterexamples = [
+        item for item in counterexample_events
+        if latest_run is not None
+        and item.metadata.get("execution_evidence_id") == latest_run.evidence_id
+    ]
     if not grounded_runs:
         overall_status = "no_grounded_tests"
-    elif counterexamples:
-        overall_status = "counterexamples_found"
     elif latest_run is not None and latest_run.passed is None:
         overall_status = "grounded_tests_unavailable"
+    elif latest_run is not None and latest_run.passed is False and latest_run_counterexamples:
+        overall_status = "counterexamples_found"
     elif latest_run is not None and latest_run.passed is False:
         overall_status = "grounded_tests_failed"
     else:

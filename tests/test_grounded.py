@@ -65,6 +65,7 @@ class FakeGroundedRunner:
                 "stdout_sha256": hashlib.sha256(self.stdout.encode()).hexdigest(),
                 "stderr_sha256": hashlib.sha256(self.stderr.encode()).hexdigest(),
                 "exit_code": 0 if self.status == "passed" else 1 if self.status == "failed" else None,
+                "sandboxed": self.status != "unavailable",
                 **evidence_metadata,
             },
             created_at=now,
@@ -188,6 +189,7 @@ def test_failed_grounded_case_records_counterexample_and_proof_bundle(tmp_path: 
     assert bundle.grounded_case_count == 1
     assert bundle.grounded_run_count == 1
     assert bundle.grounded_counterexample_count == 1
+    assert bundle.unverified_probe_candidate_count == len(probes.candidates) - 1
     assert len(bundle.execution_traces) == 1
     assert any("Oracle provenance" in risk for risk in bundle.unresolved_risks)
 
@@ -355,3 +357,39 @@ def test_test_runner_extracts_counterexample_markers_before_preview_truncation(t
     markers = result.evidence.metadata["counterexample_markers"]
     assert [item["case_id"] for item in markers] == ["one", "two"]
     assert markers[1]["actual_summary"] == "secret=[REDACTED]"
+
+
+def test_unavailable_oracle_run_does_not_mark_probe_as_verified(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, probes, runner, verifier = _setup(tmp_path)
+    runner.status = "unavailable"
+
+    result = verifier.run(task_id, _request(snapshot), workspace_root)
+
+    assert result.status == "unavailable"
+    stored = ledger.get_snapshot(task_id)
+    assert stored is not None
+    bundle = build_proof_bundle(stored)
+    assert bundle.overall_status == "grounded_tests_unavailable"
+    assert bundle.unverified_probe_candidate_count == len(probes.candidates)
+
+
+def test_old_counterexample_remains_historical_but_latest_pass_controls_status(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    runner.status = "failed"
+    runner.stdout = (
+        'UNAI_COUNTEREXAMPLE:{"case_id":"lower-edge","actual_type":"int","actual_summary":"1"}\n'
+    )
+    failed = verifier.run(task_id, _request(snapshot, expected=0), workspace_root)
+    assert len(failed.counterexamples) == 1
+
+    runner.status = "passed"
+    runner.stdout = ""
+    passed = verifier.run(task_id, _request(snapshot, expected=1), workspace_root)
+    assert passed.status == "passed"
+
+    stored = ledger.get_snapshot(task_id)
+    assert stored is not None
+    bundle = build_proof_bundle(stored)
+    assert bundle.overall_status == "grounded_tests_passed"
+    assert bundle.grounded_counterexample_count == 1
+    assert bundle.counterexamples[0].case_id == "lower-edge"
