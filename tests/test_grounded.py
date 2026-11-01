@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from unai_engine.cognition.task_compiler import compile_task
 from unai_engine.models import (
@@ -1043,6 +1044,19 @@ def test_expected_exception_property_requires_allowlisted_exception_name(tmp_pat
             task_id,
             _property_request(snapshot, exception_name="ValueError"),
             workspace_root,
+        )
+
+    assert runner.calls == []
+
+
+def test_expected_exception_property_rejects_unlisted_exception_names(tmp_path: Path) -> None:
+    _task_id, _workspace_root, _target, _source, _ledger, snapshot, _probes, runner, _verifier = _setup(tmp_path)
+
+    with pytest.raises(ValidationError):
+        _property_request(
+            snapshot,
+            property_kind="raises_exception",
+            exception_name="ImportError",
         )
 
     assert runner.calls == []
