@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -42,11 +44,80 @@ def _oracle_public_keys_from_env() -> dict[str, str]:
             raise ValueError("Trusted oracle key entries require safe string IDs and base64 public keys.")
         try:
             public_key = base64.b64decode(public_key_b64, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
+        except (ValueError, binascii.Error) as exc:
             raise ValueError(f"Trusted oracle public key {key_id!r} is not valid base64.") from exc
         if len(public_key) != 32:
             raise ValueError(f"Trusted oracle public key {key_id!r} must decode to 32 bytes.")
         validated[key_id] = public_key_b64
+    return validated
+
+
+def _oracle_publisher_keys_from_env() -> dict[str, dict[str, Any]]:
+    """Load publisher keys, issuer identities and exact HTTPS hostname allowlists."""
+    raw = os.getenv("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS", "{}")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS must be a JSON object.") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS must be a JSON object.")
+
+    validated: dict[str, dict[str, Any]] = {}
+    for key_id, entry in parsed.items():
+        if (
+            not isinstance(key_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", key_id) is None
+            or not isinstance(entry, dict)
+        ):
+            raise ValueError("Publisher key entries require safe string IDs and object values.")
+        public_key_b64 = entry.get("public_key_b64")
+        issuer = entry.get("issuer")
+        domains = entry.get("allowed_domains")
+        if (
+            not isinstance(public_key_b64, str)
+            or not isinstance(issuer, str)
+            or not 2 <= len(issuer.strip()) <= 128
+            or not isinstance(domains, list)
+            or not 1 <= len(domains) <= 20
+            or not all(isinstance(domain, str) for domain in domains)
+        ):
+            raise ValueError(
+                f"Publisher key {key_id!r} requires public_key_b64, issuer and 1-20 allowed_domains."
+            )
+        try:
+            public_key = base64.b64decode(public_key_b64, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError(f"Publisher public key {key_id!r} is not valid base64.") from exc
+        if len(public_key) != 32:
+            raise ValueError(f"Publisher public key {key_id!r} must decode to 32 bytes.")
+
+        normalized_domains: list[str] = []
+        for domain in domains:
+            normalized = domain.casefold().rstrip(".")
+            if (
+                not normalized
+                or len(normalized) > 253
+                or normalized.startswith(".")
+                or ".." in normalized
+                or re.fullmatch(r"[a-z0-9.-]+", normalized) is None
+                or any(
+                    not label
+                    or len(label) > 63
+                    or label.startswith("-")
+                    or label.endswith("-")
+                    for label in normalized.split(".")
+                )
+            ):
+                raise ValueError(
+                    f"Publisher key {key_id!r} contains an invalid exact hostname allowlist entry."
+                )
+            if normalized not in normalized_domains:
+                normalized_domains.append(normalized)
+        validated[key_id] = {
+            "public_key_b64": public_key_b64,
+            "issuer": issuer.strip(),
+            "allowed_domains": normalized_domains,
+        }
     return validated
 
 
@@ -70,6 +141,9 @@ class Settings:
     brain_write_token: str = os.getenv("UNAI_BRAIN_WRITE_TOKEN", "")
     oracle_trusted_public_keys: dict[str, str] = field(
         default_factory=_oracle_public_keys_from_env
+    )
+    oracle_trusted_publisher_keys: dict[str, dict[str, Any]] = field(
+        default_factory=_oracle_publisher_keys_from_env
     )
 
     def __post_init__(self) -> None:
