@@ -269,13 +269,17 @@ class IsolatedPythonTestRunner:
         generated_test_path: str,
         generated_test_content: str,
         evidence_metadata: dict[str, Any],
+        *,
+        evidence_source: str = "grounded-oracle-sandbox",
     ) -> TaskTestRunResponse:
         """Run one server-generated oracle test alongside the filtered workspace copy."""
+        if evidence_source not in {"grounded-oracle-sandbox", "grounded-oracle-shrink-sandbox"}:
+            raise ValueError("Unsupported generated-test evidence source.")
         return self.run(
             task_id,
             workspace_root,
             generated_test=(generated_test_path, generated_test_content),
-            evidence_source="grounded-oracle-sandbox",
+            evidence_source=evidence_source,
             evidence_metadata=evidence_metadata,
             artifact_ref=f"task:{task_id}/grounded-oracle-tests",
         )
