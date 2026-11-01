@@ -850,6 +850,8 @@ class GroundedTestVerifier:
                     "source_sha256": source_snapshot.sha256,
                     "arguments_sha256": case["arguments_sha256"],
                     "expected_sha256": case["expected_sha256"],
+                    "oracle_property_sha256": case["oracle_property_sha256"],
+                    "oracle_property": case["oracle_property"],
                     "oracle_kind": case["oracle_kind"],
                     "oracle_reference": case["oracle_reference"],
                     "oracle_artifact_path": case["oracle_artifact_path"],
@@ -894,6 +896,8 @@ class GroundedTestVerifier:
                     "reference": case["oracle_reference"],
                     "oracle_artifact_path": case["oracle_artifact_path"],
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
+                    "oracle_property_sha256": case["oracle_property_sha256"],
+                    "oracle_property": case["oracle_property"],
                     "probe_candidate_id": case["probe_candidate_id"],
                 }
                 for case in normalized
@@ -974,6 +978,7 @@ class GroundedTestVerifier:
                 probe_candidate_id=case["probe_candidate_id"],
                 oracle_kind=case["oracle_kind"],
                 oracle_reference=case["oracle_reference"],
+                oracle_property=case["oracle_property"],
                 actual_summary=actual_summary[:600],
             )
             counterexamples.append(counterexample)
@@ -993,6 +998,12 @@ class GroundedTestVerifier:
                         "source_sha256": source_snapshot.sha256,
                         "arguments_sha256": case["arguments_sha256"],
                         "expected_sha256": case["expected_sha256"],
+                        "oracle_property_sha256": case["oracle_property_sha256"],
+                        "oracle_property_kind": (
+                            case["oracle_property"]["kind"]
+                            if case["oracle_property"]
+                            else None
+                        ),
                         "oracle_kind": case["oracle_kind"],
                         "oracle_reference": case["oracle_reference"],
                         "actual_type": marker["actual_type"],
@@ -1001,6 +1012,40 @@ class GroundedTestVerifier:
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
+
+        counterexample_case_ids = {
+            item.case_id for item in counterexamples
+            if case_by_id[item.case_id].get("oracle_property") is not None
+        }
+        shrinking_results: list[GroundedShrinkResult] = []
+        if (
+            counterexample_case_ids
+            and execution.status == "failed"
+            and execution.sandboxed
+            and not execution.timed_out
+        ):
+            shrinking_results = self._shrink_property_counterexamples(
+                task_id,
+                request,
+                normalized,
+                counterexample_case_ids,
+                source_snapshot.sha256,
+                is_async,
+                artifact_fingerprints,
+                workspace_root,
+                execution.evidence.evidence_id,
+            )
+        elif counterexample_case_ids:
+            shrinking_results = [
+                GroundedShrinkResult(
+                    case_id=case_id,
+                    status="unavailable",
+                    attempts=0,
+                    original_arguments_sha256=case_by_id[case_id]["arguments_sha256"],
+                    note="Shrinking requires a completed, sandboxed initial counterexample run.",
+                )
+                for case_id in sorted(counterexample_case_ids)
+            ]
 
         stdout_bytes = (execution.stdout_preview or "").encode("utf-8")
         stderr_bytes = (execution.stderr_preview or "").encode("utf-8")
@@ -1049,6 +1094,7 @@ class GroundedTestVerifier:
             case_count=len(normalized),
             passed_cases=passed_cases,
             counterexamples=counterexamples,
+            shrinking_results=shrinking_results,
             execution_evidence=execution.evidence,
             trace_evidence=trace_evidence,
             oracle_evidence=oracle_events,
@@ -1073,7 +1119,12 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     ]
     trace_events = [
         item for item in events
-        if item.kind == "trace" and item.source == "grounded-execution-trace"
+        if item.kind == "trace"
+        and item.source in {"grounded-execution-trace", "grounded-shrink-trace"}
+    ]
+    shrink_events = [
+        item for item in events
+        if item.kind == "shrink" and item.source == "grounded-property-shrinker"
     ]
     probes = [
         item for item in events
@@ -1168,7 +1219,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     risks.extend(
         [
             "Existing passing tests and a clean Python parse are evidence, not proof of complete semantic correctness.",
-            "The verifier currently does not perform automatic shrinking, symbolic execution, or an independent model review.",
+            "Shrinking only tries bounded integer reductions under a caller-supplied fixed property; it does not prove global minimality or support floats, strings, collections, symbolic execution or independent model review.",
         ]
     )
 
@@ -1180,9 +1231,15 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         grounded_case_count=len(oracle_events),
         grounded_run_count=len(grounded_runs),
         grounded_counterexample_count=len(counterexample_events),
+        shrink_attempt_count=sum(int(item.metadata.get("attempts", 0)) for item in shrink_events),
+        shrunk_counterexample_count=sum(
+            1 for item in shrink_events
+            if item.metadata.get("status") == "smaller_failure_observed"
+        ),
         unverified_probe_candidate_count=unverified_count,
         counterexamples=counterexamples,
         oracle_evidence=oracle_events[-100:],
+        shrink_evidence=shrink_events[-100:],
         execution_traces=trace_events[-30:],
         unresolved_risks=risks,
         limitations=list(_LIMITATIONS),
