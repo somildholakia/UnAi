@@ -416,6 +416,84 @@ def test_removed_publisher_key_id_is_revoked_before_execution(tmp_path: Path) ->
     assert not any(item.kind == "oracle" for item in saved.evidence)
 
 
+@pytest.mark.parametrize(
+    "lifecycle,error_match",
+    [
+        ({"revoked": True}, "has been revoked"),
+        ({"not_before": datetime(2026, 11, 1, 10, 0, tzinfo=timezone.utc)}, "not yet valid"),
+        ({"not_after": datetime(2026, 11, 1, 8, 59, tzinfo=timezone.utc)}, "outside its validity window"),
+    ],
+)
+def test_publisher_key_lifecycle_enforces_revocation_and_issuance_windows(
+    tmp_path: Path, lifecycle: dict, error_match: str
+) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    trust_entry.update(lifecycle)
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": trust_entry}
+
+    with pytest.raises(GroundedVerificationError, match=error_match) as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_publisher_keyring_parses_rotation_windows_and_rejects_invalid_windows(monkeypatch) -> None:
+    from unai_engine.config import _oracle_publisher_keys_from_env
+
+    public_key_b64 = base64.b64encode(b"x" * 32).decode("ascii")
+    monkeypatch.setenv(
+        "UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS",
+        json.dumps({
+            "acme-specs-2025": {
+                "public_key_b64": public_key_b64,
+                "issuer": "Acme Specifications",
+                "allowed_domains": ["specs.acme.example"],
+                "not_before": "2025-01-01T00:00:00Z",
+                "not_after": "2025-12-31T23:59:59Z",
+            },
+            "acme-specs-2026": {
+                "public_key_b64": public_key_b64,
+                "issuer": "Acme Specifications",
+                "allowed_domains": ["specs.acme.example"],
+                "not_before": "2026-01-01T00:00:00+00:00",
+                "revoked": False,
+            },
+        }),
+    )
+
+    keys = _oracle_publisher_keys_from_env()
+
+    assert keys["acme-specs-2025"]["not_before"] == datetime(2025, 1, 1, tzinfo=timezone.utc)
+    assert keys["acme-specs-2025"]["not_after"] == datetime(2025, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+    assert keys["acme-specs-2026"]["not_after"] is None
+    assert keys["acme-specs-2026"]["revoked"] is False
+    assert keys["acme-specs-2025"]["issuer"] == keys["acme-specs-2026"]["issuer"]
+
+    monkeypatch.setenv(
+        "UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS",
+        json.dumps({
+            "acme-specs-2026": {
+                "public_key_b64": public_key_b64,
+                "issuer": "Acme Specifications",
+                "allowed_domains": ["specs.acme.example"],
+                "not_before": "2026-12-31T00:00:00Z",
+                "not_after": "2026-01-01T00:00:00Z",
+            }
+        }),
+    )
+    with pytest.raises(ValueError, match="invalid issuance window"):
+        _oracle_publisher_keys_from_env()
+
+
 def test_publisher_trust_config_requires_valid_keys_and_exact_domains(monkeypatch) -> None:
     from unai_engine.config import _oracle_publisher_keys_from_env
 
