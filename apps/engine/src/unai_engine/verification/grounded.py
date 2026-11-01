@@ -1712,8 +1712,20 @@ class GroundedTestVerifier:
                         and re.fullmatch(r"[a-fA-F0-9]{64}", marker["exception_message_sha256"])
                         else None
                     ),
-                    "target_line": None,
-                    "target_function": None,
+                    "target_line": (
+                        marker.get("target_frame", {}).get("line")
+                        if isinstance(marker.get("target_frame"), dict)
+                        and isinstance(marker["target_frame"].get("line"), int)
+                        and not isinstance(marker["target_frame"].get("line"), bool)
+                        and marker["target_frame"]["line"] > 0
+                        else None
+                    ),
+                    "target_function": (
+                        marker.get("target_frame", {}).get("function")[:128]
+                        if isinstance(marker.get("target_frame"), dict)
+                        and isinstance(marker["target_frame"].get("function"), str)
+                        else None
+                    ),
                 }
 
         case_by_id = {case["case_id"]: case for case in normalized}
