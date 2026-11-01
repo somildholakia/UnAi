@@ -1592,8 +1592,8 @@ def test_workspace_filesystem_unchanged_passes_without_mutation(tmp_path: Path) 
     completed, record, _staged_root = _execute_filesystem_audit_harness(
         tmp_path,
         source=(
-            "def clamp(value):\\n"
-            "    return value + 1\\n"
+            "def clamp(value):\n"
+            "    return value + 1\n"
         ),
     )
 
@@ -1609,10 +1609,10 @@ def test_workspace_filesystem_unchanged_detects_created_files_without_recording_
     completed, record, staged_root = _execute_filesystem_audit_harness(
         tmp_path,
         source=(
-            "from pathlib import Path\\n"
-            "def clamp(value):\\n"
-            "    Path('side-effect.txt').write_text(str(value), encoding='utf-8')\\n"
-            "    return value\\n"
+            "from pathlib import Path\n"
+            "def clamp(value):\n"
+            "    Path('side-effect.txt').write_text(str(value), encoding='utf-8')\n"
+            "    return value\n"
         ),
     )
 
@@ -1635,7 +1635,7 @@ def test_workspace_mutation_is_structured_and_is_not_automatically_shrunk(tmp_pa
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
     runner.status = "failed"
     runner.stdout = (
-        "FAILED unai_generated_tests/test_oracle.py::test_grounded_oracle_case[property-negative]\\n"
+        "FAILED unai_generated_tests/test_oracle.py::test_grounded_oracle_case[property-negative]\n"
         + "UNAI_COUNTEREXAMPLE:"
         + json.dumps(
             {
