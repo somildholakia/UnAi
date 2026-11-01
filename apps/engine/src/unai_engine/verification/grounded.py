@@ -112,23 +112,73 @@ def _float_shrink_candidates(value: float) -> list[float]:
 
 
 def _numeric_magnitude(value: Any) -> Decimal:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or value is None:
         return Decimal(0)
     if isinstance(value, int):
         return Decimal(abs(value))
-    if isinstance(value, float) and math.isfinite(value):
-        return Decimal(str(abs(value)))
+    if isinstance(value, float):
+        return Decimal(str(abs(value))) if math.isfinite(value) else Decimal(0)
+    if isinstance(value, list):
+        return sum((_numeric_magnitude(item) for item in value), Decimal(0))
+    if isinstance(value, dict):
+        return sum((_numeric_magnitude(item) for item in value.values()), Decimal(0))
     return Decimal(0)
 
 
 def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
-    """Score supported numeric arguments without float-sum overflow."""
-    numeric_magnitude = sum(
-        (_numeric_magnitude(value) for value in arguments.values()),
-        Decimal(0),
-    )
+    """Score numeric leaves recursively without coercing large integers to floats."""
     encoded = _json_text(arguments, "Shrunk arguments")
-    return numeric_magnitude, len(encoded.encode("utf-8")), encoded
+    return (
+        _numeric_magnitude(arguments),
+        len(encoded.encode("utf-8")),
+        encoded,
+    )
+
+
+def _shrink_value_score(value: Any) -> tuple[Decimal, int, str]:
+    encoded = _json_text(value, "Shrink candidate value")
+    return (
+        _numeric_magnitude(value),
+        len(encoded.encode("utf-8")),
+        encoded,
+    )
+
+
+def _argument_shrink_candidates(value: Any) -> list[Any]:
+    """Return deterministic top-level JSON reductions; nested values stay intact."""
+    if isinstance(value, bool) or value is None:
+        return []
+    if isinstance(value, int):
+        return _integer_shrink_candidates(value)
+    if isinstance(value, float):
+        return _float_shrink_candidates(value)
+    if isinstance(value, str):
+        candidates = {"", value[:1], value[: len(value) // 2], value[:-1]}
+        return sorted(
+            (candidate for candidate in candidates if len(candidate) < len(value)),
+            key=lambda item: (len(item), item),
+        )
+    if isinstance(value, list):
+        candidates = [[], value[:1], value[: len(value) // 2], value[:-1]]
+        unique: dict[str, list[Any]] = {}
+        for candidate in candidates:
+            if len(candidate) < len(value):
+                unique[_json_text(candidate, "List shrink candidate")] = candidate
+        return sorted(unique.values(), key=_shrink_value_score)
+    if isinstance(value, dict):
+        ordered_items = sorted(value.items(), key=lambda item: item[0])
+        candidates = [
+            {},
+            dict(ordered_items[:1]),
+            dict(ordered_items[: len(ordered_items) // 2]),
+            dict(ordered_items[:-1]),
+        ]
+        unique: dict[str, dict[str, Any]] = {}
+        for candidate in candidates:
+            if len(candidate) < len(value):
+                unique[_json_text(candidate, "Dictionary shrink candidate")] = candidate
+        return sorted(unique.values(), key=_shrink_value_score)
+    return []
 
 
 def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
@@ -661,30 +711,21 @@ class GroundedTestVerifier:
             final_note = ""
 
             while True:
-                base_numeric_magnitude = sum(
-                    (_numeric_magnitude(value) for value in current_arguments.values()),
-                    Decimal(0),
-                )
                 # Keep descriptor storage light: copy the complete argument map
                 # only for the at-most-24 candidates selected for a sandbox round.
-                descriptors: list[tuple[str, int | float, Decimal]] = []
+                descriptors: list[
+                    tuple[str, Any, tuple[Decimal, int, str]]
+                ] = []
                 for argument_name in sorted(current_arguments):
                     value = current_arguments[argument_name]
-                    if isinstance(value, bool):
-                        continue
-                    if isinstance(value, int):
-                        reductions = _integer_shrink_candidates(value)
-                    elif isinstance(value, float):
-                        reductions = _float_shrink_candidates(value)
-                    else:
-                        continue
-                    for reduced_value in reductions:
-                        score = (
-                            base_numeric_magnitude
-                            - _numeric_magnitude(value)
-                            + _numeric_magnitude(reduced_value)
+                    for reduced_value in _argument_shrink_candidates(value):
+                        descriptors.append(
+                            (
+                                argument_name,
+                                reduced_value,
+                                _shrink_value_score(reduced_value),
+                            )
                         )
-                        descriptors.append((argument_name, reduced_value, score))
 
                 descriptors.sort(
                     key=lambda item: (item[2], item[0], item[1])
