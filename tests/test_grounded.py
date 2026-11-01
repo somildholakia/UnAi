@@ -418,3 +418,79 @@ def test_grounded_oracle_payload_has_per_value_size_limit(tmp_path: Path) -> Non
         verifier.run(task_id, request, workspace_root)
 
     assert runner.calls == []
+
+
+
+def test_async_grounded_function_uses_asyncio_run_in_generated_harness(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "async def add_one(value: int):\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="add_one",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="async-add-one",
+                arguments={"value": 9},
+                expected_output=10,
+                oracle_kind="user",
+                oracle_reference="User supplied async addition result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "import asyncio" in generated
+    assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
+    assert runner.calls[0]["metadata"]["target_is_async"] is True
+
+
+def test_sync_grounded_harness_records_target_kind(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    verifier.run(task_id, _request(snapshot), workspace_root)
+
+    assert runner.calls[0]["metadata"]["target_is_async"] is False
+
+
+def test_decorated_async_function_remains_rejected(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def marker(fn):\n"
+        "    return fn\n\n"
+        "@marker\n"
+        "async def add_one(value):\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="add_one",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="decorated-async",
+                arguments={"value": 9},
+                expected_output=10,
+                oracle_kind="user",
+                oracle_reference="User supplied decorated async result",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="Decorated functions"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
