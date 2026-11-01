@@ -212,7 +212,7 @@ class IsolatedPythonTestRunner:
         if evidence_metadata:
             metadata.update(evidence_metadata)
         if evidence_source in {"grounded-oracle-sandbox", "grounded-oracle-shrink-sandbox"}:
-            markers: list[dict[str, str]] = []
+            markers: list[dict[str, Any]] = []
             captured_output = "\n".join([stdout, stderr])
             for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", captured_output):
                 try:
@@ -221,15 +221,26 @@ class IsolatedPythonTestRunner:
                     continue
                 case_id = marker.get("case_id")
                 if isinstance(case_id, str):
-                    markers.append(
-                        {
-                            "case_id": case_id[:80],
-                            "actual_type": str(marker.get("actual_type", "unknown"))[:120],
-                            "actual_summary": _redact_preview(
-                                str(marker.get("actual_summary", "")), 500
-                            ),
-                        }
-                    )
+                    normalized_marker: dict[str, Any] = {
+                        "case_id": case_id[:80],
+                        "actual_type": str(marker.get("actual_type", "unknown"))[:120],
+                        "actual_summary": _redact_preview(
+                            str(marker.get("actual_summary", "")), 500
+                        ),
+                    }
+                    for digest_field in ("actual_sha256", "exception_message_sha256"):
+                        digest_value = marker.get(digest_field)
+                        if isinstance(digest_value, str) and re.fullmatch(r"[a-fA-F0-9]{64}", digest_value):
+                            normalized_marker[digest_field] = digest_value.lower()
+                    target_frame = marker.get("target_frame")
+                    if isinstance(target_frame, dict):
+                        line_number = target_frame.get("line")
+                        function_name = target_frame.get("function")
+                        if isinstance(line_number, int) and not isinstance(line_number, bool) and line_number > 0:
+                            normalized_marker["target_line"] = line_number
+                        if isinstance(function_name, str):
+                            normalized_marker["target_function"] = function_name[:128]
+                    markers.append(normalized_marker)
             metadata["counterexample_markers"] = markers
         evidence = EvidenceRecord(
             evidence_id=uuid4().hex,

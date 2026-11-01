@@ -48,7 +48,9 @@
 - [x] Add bounded string shrinking by deterministic contiguous-chunk deletion, with strict length reduction and the existing global candidate/round budgets.
 - [x] Add bounded top-level list and string-keyed dictionary shrinking by deterministic contiguous chunk deletion, preserving nested values and existing global candidate/round budgets.
 - [x] Add bounded recursive shrinking inside JSON-compatible nested lists/dictionaries, with 4-level depth, 128-node traversal and 12-candidate-per-argument limits under the global 24-candidate/6-round Docker budget.
-- [ ] Extend deeper or broader recursive reductions only with additional per-type correctness/resource policies; add trace/discriminating analysis.
+- [x] Add structured counterexample traces with canonical JSON result hashes, exception-message hashes and target source line/function, preserving bounded redacted previews.
+- [ ] Add per-case replay traces and discriminating checks for stateful side effects only with explicit evidence and resource policies.
+- [ ] Extend deeper or broader recursive reductions only with additional per-type correctness/resource policies.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [x] Support explicitly decorated top-level-class @staticmethod and @classmethod targets with bound invocation, async support, signature validation and generated-harness tests.
 - [ ] Extend grounded tests to ordinary instance methods, nested classes, other decorators and broader Python signatures only with explicit construction/invocation rules.

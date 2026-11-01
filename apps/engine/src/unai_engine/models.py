@@ -393,6 +393,10 @@ class GroundedCounterexample(BaseModel):
     oracle_reference: str
     oracle_property: GroundedPropertyOracle | None = None
     actual_summary: str
+    actual_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+    exception_message_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+    target_line: int | None = Field(default=None, ge=1)
+    target_function: Annotated[str, StringConstraints(max_length=128)] | None = None
 
 
 class GroundedShrinkResult(BaseModel):

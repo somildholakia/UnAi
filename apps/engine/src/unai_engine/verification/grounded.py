@@ -674,6 +674,7 @@ import json
 import math
 from pathlib import Path
 import sys
+import traceback
 
 import pytest
 
@@ -737,6 +738,33 @@ def _strict_equal(actual, expected):
     return actual == expected
 
 
+def _json_sha256(value):
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _target_exception_frame(exc):
+    frames = traceback.extract_tb(exc.__traceback__)
+    target_frames = []
+    for frame in frames:
+        try:
+            frame_path = Path(frame.filename).resolve()
+        except OSError:
+            continue
+        if frame_path == _TARGET:
+            target_frames.append({{"line": frame.lineno, "function": frame.name}})
+    return target_frames[-1] if target_frames else None
+
+
 def _property_holds(actual, arguments, property_spec):
     kind = property_spec["kind"]
     if kind == "output_non_negative":
@@ -789,6 +817,11 @@ def test_grounded_oracle_case(case):
             "case_id": case["case_id"],
             "actual_type": type(exc).__name__,
             "actual_summary": repr(exc)[:300],
+            "actual_sha256": None,
+            "exception_message_sha256": hashlib.sha256(
+                str(exc).encode("utf-8", errors="replace")
+            ).hexdigest(),
+            "target_frame": _target_exception_frame(exc),
         }}
         raise AssertionError(
             "UNAI_COUNTEREXAMPLE:" + json.dumps(details, sort_keys=True, separators=(",", ":"))
@@ -808,6 +841,9 @@ def test_grounded_oracle_case(case):
             "case_id": case["case_id"],
             "actual_type": type(actual).__name__,
             "actual_summary": actual_summary,
+            "actual_sha256": _json_sha256(actual),
+            "exception_message_sha256": None,
+            "target_frame": None,
         }}
         raise AssertionError(
             "UNAI_COUNTEREXAMPLE:" + json.dumps(details, sort_keys=True, separators=(",", ":"))
@@ -1617,7 +1653,7 @@ class GroundedTestVerifier:
         output = "\n".join(
             [execution.stdout_preview or "", execution.stderr_preview or ""]
         )
-        marker_values: dict[str, dict[str, str]] = {}
+        marker_values: dict[str, dict[str, Any]] = {}
         recorded_markers = execution.evidence.metadata.get("counterexample_markers", [])
         if isinstance(recorded_markers, list):
             for marker in recorded_markers:
@@ -1628,6 +1664,30 @@ class GroundedTestVerifier:
                     marker_values[case_id] = {
                         "actual_type": str(marker.get("actual_type", "unknown"))[:120],
                         "actual_summary": str(marker.get("actual_summary", ""))[:500],
+                        "actual_sha256": (
+                            marker.get("actual_sha256")
+                            if isinstance(marker.get("actual_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["actual_sha256"])
+                            else None
+                        ),
+                        "exception_message_sha256": (
+                            marker.get("exception_message_sha256")
+                            if isinstance(marker.get("exception_message_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["exception_message_sha256"])
+                            else None
+                        ),
+                        "target_line": (
+                            marker.get("target_line")
+                            if isinstance(marker.get("target_line"), int)
+                            and not isinstance(marker.get("target_line"), bool)
+                            and marker["target_line"] > 0
+                            else None
+                        ),
+                        "target_function": (
+                            marker.get("target_function")[:128]
+                            if isinstance(marker.get("target_function"), str)
+                            else None
+                        ),
                     }
         # Fallback for test doubles and legacy evidence without structured marker metadata.
         for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", output):
@@ -1640,6 +1700,32 @@ class GroundedTestVerifier:
                 marker_values[case_id] = {
                     "actual_type": str(marker.get("actual_type", "unknown"))[:120],
                     "actual_summary": str(marker.get("actual_summary", ""))[:500],
+                    "actual_sha256": (
+                        marker.get("actual_sha256")
+                        if isinstance(marker.get("actual_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["actual_sha256"])
+                        else None
+                    ),
+                    "exception_message_sha256": (
+                        marker.get("exception_message_sha256")
+                        if isinstance(marker.get("exception_message_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["exception_message_sha256"])
+                        else None
+                    ),
+                    "target_line": (
+                        marker.get("target_frame", {}).get("line")
+                        if isinstance(marker.get("target_frame"), dict)
+                        and isinstance(marker["target_frame"].get("line"), int)
+                        and not isinstance(marker["target_frame"].get("line"), bool)
+                        and marker["target_frame"]["line"] > 0
+                        else None
+                    ),
+                    "target_function": (
+                        marker.get("target_frame", {}).get("function")[:128]
+                        if isinstance(marker.get("target_frame"), dict)
+                        and isinstance(marker["target_frame"].get("function"), str)
+                        else None
+                    ),
                 }
 
         case_by_id = {case["case_id"]: case for case in normalized}
@@ -1656,6 +1742,10 @@ class GroundedTestVerifier:
                 oracle_reference=case["oracle_reference"],
                 oracle_property=case["oracle_property"],
                 actual_summary=actual_summary[:600],
+                actual_sha256=marker.get("actual_sha256"),
+                exception_message_sha256=marker.get("exception_message_sha256"),
+                target_line=marker.get("target_line"),
+                target_function=marker.get("target_function"),
             )
             counterexamples.append(counterexample)
             self.ledger.append_evidence(
@@ -1685,6 +1775,10 @@ class GroundedTestVerifier:
                         "oracle_reference": case["oracle_reference"],
                         "actual_type": marker["actual_type"],
                         "actual_summary": marker["actual_summary"],
+                        "actual_sha256": counterexample.actual_sha256,
+                        "exception_message_sha256": counterexample.exception_message_sha256,
+                        "target_line": counterexample.target_line,
+                        "target_function": counterexample.target_function,
                     },
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
