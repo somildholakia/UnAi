@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -954,31 +955,14 @@ def test_exact_oracle_requires_explicit_expected_output_even_when_null_is_defaul
     assert runner.calls == []
 
 
-def test_property_shrinking_skips_float_arguments_and_records_non_applicability(tmp_path: Path) -> None:
-    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
-    request = _property_request(snapshot, value=9.5)
-    runner.response_queue.append(
-        (
-            "failed",
-            'UNAI_COUNTEREXAMPLE:{"case_id":"property-negative","actual_type":"float","actual_summary":"-9.5"}',
-            "",
-        )
-    )
+def test_property_shrinking_rejects_non_finite_float_arguments(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
 
-    result = verifier.run(task_id, request, workspace_root)
+    for value in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(GroundedVerificationError, match="JSON-compatible"):
+            verifier.run(task_id, _property_request(snapshot, value=value), workspace_root)
 
-    assert result.status == "failed"
-    assert len(runner.calls) == 1
-    assert result.shrinking_results[0].status == "no_supported_integer_arguments"
-    assert result.shrinking_results[0].attempts == 0
-    saved = ledger.get_snapshot(task_id)
-    assert saved is not None
-    assert any(
-        item.kind == "shrink"
-        and item.metadata.get("status") == "no_supported_integer_arguments"
-        for item in saved.evidence
-    )
-
+    assert runner.calls == []
 
 
 def test_expected_exception_property_accepts_only_the_selected_allowlisted_exception(tmp_path: Path) -> None:
