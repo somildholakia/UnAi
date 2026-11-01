@@ -245,6 +245,75 @@ def _signed_specification_request(
     return request, public_key_b64, signature_b64
 
 
+def _signed_publisher_specification_request(
+    task_id: str,
+    snapshot,
+    *,
+    spec_content: str,
+    issuer_id: str = "publisher.example",
+    key_id: str = "publisher-2026",
+):
+    private_key = Ed25519PrivateKey.generate()
+    issued_at = datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc)
+    arguments = {"value": 9}
+    artifact_path = "product-spec.md"
+    artifact_sha256 = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
+    canonical_json = lambda value: json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    statement = build_oracle_attestation_statement(
+        key_id=key_id,
+        issued_at=issued_at,
+        task_id=task_id,
+        workspace="demo",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        case_id="publisher-lower-edge",
+        oracle_kind="specification",
+        oracle_reference="product-spec.md#clamp-lower-bound",
+        oracle_artifact_path=artifact_path,
+        oracle_artifact_sha256=artifact_sha256,
+        arguments_sha256=hashlib.sha256(canonical_json(arguments)).hexdigest(),
+        expected_output_sha256=hashlib.sha256(canonical_json(0)).hexdigest(),
+        oracle_property_sha256=None,
+        issuer_id=issuer_id,
+    )
+    signature_b64 = base64.b64encode(
+        private_key.sign(canonical_attestation_message(statement))
+    ).decode("ascii")
+    public_key_b64 = base64.b64encode(
+        private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    ).decode("ascii")
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="publisher-lower-edge",
+                arguments=arguments,
+                expected_output=0,
+                oracle_kind="specification",
+                oracle_reference="product-spec.md#clamp-lower-bound",
+                oracle_artifact_path=artifact_path,
+                oracle_artifact_sha256=artifact_sha256,
+                oracle_attestation=GroundedOracleAttestation(
+                    key_id=key_id,
+                    issuer_id=issuer_id,
+                    issued_at=issued_at,
+                    signature_b64=signature_b64,
+                ),
+            )
+        ],
+    )
+    return request, public_key_b64, issued_at
+
+
 def test_trusted_ed25519_attestation_authenticates_exact_specification_case(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
     spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
@@ -270,6 +339,150 @@ def test_trusted_ed25519_attestation_authenticates_exact_specification_case(tmp_
     bundle = build_proof_bundle(saved)
     assert not any("lack a valid signature" in risk for risk in bundle.unresolved_risks)
     assert any("do not prove the underlying specification" in risk for risk in bundle.unresolved_risks)
+
+
+def test_trusted_publisher_signature_binds_issuer_and_records_publisher_provenance(tmp_path: Path) -> None:
+    from unai_engine.config import TrustedOraclePublisherKey
+
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Publisher requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, public_key_b64, issued_at = _signed_publisher_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_publisher_keys = {
+        "publisher-2026": TrustedOraclePublisherKey(
+            issuer_id="publisher.example",
+            public_key_b64=public_key_b64,
+            not_before=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            not_after=datetime(2026, 12, 1, tzinfo=timezone.utc),
+        )
+    }
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    metadata = result.oracle_evidence[0].metadata
+    assert metadata["oracle_artifact_integrity"] == "trusted-ed25519-publisher-attestation"
+    attestation = metadata["oracle_attestation"]
+    assert attestation["verified"] is True
+    assert attestation["key_role"] == "publisher"
+    assert attestation["issuer_id"] == "publisher.example"
+    assert attestation["key_id"] == "publisher-2026"
+    assert attestation["key_revoked"] is False
+    assert attestation["issued_at"].startswith("2026-11-01T09:00:00")
+    assert runner.calls[0]["metadata"]["oracle_references"][0]["oracle_attestation"]["key_role"] == "publisher"
+
+
+def test_publisher_attestation_rejects_wrong_issuer_before_execution(tmp_path: Path) -> None:
+    from unai_engine.config import TrustedOraclePublisherKey
+
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Publisher requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, public_key_b64, issued_at = _signed_publisher_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    verifier.trusted_oracle_publisher_keys = {
+        "publisher-2026": TrustedOraclePublisherKey(
+            issuer_id="other-publisher.example",
+            public_key_b64=public_key_b64,
+        )
+    }
+
+    with pytest.raises(GroundedVerificationError, match="not registered to issuer") as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+@pytest.mark.parametrize(
+    "key_changes,error",
+    [
+        ({"revoked": True}, "has been revoked"),
+        ({"not_before": datetime(2026, 11, 1, 10, 0, tzinfo=timezone.utc)}, "outside its validity window"),
+        ({"not_after": datetime(2026, 11, 1, 8, 59, tzinfo=timezone.utc)}, "outside its validity window"),
+    ],
+)
+def test_publisher_key_revocation_and_issuance_window_are_enforced(
+    tmp_path: Path, key_changes: dict, error: str
+) -> None:
+    from dataclasses import replace
+    from unai_engine.config import TrustedOraclePublisherKey
+
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Publisher requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, public_key_b64, _issued_at = _signed_publisher_specification_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    key = TrustedOraclePublisherKey(
+        issuer_id="publisher.example",
+        public_key_b64=public_key_b64,
+        not_before=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        not_after=datetime(2026, 12, 1, tzinfo=timezone.utc),
+    )
+    verifier.trusted_oracle_publisher_keys = {
+        "publisher-2026": replace(key, **key_changes)
+    }
+
+    with pytest.raises(GroundedVerificationError, match=error) as raised:
+        verifier.run(task_id, request, workspace_root)
+
+    assert raised.value.status_code == 403
+    assert runner.calls == []
+
+
+def test_publisher_keyring_supports_rotation_and_strict_issuer_metadata(monkeypatch) -> None:
+    from unai_engine.config import _publisher_keys_from_env
+
+    key_a = base64.b64encode(Ed25519PrivateKey.generate().public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )).decode("ascii")
+    key_b = base64.b64encode(Ed25519PrivateKey.generate().public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )).decode("ascii")
+    monkeypatch.setenv(
+        "UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS",
+        json.dumps({
+            "publisher-2025": {
+                "issuer_id": "publisher.example",
+                "public_key_b64": key_a,
+                "not_before": "2025-01-01T00:00:00Z",
+                "not_after": "2025-12-31T23:59:59Z",
+            },
+            "publisher-2026": {
+                "issuer_id": "publisher.example",
+                "public_key_b64": key_b,
+                "not_before": "2026-01-01T00:00:00Z",
+                "revoked": False,
+            },
+        }),
+    )
+
+    keys = _publisher_keys_from_env()
+
+    assert set(keys) == {"publisher-2025", "publisher-2026"}
+    assert keys["publisher-2025"].issuer_id == keys["publisher-2026"].issuer_id
+    assert keys["publisher-2026"].not_after is None
+    assert keys["publisher-2026"].revoked is False
+
+
+def test_publisher_attestation_model_validates_issuer_identifier() -> None:
+    signature_b64 = base64.b64encode(b"x" * 64).decode("ascii")
+    with pytest.raises(ValidationError):
+        GroundedOracleAttestation(
+            key_id="publisher-2026",
+            issuer_id="../untrusted",
+            issued_at=datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc),
+            signature_b64=signature_b64,
+        )
 
 
 def test_tampered_expected_output_invalidates_reviewer_signature_before_execution(tmp_path: Path) -> None:
