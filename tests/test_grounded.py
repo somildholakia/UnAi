@@ -1626,9 +1626,10 @@ def test_property_counterexample_shrinks_list_arguments_in_bounded_sandbox_round
     candidates = [case for round_cases in rounds for case in round_cases]
     assert candidates
     assert len(candidates) <= 24
+    from unai_engine.verification.grounded import _argument_measure
     assert all(
         isinstance(case["arguments"]["value"], list)
-        and len(case["arguments"]["value"]) < 8
+        and _argument_measure(case["arguments"]["value"]) < _argument_measure(initial)
         for case in candidates
     )
     shrink = result.shrinking_results[0]
