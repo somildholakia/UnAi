@@ -12,6 +12,8 @@
 **M4 pinned-specification artifact merge commit:** b4ce3fae5030c95bbc0ff4b509d37626d89707ff
 **M4 property-oracle and shrinking PR:** https://github.com/somildholakia/UnAi/pull/5 (merged)
 **M4 property-oracle and shrinking merge commit:** 0b2f0736bb9162af32e1e77c09e4ef2536989913
+**M4 expected-exception oracle PR:** https://github.com/somildholakia/UnAi/pull/6 (merged)
+**M4 expected-exception oracle merge commit:** c52f2e33e97e43cd54b2d85d60b14cd861293b90
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
 
@@ -112,6 +114,10 @@
 - M4 property-oracle PR CI: https://github.com/somildholakia/UnAi/actions/runs/41291943934
 - M4 property-oracle post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41292043642
 - Both PR #5 workflows reported 162 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 expected-exception oracle PR #6 was squash-merged as c52f2e33e97e43cd54b2d85d60b14cd861293b90.
+- M4 expected-exception PR CI: https://github.com/somildholakia/UnAi/actions/runs/41292712102
+- M4 expected-exception post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41292788047
+- Both PR #6 workflows reported 168 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
