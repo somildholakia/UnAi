@@ -471,7 +471,14 @@ def test_trusted_ed25519_attestation_authenticates_exact_specification_case(tmp_
     saved = ledger.get_snapshot(task_id)
     assert saved is not None
     bundle = build_proof_bundle(saved)
-    assert not any("lack a valid signature" in risk for risk in bundle.unresolved_risks)
+    assert not any(
+        "lack a valid signature from an operator-configured trusted reviewer key" in risk
+        for risk in bundle.unresolved_risks
+    )
+    assert any(
+        "lack a valid signature from an operator-configured trusted publisher key" in risk
+        for risk in bundle.unresolved_risks
+    )
     assert any("do not prove the underlying specification" in risk for risk in bundle.unresolved_risks)
 
 
