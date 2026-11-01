@@ -322,15 +322,15 @@ def _validated_replay_trace(
                 or re.fullmatch(r"[a-fA-F0-9]{64}", record["after_sha256"]) is None
                 or not isinstance(record.get("changed_entry_count"), int)
                 or isinstance(record.get("changed_entry_count"), bool)
-                or record["changed_entry_count"] < 0
+                or not 0 <= record["changed_entry_count"] <= 1024
                 or not isinstance(record.get("changed_paths_sha256"), str)
                 or re.fullmatch(r"[a-fA-F0-9]{64}", record["changed_paths_sha256"]) is None
                 or not isinstance(record.get("entry_count"), int)
                 or isinstance(record.get("entry_count"), bool)
-                or record["entry_count"] < 0
+                or not 0 <= record["entry_count"] <= 1024
                 or not isinstance(record.get("bytes_hashed"), int)
                 or isinstance(record.get("bytes_hashed"), bool)
-                or record["bytes_hashed"] < 0
+                or not 0 <= record["bytes_hashed"] <= 16 * 1024 * 1024
             ):
                 return [], "invalid"
             unchanged = record["changed_entry_count"] == 0
@@ -426,10 +426,31 @@ class IsolatedPythonTestRunner:
                             str(marker.get("actual_summary", "")), 500
                         ),
                     }
-                    for digest_field in ("actual_sha256", "exception_message_sha256", "replay_trace_sha256"):
+                    for digest_field in (
+                        "actual_sha256",
+                        "exception_message_sha256",
+                        "replay_trace_sha256",
+                        "filesystem_before_sha256",
+                        "filesystem_after_sha256",
+                        "filesystem_changed_paths_sha256",
+                    ):
                         digest_value = marker.get(digest_field)
                         if isinstance(digest_value, str) and re.fullmatch(r"[a-fA-F0-9]{64}", digest_value):
                             normalized_marker[digest_field] = digest_value.lower()
+                    for count_field, maximum in (
+                        ("replay_count", 4),
+                        ("filesystem_changed_entry_count", 1024),
+                        ("filesystem_entry_count", 1024),
+                        ("filesystem_bytes_hashed", 16 * 1024 * 1024),
+                    ):
+                        count_value = marker.get(count_field)
+                        minimum = 2 if count_field == "replay_count" else 0
+                        if (
+                            isinstance(count_value, int)
+                            and not isinstance(count_value, bool)
+                            and minimum <= count_value <= maximum
+                        ):
+                            normalized_marker[count_field] = count_value
                     replay_count = marker.get("replay_count")
                     if isinstance(replay_count, int) and not isinstance(replay_count, bool) and 2 <= replay_count <= 4:
                         normalized_marker["replay_count"] = replay_count
