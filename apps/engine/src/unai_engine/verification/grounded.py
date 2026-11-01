@@ -704,6 +704,7 @@ import importlib.util
 import json
 import math
 import os
+import stat
 from pathlib import Path
 import sys
 import traceback
@@ -837,6 +838,146 @@ def _is_native_json_value(value, depth=0):
             for key, item in value.items()
         )
     return False
+
+
+_FILESYSTEM_AUDIT_REQUEST_BYTES = 0
+_FILESYSTEM_AUDIT_MAX_REQUEST_BYTES = 16 * 1024 * 1024
+_FILESYSTEM_AUDIT_MAX_FILE_BYTES = 2 * 1024 * 1024
+_FILESYSTEM_AUDIT_MAX_ENTRIES = 1024
+_FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES = {
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+}
+
+
+def _workspace_filesystem_snapshot():
+    """Hash a bounded manifest of the disposable workspace without following symlinks."""
+    global _FILESYSTEM_AUDIT_REQUEST_BYTES
+    manifest = {}
+    snapshot_bytes = 0
+    entry_count = 0
+
+    def unavailable(reason):
+        return None, 0, reason
+
+    def add_entry(relative_path, record):
+        nonlocal entry_count
+        entry_count += 1
+        if entry_count > _FILESYSTEM_AUDIT_MAX_ENTRIES:
+            return False
+        manifest[relative_path] = record
+        return True
+
+    try:
+        for current, dirs, files in os.walk(_ROOT, topdown=True, followlinks=False):
+            current_path = Path(current)
+            dirs.sort()
+            files.sort()
+            for name in list(dirs):
+                if name in _FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES:
+                    dirs.remove(name)
+                    continue
+                candidate = current_path / name
+                relative_path = candidate.relative_to(_ROOT).as_posix()
+                info = candidate.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    target = os.readlink(candidate)
+                    if not add_entry(relative_path, {
+                        "kind": "symlink",
+                        "target_sha256": hashlib.sha256(
+                            target.encode("utf-8", errors="replace")
+                        ).hexdigest(),
+                    }):
+                        return unavailable("entry_limit_exceeded")
+                    dirs.remove(name)
+                elif stat.S_ISDIR(info.st_mode):
+                    if not add_entry(relative_path, {"kind": "directory"}):
+                        return unavailable("entry_limit_exceeded")
+                else:
+                    dirs.remove(name)
+                    return unavailable("unsupported_entry_type")
+
+            for name in files:
+                candidate = current_path / name
+                relative_path = candidate.relative_to(_ROOT).as_posix()
+                info = candidate.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    target = os.readlink(candidate)
+                    record = {
+                        "kind": "symlink",
+                        "target_sha256": hashlib.sha256(
+                            target.encode("utf-8", errors="replace")
+                        ).hexdigest(),
+                    }
+                elif stat.S_ISREG(info.st_mode):
+                    if info.st_size > _FILESYSTEM_AUDIT_MAX_FILE_BYTES:
+                        return unavailable("file_size_limit_exceeded")
+                    if (
+                        _FILESYSTEM_AUDIT_REQUEST_BYTES + snapshot_bytes + info.st_size
+                        > _FILESYSTEM_AUDIT_MAX_REQUEST_BYTES
+                    ):
+                        return unavailable("request_byte_budget_exceeded")
+                    digest = hashlib.sha256()
+                    bytes_read = 0
+                    descriptor = os.open(
+                        candidate,
+                        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    )
+                    with os.fdopen(descriptor, "rb") as handle:
+                        opened = os.fstat(handle.fileno())
+                        if not stat.S_ISREG(opened.st_mode):
+                            return unavailable("unsafe_file_type")
+                        while True:
+                            chunk = handle.read(64 * 1024)
+                            if not chunk:
+                                break
+                            bytes_read += len(chunk)
+                            if bytes_read > _FILESYSTEM_AUDIT_MAX_FILE_BYTES:
+                                return unavailable("file_size_limit_exceeded")
+                            if (
+                                _FILESYSTEM_AUDIT_REQUEST_BYTES + snapshot_bytes + bytes_read
+                                > _FILESYSTEM_AUDIT_MAX_REQUEST_BYTES
+                            ):
+                                return unavailable("request_byte_budget_exceeded")
+                            digest.update(chunk)
+                    if bytes_read != opened.st_size:
+                        return unavailable("file_changed_during_snapshot")
+                    snapshot_bytes += bytes_read
+                    record = {
+                        "kind": "file",
+                        "size_bytes": bytes_read,
+                        "sha256": digest.hexdigest(),
+                    }
+                else:
+                    return unavailable("unsupported_file_type")
+                if not add_entry(relative_path, record):
+                    return unavailable("entry_limit_exceeded")
+    except (OSError, ValueError):
+        return unavailable("filesystem_read_error")
+
+    _FILESYSTEM_AUDIT_REQUEST_BYTES += snapshot_bytes
+    return manifest, snapshot_bytes, None
+
+
+def _workspace_filesystem_digest(manifest):
+    return _json_sha256(manifest)
+
+
+def _workspace_filesystem_delta(before, after):
+    changed_paths = sorted(
+        path
+        for path in set(before) | set(after)
+        if before.get(path) != after.get(path)
+    )
+    return {
+        "before_sha256": _workspace_filesystem_digest(before),
+        "after_sha256": _workspace_filesystem_digest(after),
+        "changed_entry_count": len(changed_paths),
+        "changed_paths_sha256": _json_sha256(changed_paths),
+        "entry_count": len(after),
+    }
 
 
 def _record_replay_trace(record):
