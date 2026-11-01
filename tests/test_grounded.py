@@ -39,6 +39,7 @@ class FakeGroundedRunner:
         self.stderr = stderr
         self.calls: list[dict] = []
         self.response_queue: list[tuple[str, str, str]] = []
+        self.generated_responder = None
 
     def run_generated_test(
         self,
@@ -52,6 +53,10 @@ class FakeGroundedRunner:
     ) -> TaskTestRunResponse:
         if self.response_queue:
             status, stdout, stderr = self.response_queue.pop(0)
+        elif self.generated_responder is not None:
+            status, stdout, stderr = self.generated_responder(
+                generated_test_content, evidence_source, evidence_metadata
+            )
         else:
             status, stdout, stderr = self.status, self.stdout, self.stderr
         self.calls.append(
@@ -791,16 +796,21 @@ def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(t
 
     assert result.status == "failed"
     assert len(result.counterexamples) == 1
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3
     shrink_cases = _generated_cases(runner.calls[1]["content"])
     assert len(shrink_cases) == 5
     assert {item["arguments"]["value"] for item in shrink_cases} == {0, 1, 2, 4, 8}
     assert all(item["oracle_property"]["kind"] == "output_non_negative" for item in shrink_cases)
     assert all("expected_output" not in item for item in shrink_cases)
     assert runner.calls[1]["metadata"]["parent_execution_evidence_id"] == result.execution_evidence.evidence_id
+    next_round = _generated_cases(runner.calls[2]["content"])
+    assert [item["arguments"]["value"] for item in next_round] == [0]
+    assert runner.calls[2]["metadata"]["previous_shrink_execution_evidence_id"] == (
+        runner.calls[1]["metadata"].get("execution_evidence_id")
+    ) or runner.calls[2]["metadata"]["shrink_round"] == 2
     shrink = result.shrinking_results[0]
     assert shrink.status == "smaller_failure_observed"
-    assert shrink.attempts == 5
+    assert shrink.attempts == 6
     assert shrink.smallest_observed_arguments == {"value": 1}
     assert shrink.smallest_observed_arguments_sha256 == hashlib.sha256(
         b'{"value":1}'
