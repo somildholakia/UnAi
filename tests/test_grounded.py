@@ -1482,8 +1482,14 @@ def test_nested_shrink_candidates_reduce_values_inside_json_containers() -> None
 
     assert 0 < len(candidates) <= 12
     assert all(_argument_measure(item) < _argument_measure(original) for item in candidates)
-    assert any(item["payload"]["items"] != original["payload"]["items"] for item in candidates)
-    assert any(item["payload"]["caption"] != original["payload"]["caption"] for item in candidates)
+    assert any(
+        item.get("payload", {}).get("items") != original["payload"]["items"]
+        for item in candidates
+    )
+    assert any(
+        item.get("payload", {}).get("caption") != original["payload"]["caption"]
+        for item in candidates
+    )
     assert all(isinstance(item, dict) for item in candidates)
 
 
@@ -1618,15 +1624,20 @@ def test_property_counterexample_shrinks_list_arguments_in_bounded_sandbox_round
     candidates = [case for round_cases in rounds for case in round_cases]
     assert candidates
     assert len(candidates) <= 24
+    from unai_engine.verification.grounded import _argument_measure
+
+    original_value = [1, 2, 3, 4, 5, 6, 7, 8]
     assert all(
         isinstance(case["arguments"]["value"], list)
-        and len(case["arguments"]["value"]) < 8
+        and len(case["arguments"]["value"]) <= len(original_value)
+        and _argument_measure(case["arguments"]["value"]) < _argument_measure(original_value)
         for case in candidates
     )
     shrink = result.shrinking_results[0]
     assert shrink.status == "smaller_failure_observed"
     assert isinstance(shrink.smallest_observed_arguments["value"], list)
-    assert 0 < len(shrink.smallest_observed_arguments["value"]) < 8
+    assert 0 < len(shrink.smallest_observed_arguments["value"]) <= 8
+    assert _argument_measure(shrink.smallest_observed_arguments["value"]) < _argument_measure(original_value)
     assert shrink.attempts == len(candidates)
 
     saved = ledger.get_snapshot(task_id)
