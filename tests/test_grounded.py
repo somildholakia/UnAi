@@ -1278,3 +1278,95 @@ def test_property_counterexample_shrinks_strings_in_bounded_sandbox_rounds(tmp_p
     )
     assert evidence.metadata["status"] == "smaller_failure_observed"
     assert evidence.metadata["attempts"] <= 24
+
+
+
+def test_collection_shrink_candidates_only_remove_top_level_items() -> None:
+    from unai_engine.verification.grounded import _collection_shrink_candidates
+
+    original_list = [{"nested": [1, 2]}, {"nested": [3, 4]}, {"nested": [5, 6]}, {"nested": [7, 8]}]
+    list_candidates = _collection_shrink_candidates(original_list)
+    assert [] in list_candidates
+    assert 0 < len(list_candidates) <= 12
+    assert all(
+        isinstance(candidate, list)
+        and len(candidate) < len(original_list)
+        and all(item in original_list for item in candidate)
+        for candidate in list_candidates
+    )
+
+    original_dict = {"a": [1, 2], "b": [3, 4], "c": [5, 6], "d": [7, 8]}
+    dict_candidates = _collection_shrink_candidates(original_dict)
+    assert {} in dict_candidates
+    assert 0 < len(dict_candidates) <= 12
+    assert all(
+        isinstance(candidate, dict)
+        and len(candidate) < len(original_dict)
+        and all(original_dict[key] == value for key, value in candidate.items())
+        for candidate in dict_candidates
+    )
+    assert _collection_shrink_candidates({1: "not-json-object-key"}) == []
+    assert _collection_shrink_candidates([]) == []
+    assert _collection_shrink_candidates({}) == []
+
+
+def test_property_counterexample_shrinks_list_arguments_in_bounded_sandbox_rounds(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return -len(value)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+
+    def evaluate_generated_cases(generated_source, evidence_source, evidence_metadata):
+        markers = []
+        for case in _generated_cases(generated_source):
+            actual = -len(case["arguments"]["value"])
+            if actual < 0:
+                markers.append(
+                    "UNAI_COUNTEREXAMPLE:" + json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "actual_type": "int",
+                            "actual_summary": str(actual),
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+        if markers:
+            return "failed", chr(10).join(markers), ""
+        return "passed", "", ""
+
+    runner.generated_responder = evaluate_generated_cases
+    result = verifier.run(
+        task_id,
+        _property_request(fresh, value=[1, 2, 3, 4, 5, 6, 7, 8]),
+        workspace_root,
+    )
+
+    assert result.status == "failed"
+    assert len(runner.calls) >= 2
+    assert len(runner.calls) <= 1 + 6
+    rounds = [_generated_cases(call["content"]) for call in runner.calls[1:]]
+    candidates = [case for round_cases in rounds for case in round_cases]
+    assert candidates
+    assert len(candidates) <= 24
+    assert all(
+        isinstance(case["arguments"]["value"], list)
+        and len(case["arguments"]["value"]) < 8
+        for case in candidates
+    )
+    shrink = result.shrinking_results[0]
+    assert shrink.status == "smaller_failure_observed"
+    assert isinstance(shrink.smallest_observed_arguments["value"], list)
+    assert 0 < len(shrink.smallest_observed_arguments["value"]) < 8
+    assert shrink.attempts == len(candidates)
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    evidence = next(
+        item for item in saved.evidence
+        if item.kind == "shrink" and item.metadata.get("case_id") == "property-negative"
+    )
+    assert evidence.metadata["status"] == "smaller_failure_observed"
+    assert evidence.metadata["attempts"] <= 24
