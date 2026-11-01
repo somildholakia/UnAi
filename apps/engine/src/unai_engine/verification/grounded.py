@@ -355,6 +355,20 @@ _FILE_PATH = {file_literal}
 _SYMBOL = {symbol_literal}
 _CASES = json.loads({payload_literal})
 _EXPECTED_TARGET_SHA256 = {target_hash_literal}
+_ALLOWED_EXCEPTIONS = {{
+    "ValueError": ValueError,
+    "TypeError": TypeError,
+    "KeyError": KeyError,
+    "IndexError": IndexError,
+    "ZeroDivisionError": ZeroDivisionError,
+    "OverflowError": OverflowError,
+    "AssertionError": AssertionError,
+    "RuntimeError": RuntimeError,
+    "LookupError": LookupError,
+    "FileNotFoundError": FileNotFoundError,
+    "PermissionError": PermissionError,
+    "TimeoutError": TimeoutError,
+}}
 _TARGET = (_ROOT / _FILE_PATH).resolve()
 if not _TARGET.is_relative_to(_ROOT) or not _TARGET.is_file():
     raise RuntimeError("Grounded test target is missing or outside the staged workspace.")
@@ -441,7 +455,7 @@ def test_grounded_oracle_case(case):
         if (
             property_spec is not None
             and property_spec["kind"] == "raises_exception"
-            and type(exc).__name__ == property_spec["exception_name"]
+            and type(exc) is _ALLOWED_EXCEPTIONS.get(property_spec["exception_name"])
         ):
             return
         details = {{
