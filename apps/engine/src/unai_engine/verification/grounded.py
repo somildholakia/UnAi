@@ -2010,14 +2010,23 @@ class GroundedTestVerifier:
                 else "staticmethod"
             )
         generated_path = f"unai_generated_tests/test_oracle_{uuid4().hex}.py"
-        replay_case_ids = [
+        trace_case_ids = [
             case["case_id"]
             for case in normalized
             if case.get("oracle_property")
-            and case["oracle_property"].get("kind") == "output_stable_across_replays"
+            and case["oracle_property"].get("kind") in {
+                "output_stable_across_replays",
+                "workspace_filesystem_unchanged",
+            }
+        ]
+        filesystem_case_ids = [
+            case["case_id"]
+            for case in normalized
+            if case.get("oracle_property")
+            and case["oracle_property"].get("kind") == "workspace_filesystem_unchanged"
         ]
         replay_trace_relative_path = (
-            generated_path[:-3] + ".replay.json" if replay_case_ids else None
+            generated_path[:-3] + ".replay.json" if trace_case_ids else None
         )
         generated_content = _generated_pytest(
             request.file_path,
@@ -2037,7 +2046,8 @@ class GroundedTestVerifier:
                 generated_content.encode("utf-8")
             ).hexdigest(),
             "oracle_case_ids": [case["case_id"] for case in normalized],
-            "replay_case_ids": replay_case_ids,
+            "trace_case_ids": trace_case_ids,
+            "filesystem_case_ids": filesystem_case_ids,
             "replay_trace_relative_path": replay_trace_relative_path,
             "oracle_references": [
                 {
@@ -2139,6 +2149,45 @@ class GroundedTestVerifier:
                             and re.fullmatch(r"[a-fA-F0-9]{64}", marker["replay_trace_sha256"])
                             else None
                         ),
+                        "filesystem_before_sha256": (
+                            marker.get("filesystem_before_sha256")
+                            if isinstance(marker.get("filesystem_before_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["filesystem_before_sha256"])
+                            else None
+                        ),
+                        "filesystem_after_sha256": (
+                            marker.get("filesystem_after_sha256")
+                            if isinstance(marker.get("filesystem_after_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["filesystem_after_sha256"])
+                            else None
+                        ),
+                        "filesystem_changed_entry_count": (
+                            marker.get("filesystem_changed_entry_count")
+                            if isinstance(marker.get("filesystem_changed_entry_count"), int)
+                            and not isinstance(marker.get("filesystem_changed_entry_count"), bool)
+                            and marker["filesystem_changed_entry_count"] >= 0
+                            else None
+                        ),
+                        "filesystem_changed_paths_sha256": (
+                            marker.get("filesystem_changed_paths_sha256")
+                            if isinstance(marker.get("filesystem_changed_paths_sha256"), str)
+                            and re.fullmatch(r"[a-fA-F0-9]{64}", marker["filesystem_changed_paths_sha256"])
+                            else None
+                        ),
+                        "filesystem_entry_count": (
+                            marker.get("filesystem_entry_count")
+                            if isinstance(marker.get("filesystem_entry_count"), int)
+                            and not isinstance(marker.get("filesystem_entry_count"), bool)
+                            and marker["filesystem_entry_count"] >= 0
+                            else None
+                        ),
+                        "filesystem_bytes_hashed": (
+                            marker.get("filesystem_bytes_hashed")
+                            if isinstance(marker.get("filesystem_bytes_hashed"), int)
+                            and not isinstance(marker.get("filesystem_bytes_hashed"), bool)
+                            and marker["filesystem_bytes_hashed"] >= 0
+                            else None
+                        ),
                     }
         # Fallback for test doubles and legacy evidence without structured marker metadata.
         for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", output):
@@ -2190,6 +2239,45 @@ class GroundedTestVerifier:
                         and re.fullmatch(r"[a-fA-F0-9]{64}", marker["replay_trace_sha256"])
                         else None
                     ),
+                    "filesystem_before_sha256": (
+                        marker.get("filesystem_before_sha256")
+                        if isinstance(marker.get("filesystem_before_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["filesystem_before_sha256"])
+                        else None
+                    ),
+                    "filesystem_after_sha256": (
+                        marker.get("filesystem_after_sha256")
+                        if isinstance(marker.get("filesystem_after_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["filesystem_after_sha256"])
+                        else None
+                    ),
+                    "filesystem_changed_entry_count": (
+                        marker.get("filesystem_changed_entry_count")
+                        if isinstance(marker.get("filesystem_changed_entry_count"), int)
+                        and not isinstance(marker.get("filesystem_changed_entry_count"), bool)
+                        and marker["filesystem_changed_entry_count"] >= 0
+                        else None
+                    ),
+                    "filesystem_changed_paths_sha256": (
+                        marker.get("filesystem_changed_paths_sha256")
+                        if isinstance(marker.get("filesystem_changed_paths_sha256"), str)
+                        and re.fullmatch(r"[a-fA-F0-9]{64}", marker["filesystem_changed_paths_sha256"])
+                        else None
+                    ),
+                    "filesystem_entry_count": (
+                        marker.get("filesystem_entry_count")
+                        if isinstance(marker.get("filesystem_entry_count"), int)
+                        and not isinstance(marker.get("filesystem_entry_count"), bool)
+                        and marker["filesystem_entry_count"] >= 0
+                        else None
+                    ),
+                    "filesystem_bytes_hashed": (
+                        marker.get("filesystem_bytes_hashed")
+                        if isinstance(marker.get("filesystem_bytes_hashed"), int)
+                        and not isinstance(marker.get("filesystem_bytes_hashed"), bool)
+                        and marker["filesystem_bytes_hashed"] >= 0
+                        else None
+                    ),
                 }
 
         case_by_id = {case["case_id"]: case for case in normalized}
@@ -2212,6 +2300,12 @@ class GroundedTestVerifier:
                 target_function=marker.get("target_function"),
                 replay_count=marker.get("replay_count"),
                 replay_trace_sha256=marker.get("replay_trace_sha256"),
+                filesystem_before_sha256=marker.get("filesystem_before_sha256"),
+                filesystem_after_sha256=marker.get("filesystem_after_sha256"),
+                filesystem_changed_entry_count=marker.get("filesystem_changed_entry_count"),
+                filesystem_changed_paths_sha256=marker.get("filesystem_changed_paths_sha256"),
+                filesystem_entry_count=marker.get("filesystem_entry_count"),
+                filesystem_bytes_hashed=marker.get("filesystem_bytes_hashed"),
             )
             counterexamples.append(counterexample)
             self.ledger.append_evidence(
@@ -2247,6 +2341,12 @@ class GroundedTestVerifier:
                         "target_function": counterexample.target_function,
                         "replay_count": counterexample.replay_count,
                         "replay_trace_sha256": counterexample.replay_trace_sha256,
+                        "filesystem_before_sha256": counterexample.filesystem_before_sha256,
+                        "filesystem_after_sha256": counterexample.filesystem_after_sha256,
+                        "filesystem_changed_entry_count": counterexample.filesystem_changed_entry_count,
+                        "filesystem_changed_paths_sha256": counterexample.filesystem_changed_paths_sha256,
+                        "filesystem_entry_count": counterexample.filesystem_entry_count,
+                        "filesystem_bytes_hashed": counterexample.filesystem_bytes_hashed,
                     },
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
@@ -2259,7 +2359,7 @@ class GroundedTestVerifier:
         shrinkable_case_ids = {
             case_id for case_id in counterexample_case_ids
             if case_by_id[case_id]["oracle_property"].get("kind")
-            != "output_stable_across_replays"
+            not in {"output_stable_across_replays", "workspace_filesystem_unchanged"}
         }
         shrinking_results: list[GroundedShrinkResult] = []
         if (
