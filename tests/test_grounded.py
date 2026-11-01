@@ -1493,6 +1493,98 @@ def test_collection_shrink_candidates_only_remove_top_level_items() -> None:
     assert _collection_shrink_candidates({}) == []
 
 
+def test_recursive_shrink_candidates_reduce_nested_json_without_mutating_original() -> None:
+    from unai_engine.verification.grounded import _recursive_shrink_candidates
+
+    original = {"config": {"items": [1, 2, 3, 4]}}
+    candidates = _recursive_shrink_candidates(original)
+
+    assert candidates
+    assert len(candidates) <= 12
+    assert original == {"config": {"items": [1, 2, 3, 4]}}
+    assert any(
+        candidate.get("config", {}).get("items") != [1, 2, 3, 4]
+        and isinstance(candidate.get("config", {}).get("items"), list)
+        for candidate in candidates
+    )
+    assert all(
+        len(json.dumps(candidate, sort_keys=True)) < len(json.dumps(original, sort_keys=True))
+        or candidate != original
+        for candidate in candidates
+    )
+    assert _recursive_shrink_candidates(
+        {"a": {"b": {"c": {"d": [1, 2, 3]}}}},
+        max_depth=2,
+    ) == _recursive_shrink_candidates(
+        {"a": {"b": {"c": {"d": [1, 2, 3]}}}},
+        max_depth=2,
+    )
+
+
+def test_property_counterexample_shrinks_nested_collection_values_in_bounded_rounds(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10)
+        + "    return -len(value.get('items', []))" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+
+    def evaluate_generated_cases(generated_source, evidence_source, evidence_metadata):
+        markers = []
+        for case in _generated_cases(generated_source):
+            actual = -len(case["arguments"]["value"].get("items", []))
+            if actual < 0:
+                markers.append(
+                    "UNAI_COUNTEREXAMPLE:" + json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "actual_type": "int",
+                            "actual_summary": str(actual),
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+        if markers:
+            return "failed", chr(10).join(markers), ""
+        return "passed", "", ""
+
+    initial = {"items": [1, 2, 3, 4, 5, 6, 7, 8]}
+    runner.generated_responder = evaluate_generated_cases
+    result = verifier.run(
+        task_id,
+        _property_request(fresh, value=initial),
+        workspace_root,
+    )
+
+    assert result.status == "failed"
+    assert 2 <= len(runner.calls) <= 7
+    candidates = [
+        case
+        for call in runner.calls[1:]
+        for case in _generated_cases(call["content"])
+    ]
+    assert candidates
+    assert len(candidates) <= 24
+    assert all(
+        case["arguments"]["value"] != initial
+        for case in candidates
+    )
+    shrink = result.shrinking_results[0]
+    assert shrink.status == "smaller_failure_observed"
+    smallest = shrink.smallest_observed_arguments["value"]
+    assert isinstance(smallest, dict)
+    assert isinstance(smallest.get("items"), list)
+    assert 0 < len(smallest["items"]) < len(initial["items"])
+    assert shrink.attempts == len(candidates)
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    proof = build_proof_bundle(saved)
+    assert proof.shrink_attempt_count == len(candidates)
+    assert proof.shrunk_counterexample_count == 1
+
+
 def test_property_counterexample_shrinks_list_arguments_in_bounded_sandbox_rounds(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
