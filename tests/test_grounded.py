@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -954,31 +955,14 @@ def test_exact_oracle_requires_explicit_expected_output_even_when_null_is_defaul
     assert runner.calls == []
 
 
-def test_property_shrinking_skips_float_arguments_and_records_non_applicability(tmp_path: Path) -> None:
-    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
-    request = _property_request(snapshot, value=9.5)
-    runner.response_queue.append(
-        (
-            "failed",
-            'UNAI_COUNTEREXAMPLE:{"case_id":"property-negative","actual_type":"float","actual_summary":"-9.5"}',
-            "",
-        )
-    )
+def test_property_shrinking_rejects_non_finite_float_arguments(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
 
-    result = verifier.run(task_id, request, workspace_root)
+    for value in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(GroundedVerificationError, match="JSON-compatible"):
+            verifier.run(task_id, _property_request(snapshot, value=value), workspace_root)
 
-    assert result.status == "failed"
-    assert len(runner.calls) == 1
-    assert result.shrinking_results[0].status == "no_supported_integer_arguments"
-    assert result.shrinking_results[0].attempts == 0
-    saved = ledger.get_snapshot(task_id)
-    assert saved is not None
-    assert any(
-        item.kind == "shrink"
-        and item.metadata.get("status") == "no_supported_integer_arguments"
-        for item in saved.evidence
-    )
-
+    assert runner.calls == []
 
 
 def test_expected_exception_property_accepts_only_the_selected_allowlisted_exception(tmp_path: Path) -> None:
@@ -1139,3 +1123,86 @@ def test_expected_exception_property_rejects_unlisted_exception_names(tmp_path: 
         )
 
     assert runner.calls == []
+
+
+
+def test_float_shrink_candidates_are_finite_and_strictly_smaller() -> None:
+    from unai_engine.verification.grounded import _float_shrink_candidates
+
+    positive = _float_shrink_candidates(9.5)
+    negative = _float_shrink_candidates(-9.5)
+
+    assert positive == sorted(set(positive), key=lambda item: (abs(item), item))
+    assert negative == sorted(set(negative), key=lambda item: (abs(item), item))
+    assert 0.0 in positive and 0.0 in negative
+    assert all(math.isfinite(item) and abs(item) < 9.5 for item in positive)
+    assert all(math.isfinite(item) and abs(item) < 9.5 for item in negative)
+    assert _float_shrink_candidates(0.0) == []
+    assert _float_shrink_candidates(-0.0) == []
+    assert _float_shrink_candidates(float("nan")) == []
+    assert _float_shrink_candidates(float("inf")) == []
+    assert _float_shrink_candidates(float("-inf")) == []
+    assert _float_shrink_candidates(True) == []
+
+
+def test_property_counterexample_shrinks_finite_float_arguments_in_sandbox_rounds(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return -abs(value)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+
+    def evaluate_generated_cases(generated_source, evidence_source, evidence_metadata):
+        markers = []
+        for case in _generated_cases(generated_source):
+            value = case["arguments"]["value"]
+            actual = -abs(value)
+            if actual < 0:
+                markers.append(
+                    "UNAI_COUNTEREXAMPLE:" + json.dumps(
+                        {
+                            "case_id": case["case_id"],
+                            "actual_type": "float" if isinstance(actual, float) else "int",
+                            "actual_summary": str(actual),
+                        },
+                        separators=(",", ":"),
+                    )
+                )
+        if markers:
+            return "failed", chr(10).join(markers), ""
+        return "passed", "", ""
+
+    runner.generated_responder = evaluate_generated_cases
+    result = verifier.run(task_id, _property_request(fresh, value=9.5), workspace_root)
+
+    assert result.status == "failed"
+    assert len(runner.calls) >= 2
+    assert len(runner.calls) <= 1 + 6
+    shrink_rounds = [
+        _generated_cases(call["content"])
+        for call in runner.calls[1:]
+    ]
+    all_candidates = [case for round_cases in shrink_rounds for case in round_cases]
+    assert all_candidates
+    assert len(all_candidates) <= 24
+    assert all(
+        isinstance(case["arguments"]["value"], float)
+        and math.isfinite(case["arguments"]["value"])
+        and abs(case["arguments"]["value"]) < 9.5
+        for case in all_candidates
+    )
+    shrink = result.shrinking_results[0]
+    assert shrink.status == "smaller_failure_observed"
+    assert isinstance(shrink.smallest_observed_arguments["value"], float)
+    assert 0.0 < abs(shrink.smallest_observed_arguments["value"]) < 9.5
+    assert shrink.attempts == len(all_candidates)
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    evidence = next(
+        item for item in saved.evidence
+        if item.kind == "shrink" and item.metadata.get("case_id") == "property-negative"
+    )
+    assert evidence.metadata["status"] == "smaller_failure_observed"
+    assert evidence.metadata["attempts"] <= 24

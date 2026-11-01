@@ -12,6 +12,7 @@ import json
 import math
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
@@ -36,7 +37,7 @@ _MAX_SHRINK_ROUNDS = 6
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
-    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to integer arguments, 24 deterministic candidates and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
+    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
@@ -88,15 +89,46 @@ def _integer_shrink_candidates(value: int) -> list[int]:
     )
 
 
-def _shrink_score(arguments: dict[str, Any]) -> tuple[int, int, str]:
-    """Score only supported integer arguments; never claim global minimality."""
-    integer_magnitude = sum(
-        abs(value)
-        for value in arguments.values()
-        if isinstance(value, int) and not isinstance(value, bool)
+def _float_shrink_candidates(value: float) -> list[float]:
+    """Return deterministic, finite float candidates with strictly smaller magnitude."""
+    if isinstance(value, bool) or not isinstance(value, float) or not math.isfinite(value) or value == 0.0:
+        return []
+    sign = math.copysign(1.0, value)
+    magnitude = abs(value)
+    candidates = {
+        0.0,
+        sign,
+        value - sign,
+        math.copysign(math.nextafter(magnitude, 0.0), value),
+    }
+    for divisor in (2, 4, 8, 16, 32):
+        candidates.add(sign * (magnitude / divisor))
+    normalized = {
+        0.0 if candidate == 0.0 else candidate
+        for candidate in candidates
+        if math.isfinite(candidate) and abs(candidate) < magnitude
+    }
+    return sorted(normalized, key=lambda item: (abs(item), item))
+
+
+def _numeric_magnitude(value: Any) -> Decimal:
+    if isinstance(value, bool):
+        return Decimal(0)
+    if isinstance(value, int):
+        return Decimal(abs(value))
+    if isinstance(value, float) and math.isfinite(value):
+        return Decimal(str(abs(value)))
+    return Decimal(0)
+
+
+def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
+    """Score supported numeric arguments without float-sum overflow."""
+    numeric_magnitude = sum(
+        (_numeric_magnitude(value) for value in arguments.values()),
+        Decimal(0),
     )
     encoded = _json_text(arguments, "Shrunk arguments")
-    return integer_magnitude, len(encoded.encode("utf-8")), encoded
+    return numeric_magnitude, len(encoded.encode("utf-8")), encoded
 
 
 def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
@@ -629,21 +661,28 @@ class GroundedTestVerifier:
             final_note = ""
 
             while True:
-                base_integer_magnitude = sum(
-                    abs(value)
-                    for value in current_arguments.values()
-                    if isinstance(value, int) and not isinstance(value, bool)
+                base_numeric_magnitude = sum(
+                    (_numeric_magnitude(value) for value in current_arguments.values()),
+                    Decimal(0),
                 )
                 # Keep descriptor storage light: copy the complete argument map
                 # only for the at-most-24 candidates selected for a sandbox round.
-                descriptors: list[tuple[str, int, int]] = []
+                descriptors: list[tuple[str, int | float, Decimal]] = []
                 for argument_name in sorted(current_arguments):
                     value = current_arguments[argument_name]
-                    if isinstance(value, bool) or not isinstance(value, int):
+                    if isinstance(value, bool):
                         continue
-                    for reduced_value in _integer_shrink_candidates(value):
+                    if isinstance(value, int):
+                        reductions = _integer_shrink_candidates(value)
+                    elif isinstance(value, float):
+                        reductions = _float_shrink_candidates(value)
+                    else:
+                        continue
+                    for reduced_value in reductions:
                         score = (
-                            base_integer_magnitude - abs(value) + abs(reduced_value)
+                            base_numeric_magnitude
+                            - _numeric_magnitude(value)
+                            + _numeric_magnitude(reduced_value)
                         )
                         descriptors.append((argument_name, reduced_value, score))
 
@@ -655,14 +694,14 @@ class GroundedTestVerifier:
                     if smallest_observed is not None:
                         final_status = "smaller_failure_observed"
                         final_note = (
-                            "No strictly smaller integer reduction remained after cumulative shrinking. "
-                            "The result is locally reduced under the implemented integer strategy, not a proof of global minimality."
+                            "No strictly smaller finite integer/float reduction remained after cumulative shrinking. "
+                            "The result is locally reduced under the implemented numeric strategy, not a proof of global minimality."
                         )
                     else:
-                        final_status = "no_supported_integer_arguments"
+                        final_status = "no_supported_numeric_arguments"
                         final_note = (
-                            "Shrinking currently changes non-zero integer arguments only; "
-                            "booleans, floats, strings, collections and zero-valued inputs are left unchanged."
+                            "Shrinking currently changes non-zero integer and finite float arguments only; "
+                            "booleans, NaN/infinity, strings, collections and zero-valued inputs are left unchanged."
                         )
                     break
 

@@ -42,7 +42,8 @@
 - [ ] Independently authenticate the external publisher/author or a human-review attestation; a hash proves content integrity, not trust or correctness.
 - [x] Add fixed, non-executable property-oracle contracts, including allowlisted expected-exception checks with exact built-in type identity, and opt-in Docker-isolated integer shrinking capped at 24 candidates per request; report smallest observed failures without claiming global minimality.
 - [x] Add greedy cumulative reduction across multiple integer arguments using successive, source/specification-pinned Docker rounds; cap at 24 candidate executions and 6 rounds per request.
-- [ ] Extend shrinking to floats, strings and collections only with per-type correctness/resource policies; add broader trace/discriminating analysis.
+- [x] Add finite-float shrinking with deterministic toward-zero candidates, finite-value checks and the existing 24-candidate/6-round sandbox budgets.
+- [ ] Extend shrinking to strings and collections only with explicit per-type correctness/resource policies; add broader trace/discriminating analysis.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [ ] Extend grounded tests to class methods, decorated functions and broader Python signatures with explicit invocation rules.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
