@@ -371,8 +371,10 @@ def test_test_runner_extracts_counterexample_markers_before_preview_truncation(t
         "unai_generated_tests/test_oracle.py",
         "def test_placeholder():\n    assert False\n",
         {},
+        evidence_source="grounded-oracle-shrink-sandbox",
     )
 
+    assert result.evidence.source == "grounded-oracle-shrink-sandbox"
     markers = result.evidence.metadata["counterexample_markers"]
     assert [item["case_id"] for item in markers] == ["one", "two"]
     assert markers[1]["actual_summary"] == "secret=[REDACTED]"
