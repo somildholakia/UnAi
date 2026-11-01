@@ -1753,7 +1753,6 @@ class GroundedTestVerifier:
             "generated_test_sha256": hashlib.sha256(
                 generated_content.encode("utf-8")
             ).hexdigest(),
-            "replay_trace_relative_path": replay_trace_relative_path,
             "oracle_case_ids": [case["case_id"] for case in normalized],
             "replay_case_ids": replay_case_ids,
             "replay_trace_relative_path": replay_trace_relative_path,
