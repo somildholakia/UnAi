@@ -16,6 +16,9 @@ dependencies = [
   "PyYAML>=6.0.2,<7.0",
 ]
 
+[project.scripts]
+unai-task-mcp = "unai_engine.task_mcp_server:run"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
 mcp = ["mcp>=2.0.0,<3.0"]
