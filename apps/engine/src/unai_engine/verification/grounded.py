@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -19,6 +20,7 @@ from unai_engine.models import (
     EvidenceRecord,
     GroundedCounterexample,
     GroundedTestApprovalRequest,
+    GroundedShrinkResult,
     GroundedTestResponse,
     TaskEvidenceSnapshot,
     TaskProofBundleResponse,
@@ -29,8 +31,11 @@ from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.proof import summarize_proof
 
 
+_MAX_SHRINK_CANDIDATES = 24
+
 _LIMITATIONS = [
-    "Expected outputs are supplied by the requester; oracle references are recorded but not automatically authenticated against an external specification.",
+    "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
+    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to integer arguments and at most 24 deterministic candidates per run; it reports the smallest observed failure, not a globally minimal input.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
@@ -98,7 +103,7 @@ def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.Asy
     return function
 
 
-def _signature(function: ast.FunctionDef) -> tuple[set[str], set[str]]:
+def _signature(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], set[str]]:
     positional = list(function.args.args)
     defaults_start = len(positional) - len(function.args.defaults)
     required = {
@@ -173,6 +178,26 @@ def _validate_cases(
         if case.case_id in seen:
             raise GroundedVerificationError("Oracle case IDs must be unique within a run.")
         seen.add(case.case_id)
+        has_expected_output = "expected_output" in case.model_fields_set
+        if case.oracle_property is None and not has_expected_output:
+            raise GroundedVerificationError(
+                f"Exact oracle case {case.case_id} must explicitly supply expected_output (including null when intended)."
+            )
+        if case.oracle_property is not None and has_expected_output:
+            raise GroundedVerificationError(
+                f"Property oracle case {case.case_id} must omit expected_output; choose exactly one oracle contract."
+            )
+        if case.oracle_property is not None:
+            property_argument = case.oracle_property.argument_name
+            if case.oracle_property.kind == "output_equals_argument":
+                if property_argument not in case.arguments:
+                    raise GroundedVerificationError(
+                        f"Property oracle case {case.case_id} must name an argument present in its input."
+                    )
+            elif property_argument is not None:
+                raise GroundedVerificationError(
+                    f"Property oracle case {case.case_id} cannot set argument_name for this property kind."
+                )
         arguments = dict(case.arguments)
         unknown = set(arguments) - allowed
         missing = required - set(arguments)
@@ -202,14 +227,24 @@ def _validate_cases(
                 )
 
         arguments_json = _json_text(arguments, f"Arguments for case {case.case_id}")
-        expected_json = _json_text(case.expected_output, f"Expected output for case {case.case_id}")
+        expected_json = (
+            _json_text(case.expected_output, f"Expected output for case {case.case_id}")
+            if case.oracle_property is None
+            else ""
+        )
+        property_json = (
+            _json_text(case.oracle_property.model_dump(), f"Property oracle for case {case.case_id}")
+            if case.oracle_property is not None
+            else ""
+        )
         arguments_bytes = len(arguments_json.encode("utf-8"))
         expected_bytes = len(expected_json.encode("utf-8"))
-        if arguments_bytes > 10_000 or expected_bytes > 10_000:
+        property_bytes = len(property_json.encode("utf-8"))
+        if max(arguments_bytes, expected_bytes, property_bytes) > 10_000:
             raise GroundedVerificationError(
                 f"Oracle case {case.case_id} exceeds the 10 KB per-value limit."
             )
-        total_payload_bytes += arguments_bytes + expected_bytes
+        total_payload_bytes += arguments_bytes + expected_bytes + property_bytes
         if total_payload_bytes > 200_000:
             raise GroundedVerificationError(
                 "Grounded oracle payload exceeds the 200 KB aggregate limit."
@@ -218,14 +253,24 @@ def _validate_cases(
             {
                 "case_id": case.case_id,
                 "arguments": arguments,
-                "expected_output": case.expected_output,
+                "expected_output": case.expected_output if case.oracle_property is None else None,
+                "oracle_property": case.oracle_property.model_dump() if case.oracle_property else None,
                 "oracle_kind": case.oracle_kind,
                 "oracle_reference": case.oracle_reference,
                 "oracle_artifact_path": artifact_path,
                 "oracle_artifact_sha256": artifact_sha256.lower() if artifact_sha256 else None,
                 "probe_candidate_id": case.probe_candidate_id,
                 "arguments_sha256": _digest(arguments, "Arguments"),
-                "expected_sha256": _digest(case.expected_output, "Expected output"),
+                "expected_sha256": (
+                    _digest(case.expected_output, "Expected output")
+                    if case.oracle_property is None
+                    else None
+                ),
+                "oracle_property_sha256": (
+                    _digest(case.oracle_property.model_dump(), "Property oracle")
+                    if case.oracle_property
+                    else None
+                ),
             }
         )
     return normalized
@@ -258,6 +303,7 @@ from __future__ import annotations
 {asyncio_import}import hashlib
 import importlib.util
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -309,6 +355,40 @@ def _strict_equal(actual, expected):
     return actual == expected
 
 
+def _property_holds(actual, arguments, property_spec):
+    kind = property_spec["kind"]
+    if kind == "output_non_negative":
+        return (
+            isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and math.isfinite(actual)
+            and actual >= 0
+        )
+    if kind == "output_positive":
+        return (
+            isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and math.isfinite(actual)
+            and actual > 0
+        )
+    if kind == "output_truthy":
+        return bool(actual)
+    if kind == "output_falsy":
+        return not bool(actual)
+    if kind == "output_is_none":
+        return actual is None
+    if kind == "output_not_none":
+        return actual is not None
+    if kind == "output_is_empty":
+        return isinstance(actual, (str, list, dict)) and len(actual) == 0
+    if kind == "output_not_empty":
+        return isinstance(actual, (str, list, dict)) and len(actual) > 0
+    if kind == "output_equals_argument":
+        argument_name = property_spec["argument_name"]
+        return _strict_equal(actual, arguments[argument_name])
+    raise RuntimeError("Unknown fixed property-oracle kind.")
+
+
 @pytest.mark.parametrize("case", _CASES, ids=lambda case: case["case_id"])
 def test_grounded_oracle_case(case):
     try:
@@ -322,7 +402,13 @@ def test_grounded_oracle_case(case):
         raise AssertionError(
             "UNAI_COUNTEREXAMPLE:" + json.dumps(details, sort_keys=True, separators=(",", ":"))
         ) from exc
-    if not _strict_equal(actual, case["expected_output"]):
+    property_spec = case.get("oracle_property")
+    violation = (
+        not _property_holds(actual, case["arguments"], property_spec)
+        if property_spec is not None
+        else not _strict_equal(actual, case["expected_output"])
+    )
+    if violation:
         details = {{
             "case_id": case["case_id"],
             "actual_type": type(actual).__name__,
