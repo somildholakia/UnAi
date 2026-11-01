@@ -1239,6 +1239,7 @@ class GroundedTestVerifier:
                     )
 
                 candidate_cases = list(candidate_map.values())
+                generated_path = f"unai_generated_tests/test_shrink_{uuid4().hex}.py"
                 generated_content = _generated_pytest(
                     request.file_path,
                     request.symbol_name,
@@ -1246,7 +1247,6 @@ class GroundedTestVerifier:
                     source_sha256,
                     is_async=is_async,
                 )
-                generated_path = f"unai_generated_tests/test_shrink_{uuid4().hex}.py"
 
                 # Each round must use the same implementation and specification
                 # bytes as the original failure and every prior shrink round.
@@ -1726,14 +1726,24 @@ class GroundedTestVerifier:
                 and _decorator_name(function.decorator_list[0]) == "classmethod"
                 else "staticmethod"
             )
+        generated_path = f"unai_generated_tests/test_oracle_{uuid4().hex}.py"
+        replay_case_ids = [
+            case["case_id"]
+            for case in normalized
+            if case.get("oracle_property")
+            and case["oracle_property"].get("kind") == "output_stable_across_replays"
+        ]
+        replay_trace_relative_path = (
+            generated_path[:-3] + ".replay.json" if replay_case_ids else None
+        )
         generated_content = _generated_pytest(
             request.file_path,
             request.symbol_name,
             normalized,
             source_snapshot.sha256,
             is_async=is_async,
+            replay_trace_path=replay_trace_relative_path,
         )
-        generated_path = f"unai_generated_tests/test_oracle_{uuid4().hex}.py"
         run_metadata = {
             "target_file": request.file_path,
             "target_function": request.symbol_name,
@@ -1743,7 +1753,10 @@ class GroundedTestVerifier:
             "generated_test_sha256": hashlib.sha256(
                 generated_content.encode("utf-8")
             ).hexdigest(),
+            "replay_trace_relative_path": replay_trace_relative_path,
             "oracle_case_ids": [case["case_id"] for case in normalized],
+            "replay_case_ids": replay_case_ids,
+            "replay_trace_relative_path": replay_trace_relative_path,
             "oracle_references": [
                 {
                     "case_id": case["case_id"],
@@ -1931,9 +1944,14 @@ class GroundedTestVerifier:
             item.case_id for item in counterexamples
             if case_by_id[item.case_id].get("oracle_property") is not None
         }
+        shrinkable_case_ids = {
+            case_id for case_id in counterexample_case_ids
+            if case_by_id[case_id]["oracle_property"].get("kind")
+            != "output_stable_across_replays"
+        }
         shrinking_results: list[GroundedShrinkResult] = []
         if (
-            counterexample_case_ids
+            shrinkable_case_ids
             and execution.status == "failed"
             and execution.sandboxed
             and not execution.timed_out
@@ -1942,7 +1960,7 @@ class GroundedTestVerifier:
                 task_id,
                 request,
                 normalized,
-                counterexample_case_ids,
+                shrinkable_case_ids,
                 source_snapshot.sha256,
                 is_async,
                 target_invocation_kind,
@@ -1950,7 +1968,7 @@ class GroundedTestVerifier:
                 workspace_root,
                 execution.evidence.evidence_id,
             )
-        elif counterexample_case_ids:
+        elif shrinkable_case_ids:
             shrinking_results = [
                 GroundedShrinkResult(
                     case_id=case_id,
@@ -1973,6 +1991,8 @@ class GroundedTestVerifier:
             "stderr_sha256": execution.evidence.metadata.get("stderr_sha256"),
             "stdout_preview": execution.stdout_preview,
             "stderr_preview": execution.stderr_preview,
+            "replay_trace_records": execution.evidence.metadata.get("replay_trace_records", []),
+            "replay_trace_status": execution.evidence.metadata.get("replay_trace_status"),
             "target_sha256": source_snapshot.sha256,
             "generated_test_sha256": run_metadata["generated_test_sha256"],
             "case_ids": [case["case_id"] for case in normalized],
