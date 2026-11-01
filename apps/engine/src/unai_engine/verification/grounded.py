@@ -203,7 +203,8 @@ def _collection_shrink_candidates(value: Any) -> list[Any]:
 
 
 def _argument_measure(value: Any) -> Decimal:
-    if isinstance(value, bool):
+    """Measure JSON values recursively to rank progressively smaller candidates."""
+    if isinstance(value, bool) or value is None:
         return Decimal(0)
     if isinstance(value, int):
         return Decimal(abs(value))
@@ -211,8 +212,14 @@ def _argument_measure(value: Any) -> Decimal:
         return Decimal(str(abs(value)))
     if isinstance(value, str):
         return Decimal(len(value))
-    if isinstance(value, (list, dict)):
-        return Decimal(len(value))
+    if isinstance(value, list):
+        return Decimal(len(value)) + sum(
+            (_argument_measure(item) for item in value), Decimal(0)
+        )
+    if isinstance(value, dict):
+        return Decimal(len(value)) + sum(
+            (_argument_measure(item) for item in value.values()), Decimal(0)
+        )
     return Decimal(0)
 
 
@@ -224,6 +231,75 @@ def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
     )
     encoded = _json_text(arguments, "Shrunk arguments")
     return numeric_magnitude, len(encoded.encode("utf-8")), encoded
+
+
+def _recursive_shrink_candidates(
+    value: Any,
+    *,
+    depth: int = 0,
+    max_depth: int = 3,
+    limit: int = 12,
+) -> list[Any]:
+    """Generate bounded deterministic reductions inside nested JSON values."""
+    if limit <= 0:
+        return []
+    if isinstance(value, bool) or value is None:
+        return []
+
+    if isinstance(value, int):
+        return _integer_shrink_candidates(value)[:limit]
+    if isinstance(value, float):
+        return _float_shrink_candidates(value)[:limit]
+    if isinstance(value, str):
+        return _string_shrink_candidates(value)[:limit]
+
+    if isinstance(value, list):
+        candidates = list(_collection_shrink_candidates(value))
+        if depth < max_depth:
+            for index, item in enumerate(value):
+                for reduced_item in _recursive_shrink_candidates(
+                    item, depth=depth + 1, max_depth=max_depth,
+                    limit=limit - len(candidates),
+                ):
+                    updated = list(value)
+                    updated[index] = reduced_item
+                    candidates.append(updated)
+                    if len(candidates) >= limit:
+                        break
+                if len(candidates) >= limit:
+                    break
+    elif isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        candidates = list(_collection_shrink_candidates(value))
+        if depth < max_depth:
+            for key in sorted(value):
+                for reduced_item in _recursive_shrink_candidates(
+                    value[key], depth=depth + 1, max_depth=max_depth,
+                    limit=limit - len(candidates),
+                ):
+                    updated = dict(value)
+                    updated[key] = reduced_item
+                    candidates.append(updated)
+                    if len(candidates) >= limit:
+                        break
+                if len(candidates) >= limit:
+                    break
+    else:
+        return []
+
+    unique: dict[str, Any] = {}
+    original_measure = _argument_measure(value)
+    for candidate in candidates:
+        if _argument_measure(candidate) >= original_measure:
+            continue
+        unique.setdefault(_digest(candidate, "Recursive shrink candidate"), candidate)
+    return sorted(
+        unique.values(),
+        key=lambda item: (
+            _argument_measure(item),
+            len(_json_text(item, "Recursive shrink candidate").encode("utf-8")),
+            _json_text(item, "Recursive shrink candidate"),
+        ),
+    )[:limit]
 
 
 def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
@@ -789,7 +865,7 @@ class GroundedTestVerifier:
                     elif isinstance(value, str):
                         reductions = _string_shrink_candidates(value)
                     elif isinstance(value, (list, dict)):
-                        reductions = _collection_shrink_candidates(value)
+                        reductions = _recursive_shrink_candidates(value)
                     else:
                         continue
                     for reduced_value in reductions:
