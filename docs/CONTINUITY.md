@@ -22,7 +22,7 @@ Read these in order before extending unAI:
 - Grounded execution requires task-level workspace_read and run_tests approvals plus the separate exact run-grounded-oracle-tests confirmation. The run is a fixed pytest command in the disposable Docker staging copy.
 - The task MCP bridge remains read-only. It can retrieve proof bundles but cannot run grounded tests, apply patches, run tests, execute shell commands or grant permissions.
 - Counterexamples mean observed mismatch against a supplied oracle, not automatic proof that the code or specification is wrong.
-- Oracle references are requester-supplied and are not independently authenticated. Passing examples are not a semantic proof; keep acceptance gaps and unknowns visible.
+- Oracle references are requester-supplied. A workspace specification artifact may be SHA-256-pinned for byte integrity, but that does not authenticate its author/publisher or prove the expected output is correct. Passing examples are not a semantic proof; keep acceptance gaps and unknowns visible.
 - Execution trace hashes and redacted previews are bounded evidence, not full deterministic replay. Do not include secrets in oracle inputs or expected outputs.
 - Current grounded testing supports synchronous and async, undecorated module-level Python functions and JSON-compatible return values. Async calls are executed via asyncio.run in the fixed harness. Methods, decorators and expected-exception cases remain unsupported.
 - Do not describe a Cloudflare scaffold as deployed until a D1 database, secrets, access policy and live URL have been verified.
