@@ -17,6 +17,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
+from unai_engine.config import TrustedOraclePublisherKey
 from unai_engine.models import (
     EvidenceRecord,
     GroundedCounterexample,
@@ -808,11 +809,13 @@ class GroundedTestVerifier:
         patch_manager: PatchManager,
         test_runner: IsolatedPythonTestRunner,
         trusted_oracle_public_keys: dict[str, str] | None = None,
+        trusted_oracle_publisher_keys: dict[str, TrustedOraclePublisherKey] | None = None,
     ) -> None:
         self.ledger = ledger
         self.patch_manager = patch_manager
         self.test_runner = test_runner
         self.trusted_oracle_public_keys = dict(trusted_oracle_public_keys or {})
+        self.trusted_oracle_publisher_keys = dict(trusted_oracle_publisher_keys or {})
 
     def _shrink_property_counterexamples(
         self,
@@ -1332,8 +1335,8 @@ class GroundedTestVerifier:
                 )
             case["oracle_artifact_size_bytes"] = fingerprint["size_bytes"]
 
-        # An optional signature is trusted only when its key ID is in the
-        # operator-configured keyring. Signatures bind the exact test assertion.
+        # Reviewer keys retain the v1 trust path. Publisher keys are issuer-bound,
+        # time-bounded and independently revocable through operator configuration.
         attestation_signatures: dict[str, str] = {}
         for case in normalized:
             attestation_data = case.get("oracle_attestation")
@@ -1341,12 +1344,51 @@ class GroundedTestVerifier:
                 case["oracle_attestation_provenance"] = None
                 continue
             attestation = GroundedOracleAttestation.model_validate(attestation_data)
-            public_key_b64 = self.trusted_oracle_public_keys.get(attestation.key_id)
-            if public_key_b64 is None:
-                raise GroundedVerificationError(
-                    f"Oracle attestation key {attestation.key_id!r} is not in the configured trusted keyring.",
-                    403,
-                )
+            issuer_id = attestation.issuer_id
+            key_role = "reviewer"
+            if issuer_id is None:
+                public_key_b64 = self.trusted_oracle_public_keys.get(attestation.key_id)
+                if public_key_b64 is None:
+                    raise GroundedVerificationError(
+                        f"Oracle reviewer key {attestation.key_id!r} is not in the configured trusted reviewer keyring.",
+                        403,
+                    )
+            else:
+                publisher_key = self.trusted_oracle_publisher_keys.get(attestation.key_id)
+                if publisher_key is None:
+                    raise GroundedVerificationError(
+                        f"Oracle publisher key {attestation.key_id!r} is not in the configured trusted publisher keyring.",
+                        403,
+                    )
+                if publisher_key.issuer_id != issuer_id:
+                    raise GroundedVerificationError(
+                        f"Oracle publisher key {attestation.key_id!r} is not registered to issuer {issuer_id!r}.",
+                        403,
+                    )
+                if publisher_key.revoked:
+                    raise GroundedVerificationError(
+                        f"Oracle publisher key {attestation.key_id!r} has been revoked.",
+                        403,
+                    )
+                if (
+                    publisher_key.not_before is not None
+                    and attestation.issued_at < publisher_key.not_before
+                ):
+                    raise GroundedVerificationError(
+                        f"Oracle publisher key {attestation.key_id!r} was not valid when this attestation was issued.",
+                        403,
+                    )
+                if (
+                    publisher_key.not_after is not None
+                    and attestation.issued_at > publisher_key.not_after
+                ):
+                    raise GroundedVerificationError(
+                        f"Oracle publisher key {attestation.key_id!r} was outside its validity window when this attestation was issued.",
+                        403,
+                    )
+                public_key_b64 = publisher_key.public_key_b64
+                key_role = "publisher"
+
             statement = build_oracle_attestation_statement(
                 key_id=attestation.key_id,
                 issued_at=attestation.issued_at,
@@ -1363,6 +1405,7 @@ class GroundedTestVerifier:
                 arguments_sha256=case["arguments_sha256"],
                 expected_output_sha256=case["expected_sha256"],
                 oracle_property_sha256=case["oracle_property_sha256"],
+                issuer_id=issuer_id,
             )
             message = canonical_attestation_message(statement)
             if not verify_ed25519_attestation(
@@ -1377,9 +1420,12 @@ class GroundedTestVerifier:
             case["oracle_attestation_provenance"] = {
                 "verified": True,
                 "algorithm": "Ed25519",
+                "key_role": key_role,
                 "key_id": attestation.key_id,
+                "issuer_id": issuer_id,
                 "issued_at": statement["issued_at"],
                 "statement_sha256": attestation_statement_sha256(statement),
+                "key_revoked": False if key_role == "publisher" else None,
             }
             attestation_signatures[case["case_id"]] = attestation.signature_b64
             # Signature is evidence, not test input. Do not embed it in generated pytest.
@@ -1417,7 +1463,11 @@ class GroundedTestVerifier:
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
                     "oracle_artifact_size_bytes": case.get("oracle_artifact_size_bytes"),
                     "oracle_artifact_integrity": (
-                        "trusted-ed25519-review-attestation"
+                        (
+                            "trusted-ed25519-publisher-attestation"
+                            if case["oracle_attestation_provenance"].get("key_role") == "publisher"
+                            else "trusted-ed25519-review-attestation"
+                        )
                         if case["oracle_attestation_provenance"]
                         else "workspace-file-sha256-verified"
                         if case["oracle_artifact_path"]
