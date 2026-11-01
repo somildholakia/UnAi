@@ -857,10 +857,14 @@ def _workspace_filesystem_snapshot():
     global _FILESYSTEM_AUDIT_REQUEST_BYTES
     manifest = {{}}
     snapshot_bytes = 0
+    partial_file_bytes = 0
     entry_count = 0
 
     def unavailable(reason):
-        return None, 0, reason
+        global _FILESYSTEM_AUDIT_REQUEST_BYTES
+        consumed = snapshot_bytes + partial_file_bytes
+        _FILESYSTEM_AUDIT_REQUEST_BYTES += consumed
+        return None, consumed, reason
 
     def add_entry(relative_path, record):
         nonlocal entry_count
@@ -893,7 +897,11 @@ def _workspace_filesystem_snapshot():
                         return unavailable("entry_limit_exceeded")
                     dirs.remove(name)
                 elif stat.S_ISDIR(info.st_mode):
-                    if not add_entry(relative_path, {{"kind": "directory"}}):
+                    if not add_entry(relative_path, {{
+                        "kind": "directory",
+                        "mode": stat.S_IMODE(info.st_mode),
+                        "mtime_ns": info.st_mtime_ns,
+                    }}):
                         return unavailable("entry_limit_exceeded")
                 else:
                     dirs.remove(name)
@@ -910,6 +918,7 @@ def _workspace_filesystem_snapshot():
                         "target_sha256": hashlib.sha256(
                             target.encode("utf-8", errors="replace")
                         ).hexdigest(),
+                        "mtime_ns": info.st_mtime_ns,
                     }}
                 elif stat.S_ISREG(info.st_mode):
                     if info.st_size > _FILESYSTEM_AUDIT_MAX_FILE_BYTES:
@@ -921,6 +930,7 @@ def _workspace_filesystem_snapshot():
                         return unavailable("request_byte_budget_exceeded")
                     digest = hashlib.sha256()
                     bytes_read = 0
+                    partial_file_bytes = 0
                     descriptor = os.open(
                         candidate,
                         os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
@@ -934,6 +944,7 @@ def _workspace_filesystem_snapshot():
                             if not chunk:
                                 break
                             bytes_read += len(chunk)
+                            partial_file_bytes = bytes_read
                             if bytes_read > _FILESYSTEM_AUDIT_MAX_FILE_BYTES:
                                 return unavailable("file_size_limit_exceeded")
                             if (
@@ -945,10 +956,13 @@ def _workspace_filesystem_snapshot():
                     if bytes_read != opened.st_size:
                         return unavailable("file_changed_during_snapshot")
                     snapshot_bytes += bytes_read
+                    partial_file_bytes = 0
                     record = {{
                         "kind": "file",
                         "size_bytes": bytes_read,
                         "sha256": digest.hexdigest(),
+                        "mode": stat.S_IMODE(info.st_mode),
+                        "mtime_ns": info.st_mtime_ns,
                     }}
                 else:
                     return unavailable("unsupported_file_type")
