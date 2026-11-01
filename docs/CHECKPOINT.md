@@ -143,6 +143,10 @@
 - M4 recursive-shrinking PR CI: https://github.com/somildholakia/UnAi/actions/runs/41295629226
 - M4 recursive-shrinking post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41295688338
 - Both PR #16 workflows reported 182 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 static/class method invocation PR #17 was squash-merged as 3464578c71a15ebf10f3d169fc753d93c84a8be4.
+- M4 method-invocation PR CI: https://github.com/somildholakia/UnAi/actions/runs/41296156280
+- M4 method-invocation post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41296223884
+- Both PR #17 workflows reported 188 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
