@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from unai_engine.cognition.task_compiler import compile_task
 from unai_engine.models import (
     EvidenceRecord,
     GroundedOracleCase,
+    GroundedPropertyOracle,
     GroundedTestApprovalRequest,
     TaskCompileRequest,
     TaskTestRunResponse,
@@ -35,6 +37,7 @@ class FakeGroundedRunner:
         self.stdout = stdout
         self.stderr = stderr
         self.calls: list[dict] = []
+        self.response_queue: list[tuple[str, str, str]] = []
 
     def run_generated_test(
         self,
@@ -43,7 +46,13 @@ class FakeGroundedRunner:
         generated_test_path: str,
         generated_test_content: str,
         evidence_metadata: dict,
+        *,
+        evidence_source: str = "grounded-oracle-sandbox",
     ) -> TaskTestRunResponse:
+        if self.response_queue:
+            status, stdout, stderr = self.response_queue.pop(0)
+        else:
+            status, stdout, stderr = self.status, self.stdout, self.stderr
         self.calls.append(
             {
                 "task_id": task_id,
@@ -57,15 +66,15 @@ class FakeGroundedRunner:
             evidence_id=f"run-{len(self.calls)}",
             task_id=task_id,
             kind="execution",
-            source="grounded-oracle-sandbox",
+            source=evidence_source,
             claim="Grounded pytest run completed.",
-            passed=True if self.status == "passed" else False if self.status == "failed" else None,
+            passed=True if status == "passed" else False if status == "failed" else None,
             artifact_ref=f"task:{task_id}/grounded-oracle-tests",
             metadata={
-                "stdout_sha256": hashlib.sha256(self.stdout.encode()).hexdigest(),
-                "stderr_sha256": hashlib.sha256(self.stderr.encode()).hexdigest(),
-                "exit_code": 0 if self.status == "passed" else 1 if self.status == "failed" else None,
-                "sandboxed": self.status != "unavailable",
+                "stdout_sha256": hashlib.sha256(stdout.encode()).hexdigest(),
+                "stderr_sha256": hashlib.sha256(stderr.encode()).hexdigest(),
+                "exit_code": 0 if status == "passed" else 1 if status == "failed" else None,
+                "sandboxed": status != "unavailable",
                 **evidence_metadata,
             },
             created_at=now,
@@ -73,11 +82,11 @@ class FakeGroundedRunner:
         self.ledger.append_evidence(event)
         return TaskTestRunResponse(
             task_id=task_id,
-            status=self.status,
+            status=status,
             exit_code=event.metadata["exit_code"],
-            sandboxed=self.status != "unavailable",
-            stdout_preview=self.stdout,
-            stderr_preview=self.stderr,
+            sandboxed=status != "unavailable",
+            stdout_preview=stdout,
+            stderr_preview=stderr,
             evidence=event,
         )
 
@@ -362,8 +371,10 @@ def test_test_runner_extracts_counterexample_markers_before_preview_truncation(t
         "unai_generated_tests/test_oracle.py",
         "def test_placeholder():\n    assert False\n",
         {},
+        evidence_source="grounded-oracle-shrink-sandbox",
     )
 
+    assert result.evidence.source == "grounded-oracle-shrink-sandbox"
     markers = result.evidence.metadata["counterexample_markers"]
     assert [item["case_id"] for item in markers] == ["one", "two"]
     assert markers[1]["actual_summary"] == "secret=[REDACTED]"
@@ -666,4 +677,216 @@ def test_user_oracle_does_not_create_missing_specification_pin_risk(tmp_path: Pa
     assert not any(
         "specification references are not bound" in risk
         for risk in bundle.unresolved_risks
+    )
+
+
+
+def _property_request(snapshot, *, value=9, property_kind="output_non_negative", argument_name=None):
+    return GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="property-negative",
+                arguments={"value": value},
+                oracle_property=GroundedPropertyOracle(
+                    kind=property_kind,
+                    argument_name=argument_name,
+                ),
+                oracle_kind="user",
+                oracle_reference="User supplied non-negative return-value property",
+            )
+        ],
+    )
+
+
+def _generated_cases(generated_source: str) -> list[dict]:
+    tree = ast.parse(generated_source)
+    assignment = next(
+        node for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "_CASES" for target in node.targets)
+    )
+    payload = ast.literal_eval(assignment.value.args[0])
+    return json.loads(payload)
+
+
+def test_property_oracle_harness_uses_fixed_predicates_without_expected_value(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return -abs(value)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    result = verifier.run(task_id, _property_request(fresh), workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "def _property_holds(actual, arguments, property_spec):" in generated
+    assert '"output_non_negative"' in generated
+    assert "expected_output" not in _generated_cases(generated)[0]
+    assert runner.calls[0]["metadata"]["oracle_case_ids"] == ["property-negative"]
+
+    staged_root = tmp_path / "property-staged"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(
+        target.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    generated_path = staged_root / "unai_generated_tests" / "test_oracle.py"
+    generated_path.parent.mkdir()
+    generated_path.write_text(generated, encoding="utf-8")
+    namespace = {"__file__": str(generated_path)}
+    exec(compile(generated, str(generated_path), "exec"), namespace)
+    with pytest.raises(AssertionError, match="UNAI_COUNTEREXAMPLE"):
+        namespace["test_grounded_oracle_case"](namespace["_CASES"][0])
+
+
+def test_property_counterexample_is_shrunk_only_when_same_property_still_fails(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "def clamp(value):" + chr(10) + "    return -abs(value)" + chr(10),
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    initial_marker = (
+        'UNAI_COUNTEREXAMPLE:{"case_id":"property-negative","actual_type":"int","actual_summary":"-9"}'
+    )
+    candidate_ids = {
+        value: "sh-" + hashlib.sha256(
+            ("property-negative" + chr(0) + "value" + chr(0) + str(value)).encode("utf-8")
+        ).hexdigest()[:24]
+        for value in (0, 1, 2, 4, 8)
+    }
+    shrink_markers = [
+        "UNAI_COUNTEREXAMPLE:" + json.dumps(
+            {
+                "case_id": candidate_ids[value],
+                "actual_type": "int",
+                "actual_summary": str(-value),
+            },
+            separators=(",", ":"),
+        )
+        for value in (1, 2, 4, 8)
+    ]
+    runner.response_queue.extend(
+        [
+            ("failed", initial_marker, ""),
+            ("failed", chr(10).join(shrink_markers), ""),
+        ]
+    )
+
+    result = verifier.run(task_id, _property_request(fresh), workspace_root)
+
+    assert result.status == "failed"
+    assert len(result.counterexamples) == 1
+    assert len(runner.calls) == 2
+    shrink_cases = _generated_cases(runner.calls[1]["content"])
+    assert len(shrink_cases) == 5
+    assert {item["arguments"]["value"] for item in shrink_cases} == {0, 1, 2, 4, 8}
+    assert all(item["oracle_property"]["kind"] == "output_non_negative" for item in shrink_cases)
+    assert all("expected_output" not in item for item in shrink_cases)
+    assert runner.calls[1]["metadata"]["parent_execution_evidence_id"] == result.execution_evidence.evidence_id
+    shrink = result.shrinking_results[0]
+    assert shrink.status == "smaller_failure_observed"
+    assert shrink.attempts == 5
+    assert shrink.smallest_observed_arguments == {"value": 1}
+    assert shrink.smallest_observed_arguments_sha256 == hashlib.sha256(
+        b'{"value":1}'
+    ).hexdigest()
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    bundle = build_proof_bundle(saved)
+    assert bundle.overall_status == "counterexamples_found"
+    assert bundle.shrink_attempt_count == 5
+    assert bundle.shrunk_counterexample_count == 1
+    assert any(item.source == "grounded-oracle-shrink-sandbox" for item in saved.evidence)
+    assert any(item.source == "grounded-shrink-trace" for item in saved.evidence)
+
+def test_property_contract_rejects_expected_output_and_requires_argument_reference(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    with pytest.raises(GroundedVerificationError, match="must omit expected_output"):
+        request = _property_request(snapshot)
+        request.cases[0].expected_output = 0
+        verifier.run(task_id, request, workspace_root)
+
+    request = _property_request(snapshot, property_kind="output_equals_argument")
+    with pytest.raises(GroundedVerificationError, match="must name an argument"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+
+def test_exact_oracle_counterexample_does_not_trigger_input_shrinking(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    runner.status = "failed"
+    runner.stdout = (
+        'UNAI_COUNTEREXAMPLE:{"case_id":"lower-edge","actual_type":"int","actual_summary":"1"}'
+    )
+
+    result = verifier.run(task_id, _request(snapshot, expected=0), workspace_root)
+
+    assert result.counterexamples
+    assert result.shrinking_results == []
+    assert len(runner.calls) == 1
+
+
+def test_integer_shrink_candidates_are_deterministic_and_never_increase_magnitude() -> None:
+    from unai_engine.verification.grounded import _integer_shrink_candidates
+
+    assert _integer_shrink_candidates(9) == [0, 1, 2, 4, 8]
+    assert _integer_shrink_candidates(-9) == [0, -1, -2, -4, -8]
+    assert _integer_shrink_candidates(0) == []
+    assert _integer_shrink_candidates(True) == []
+
+
+
+def test_exact_oracle_requires_explicit_expected_output_even_when_null_is_default(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256=snapshot.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="missing-expected",
+                arguments={"value": 9},
+                oracle_kind="user",
+                oracle_reference="Expected output was accidentally omitted",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="must explicitly supply expected_output"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_property_shrinking_skips_float_arguments_and_records_non_applicability(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    request = _property_request(snapshot, value=9.5)
+    runner.response_queue.append(
+        (
+            "failed",
+            'UNAI_COUNTEREXAMPLE:{"case_id":"property-negative","actual_type":"float","actual_summary":"-9.5"}',
+            "",
+        )
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "failed"
+    assert len(runner.calls) == 1
+    assert result.shrinking_results[0].status == "no_supported_integer_arguments"
+    assert result.shrinking_results[0].attempts == 0
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert any(
+        item.kind == "shrink"
+        and item.metadata.get("status") == "no_supported_integer_arguments"
+        for item in saved.evidence
     )

@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -19,6 +20,7 @@ from unai_engine.models import (
     EvidenceRecord,
     GroundedCounterexample,
     GroundedTestApprovalRequest,
+    GroundedShrinkResult,
     GroundedTestResponse,
     TaskEvidenceSnapshot,
     TaskProofBundleResponse,
@@ -29,8 +31,11 @@ from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.proof import summarize_proof
 
 
+_MAX_SHRINK_CANDIDATES = 24
+
 _LIMITATIONS = [
-    "Expected outputs are supplied by the requester; oracle references are recorded but not automatically authenticated against an external specification.",
+    "Exact expected outputs and property predicates are supplied by the requester; oracle references are not automatically authenticated against an external specification.",
+    "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to integer arguments and at most 24 deterministic candidates per run; it reports the smallest observed failure, not a globally minimal input.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Undecorated, module-level synchronous and async Python functions with keyword-addressable parameters are supported; methods and decorated functions remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
@@ -63,6 +68,34 @@ def _json_text(value: Any, label: str) -> str:
 
 def _digest(value: Any, label: str) -> str:
     return hashlib.sha256(_json_text(value, label).encode("utf-8")).hexdigest()
+
+
+def _integer_shrink_candidates(value: int) -> list[int]:
+    """Return bounded, deterministic, strictly smaller integer candidates."""
+    if isinstance(value, bool) or not isinstance(value, int) or value == 0:
+        return []
+    sign = 1 if value > 0 else -1
+    magnitude = abs(value)
+    candidates = {0, sign, value - sign}
+    for divisor in (2, 4, 8, 16, 32):
+        reduced = magnitude // divisor
+        if reduced < magnitude:
+            candidates.add(sign * reduced)
+    return sorted(
+        (item for item in candidates if abs(item) < magnitude),
+        key=lambda item: (abs(item), item),
+    )
+
+
+def _shrink_score(arguments: dict[str, Any]) -> tuple[int, int, str]:
+    """Score only supported integer arguments; never claim global minimality."""
+    integer_magnitude = sum(
+        abs(value)
+        for value in arguments.values()
+        if isinstance(value, int) and not isinstance(value, bool)
+    )
+    encoded = _json_text(arguments, "Shrunk arguments")
+    return integer_magnitude, len(encoded.encode("utf-8")), encoded
 
 
 def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
@@ -98,7 +131,7 @@ def _target_function(source: str, symbol_name: str) -> ast.FunctionDef | ast.Asy
     return function
 
 
-def _signature(function: ast.FunctionDef) -> tuple[set[str], set[str]]:
+def _signature(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[set[str], set[str]]:
     positional = list(function.args.args)
     defaults_start = len(positional) - len(function.args.defaults)
     required = {
@@ -173,6 +206,26 @@ def _validate_cases(
         if case.case_id in seen:
             raise GroundedVerificationError("Oracle case IDs must be unique within a run.")
         seen.add(case.case_id)
+        has_expected_output = "expected_output" in case.model_fields_set
+        if case.oracle_property is None and not has_expected_output:
+            raise GroundedVerificationError(
+                f"Exact oracle case {case.case_id} must explicitly supply expected_output (including null when intended)."
+            )
+        if case.oracle_property is not None and has_expected_output:
+            raise GroundedVerificationError(
+                f"Property oracle case {case.case_id} must omit expected_output; choose exactly one oracle contract."
+            )
+        if case.oracle_property is not None:
+            property_argument = case.oracle_property.argument_name
+            if case.oracle_property.kind == "output_equals_argument":
+                if property_argument not in case.arguments:
+                    raise GroundedVerificationError(
+                        f"Property oracle case {case.case_id} must name an argument present in its input."
+                    )
+            elif property_argument is not None:
+                raise GroundedVerificationError(
+                    f"Property oracle case {case.case_id} cannot set argument_name for this property kind."
+                )
         arguments = dict(case.arguments)
         unknown = set(arguments) - allowed
         missing = required - set(arguments)
@@ -202,14 +255,24 @@ def _validate_cases(
                 )
 
         arguments_json = _json_text(arguments, f"Arguments for case {case.case_id}")
-        expected_json = _json_text(case.expected_output, f"Expected output for case {case.case_id}")
+        expected_json = (
+            _json_text(case.expected_output, f"Expected output for case {case.case_id}")
+            if case.oracle_property is None
+            else ""
+        )
+        property_json = (
+            _json_text(case.oracle_property.model_dump(), f"Property oracle for case {case.case_id}")
+            if case.oracle_property is not None
+            else ""
+        )
         arguments_bytes = len(arguments_json.encode("utf-8"))
         expected_bytes = len(expected_json.encode("utf-8"))
-        if arguments_bytes > 10_000 or expected_bytes > 10_000:
+        property_bytes = len(property_json.encode("utf-8"))
+        if max(arguments_bytes, expected_bytes, property_bytes) > 10_000:
             raise GroundedVerificationError(
                 f"Oracle case {case.case_id} exceeds the 10 KB per-value limit."
             )
-        total_payload_bytes += arguments_bytes + expected_bytes
+        total_payload_bytes += arguments_bytes + expected_bytes + property_bytes
         if total_payload_bytes > 200_000:
             raise GroundedVerificationError(
                 "Grounded oracle payload exceeds the 200 KB aggregate limit."
@@ -218,14 +281,28 @@ def _validate_cases(
             {
                 "case_id": case.case_id,
                 "arguments": arguments,
-                "expected_output": case.expected_output,
+                **(
+                    {"expected_output": case.expected_output}
+                    if case.oracle_property is None
+                    else {}
+                ),
+                "oracle_property": case.oracle_property.model_dump() if case.oracle_property else None,
                 "oracle_kind": case.oracle_kind,
                 "oracle_reference": case.oracle_reference,
                 "oracle_artifact_path": artifact_path,
                 "oracle_artifact_sha256": artifact_sha256.lower() if artifact_sha256 else None,
                 "probe_candidate_id": case.probe_candidate_id,
                 "arguments_sha256": _digest(arguments, "Arguments"),
-                "expected_sha256": _digest(case.expected_output, "Expected output"),
+                "expected_sha256": (
+                    _digest(case.expected_output, "Expected output")
+                    if case.oracle_property is None
+                    else None
+                ),
+                "oracle_property_sha256": (
+                    _digest(case.oracle_property.model_dump(), "Property oracle")
+                    if case.oracle_property
+                    else None
+                ),
             }
         )
     return normalized
@@ -258,6 +335,7 @@ from __future__ import annotations
 {asyncio_import}import hashlib
 import importlib.util
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -309,6 +387,40 @@ def _strict_equal(actual, expected):
     return actual == expected
 
 
+def _property_holds(actual, arguments, property_spec):
+    kind = property_spec["kind"]
+    if kind == "output_non_negative":
+        return (
+            isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and (not isinstance(actual, float) or math.isfinite(actual))
+            and actual >= 0
+        )
+    if kind == "output_positive":
+        return (
+            isinstance(actual, (int, float))
+            and not isinstance(actual, bool)
+            and (not isinstance(actual, float) or math.isfinite(actual))
+            and actual > 0
+        )
+    if kind == "output_truthy":
+        return bool(actual)
+    if kind == "output_falsy":
+        return not bool(actual)
+    if kind == "output_is_none":
+        return actual is None
+    if kind == "output_not_none":
+        return actual is not None
+    if kind == "output_is_empty":
+        return isinstance(actual, (str, list, dict)) and len(actual) == 0
+    if kind == "output_not_empty":
+        return isinstance(actual, (str, list, dict)) and len(actual) > 0
+    if kind == "output_equals_argument":
+        argument_name = property_spec["argument_name"]
+        return _strict_equal(actual, arguments[argument_name])
+    raise RuntimeError("Unknown fixed property-oracle kind.")
+
+
 @pytest.mark.parametrize("case", _CASES, ids=lambda case: case["case_id"])
 def test_grounded_oracle_case(case):
     try:
@@ -322,7 +434,13 @@ def test_grounded_oracle_case(case):
         raise AssertionError(
             "UNAI_COUNTEREXAMPLE:" + json.dumps(details, sort_keys=True, separators=(",", ":"))
         ) from exc
-    if not _strict_equal(actual, case["expected_output"]):
+    property_spec = case.get("oracle_property")
+    violation = (
+        not _property_holds(actual, case["arguments"], property_spec)
+        if property_spec is not None
+        else not _strict_equal(actual, case["expected_output"])
+    )
+    if violation:
         details = {{
             "case_id": case["case_id"],
             "actual_type": type(actual).__name__,
@@ -346,6 +464,320 @@ class GroundedTestVerifier:
         self.ledger = ledger
         self.patch_manager = patch_manager
         self.test_runner = test_runner
+
+    def _shrink_property_counterexamples(
+        self,
+        task_id: str,
+        request: GroundedTestApprovalRequest,
+        normalized: list[dict[str, Any]],
+        counterexample_case_ids: set[str],
+        source_sha256: str,
+        is_async: bool,
+        artifact_fingerprints: dict[str, dict[str, Any]],
+        workspace_root,
+        parent_execution_id: str,
+    ) -> list[GroundedShrinkResult]:
+        """Check a bounded set of explicitly property-preserving integer reductions."""
+        by_case_id = {case["case_id"]: case for case in normalized}
+        candidate_map: dict[str, dict[str, Any]] = {}
+        attempts_by_case: dict[str, list[str]] = {}
+        results: list[GroundedShrinkResult] = []
+        used = 0
+
+        for case_id in sorted(counterexample_case_ids):
+            case = by_case_id.get(case_id)
+            if case is None or case.get("oracle_property") is None:
+                continue
+            attempts_by_case[case_id] = []
+            for argument_name in sorted(case["arguments"]):
+                value = case["arguments"][argument_name]
+                for reduced_value in _integer_shrink_candidates(value):
+                    if used >= _MAX_SHRINK_CANDIDATES:
+                        break
+                    candidate_arguments = dict(case["arguments"])
+                    candidate_arguments[argument_name] = reduced_value
+                    candidate_id = "sh-" + hashlib.sha256(
+                        f"{case_id}\x00{argument_name}\x00{reduced_value}".encode("utf-8")
+                    ).hexdigest()[:24]
+                    candidate = dict(case)
+                    candidate.update(
+                        {
+                            "case_id": candidate_id,
+                            "original_case_id": case_id,
+                            "arguments": candidate_arguments,
+                            "arguments_sha256": _digest(candidate_arguments, "Shrink candidate arguments"),
+                            "expected_sha256": None,
+                        }
+                    )
+                    candidate_map[candidate_id] = candidate
+                    attempts_by_case[case_id].append(candidate_id)
+                    used += 1
+                if used >= _MAX_SHRINK_CANDIDATES:
+                    break
+
+            if not attempts_by_case[case_id]:
+                has_integer_input = any(
+                    isinstance(value, int) and not isinstance(value, bool) and value != 0
+                    for value in case["arguments"].values()
+                )
+                status = (
+                    "budget_exhausted"
+                    if has_integer_input and used >= _MAX_SHRINK_CANDIDATES
+                    else "no_supported_integer_arguments"
+                )
+                note = (
+                    "The global 24-candidate shrink budget was consumed by earlier counterexamples."
+                    if status == "budget_exhausted"
+                    else "Shrinking currently changes integer arguments only; booleans, floats, strings and collections are left unchanged."
+                )
+                result = GroundedShrinkResult(
+                    case_id=case_id,
+                    status=status,
+                    attempts=0,
+                    original_arguments_sha256=case["arguments_sha256"],
+                    note=note,
+                )
+                results.append(result)
+                self.ledger.append_evidence(
+                    EvidenceRecord(
+                        evidence_id=uuid4().hex,
+                        task_id=task_id,
+                        kind="shrink",
+                        source="grounded-property-shrinker",
+                        claim=f"Counterexample shrinking was not run for case {case_id}: {status}.",
+                        passed=None,
+                        artifact_ref=f"oracle-case:{task_id}:{case_id}",
+                        metadata={
+                            "case_id": case_id,
+                            "status": status,
+                            "attempts": 0,
+                            "source_sha256": source_sha256,
+                            "original_arguments_sha256": case["arguments_sha256"],
+                        },
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+
+        if not candidate_map:
+            return results
+
+        candidate_cases = list(candidate_map.values())
+        generated_content = _generated_pytest(
+            request.file_path,
+            request.symbol_name,
+            candidate_cases,
+            source_sha256,
+            is_async=is_async,
+        )
+        generated_path = f"unai_generated_tests/test_shrink_{uuid4().hex}.py"
+
+        # A shrink trial must observe the exact same target and pinned documents
+        # as the original counterexample; otherwise it is not comparable evidence.
+        try:
+            latest_source = self.patch_manager.read_file(
+                task_id, request.file_path, workspace_root
+            )
+            source_still_current = latest_source.sha256.lower() == source_sha256.lower()
+            artifacts_still_current = True
+            for artifact_path, fingerprint in artifact_fingerprints.items():
+                latest_artifact = self.patch_manager.read_file(
+                    task_id, artifact_path, workspace_root
+                )
+                if latest_artifact.sha256.lower() != fingerprint["sha256"].lower():
+                    artifacts_still_current = False
+                    break
+        except (PatchRejected, PatchConflict, OSError):
+            source_still_current = False
+            artifacts_still_current = False
+
+        if not source_still_current or not artifacts_still_current:
+            for case_id, candidate_ids in attempts_by_case.items():
+                original = by_case_id[case_id]
+                result = GroundedShrinkResult(
+                    case_id=case_id,
+                    status="unavailable",
+                    attempts=len(candidate_ids),
+                    original_arguments_sha256=original["arguments_sha256"],
+                    note="Target or pinned specification changed before shrink trials; no candidates were executed.",
+                )
+                results.append(result)
+                self.ledger.append_evidence(
+                    EvidenceRecord(
+                        evidence_id=uuid4().hex,
+                        task_id=task_id,
+                        kind="shrink",
+                        source="grounded-property-shrinker",
+                        claim=f"Shrink trials for case {case_id} were rejected because their source snapshot became stale.",
+                        passed=None,
+                        artifact_ref=f"oracle-case:{task_id}:{case_id}",
+                        metadata={
+                            "case_id": case_id,
+                            "status": result.status,
+                            "attempts": len(candidate_ids),
+                            "source_sha256": source_sha256,
+                            "parent_execution_evidence_id": parent_execution_id,
+                        },
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+            return results
+
+        shrink_metadata = {
+            "target_file": request.file_path,
+            "target_function": request.symbol_name,
+            "target_is_async": is_async,
+            "target_sha256": source_sha256,
+            "generated_test_sha256": hashlib.sha256(
+                generated_content.encode("utf-8")
+            ).hexdigest(),
+            "parent_execution_evidence_id": parent_execution_id,
+            "shrink_candidate_case_ids": list(candidate_map),
+            "shrink_candidate_map": [
+                {
+                    "candidate_case_id": candidate_id,
+                    "original_case_id": candidate["original_case_id"],
+                    "argument_name": next(
+                        key for key in candidate["arguments"]
+                        if candidate["arguments"][key] != by_case_id[candidate["original_case_id"]]["arguments"][key]
+                    ),
+                    "candidate_arguments_sha256": candidate["arguments_sha256"],
+                }
+                for candidate_id, candidate in candidate_map.items()
+            ],
+            "oracle_case_ids": [],
+            "source_fingerprint_rechecked_before_staging": True,
+            "staged_fingerprint_assertions_embedded": True,
+        }
+        shrink_execution = self.test_runner.run_generated_test(
+            task_id,
+            workspace_root,
+            generated_path,
+            generated_content,
+            shrink_metadata,
+            evidence_source="grounded-oracle-shrink-sandbox",
+        )
+
+        marker_values: set[str] = set()
+        marker_records = shrink_execution.evidence.metadata.get("counterexample_markers", [])
+        if isinstance(marker_records, list):
+            marker_values.update(
+                item["case_id"]
+                for item in marker_records
+                if isinstance(item, dict) and isinstance(item.get("case_id"), str)
+            )
+        shrink_output = "\n".join(
+            [shrink_execution.stdout_preview or "", shrink_execution.stderr_preview or ""]
+        )
+        for match in re.findall(r"UNAI_COUNTEREXAMPLE:(\{[^\r\n]*\})", shrink_output):
+            try:
+                marker = json.loads(match)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(marker.get("case_id"), str):
+                marker_values.add(marker["case_id"])
+
+        for case_id, candidate_ids in attempts_by_case.items():
+            original = by_case_id[case_id]
+            failing_candidates = [
+                candidate_map[candidate_id]
+                for candidate_id in candidate_ids
+                if candidate_id in marker_values
+            ]
+            best = min(
+                failing_candidates,
+                key=lambda item: _shrink_score(item["arguments"]),
+                default=None,
+            )
+            if shrink_execution.status == "unavailable":
+                status = "unavailable"
+                note = "Docker or workspace staging could not execute the bounded shrink batch."
+            elif best is not None:
+                status = "smaller_failure_observed"
+                note = (
+                    "At least one strictly smaller integer input still violated the same fixed property. "
+                    "The selected input is the smallest observed in this bounded candidate batch, not a proof of global minimality."
+                )
+            elif shrink_execution.status == "passed":
+                status = "no_smaller_failure_observed"
+                note = "All bounded smaller candidates satisfied the property; the original counterexample remains valid."
+            else:
+                status = "unavailable"
+                note = "The shrink batch failed without a recognized property-violation marker; its result is inconclusive."
+
+            result = GroundedShrinkResult(
+                case_id=case_id,
+                status=status,
+                attempts=len(candidate_ids),
+                original_arguments_sha256=original["arguments_sha256"],
+                smallest_observed_arguments_sha256=best["arguments_sha256"] if best else None,
+                smallest_observed_arguments=best["arguments"] if best else None,
+                note=note,
+            )
+            results.append(result)
+            shrink_evidence = EvidenceRecord(
+                evidence_id=uuid4().hex,
+                task_id=task_id,
+                kind="shrink",
+                source="grounded-property-shrinker",
+                claim=f"Bounded property-oracle shrinking completed for case {case_id}: {status}.",
+                passed=None,
+                artifact_ref=f"oracle-case:{task_id}:{case_id}",
+                metadata={
+                    "case_id": case_id,
+                    "status": status,
+                    "attempts": len(candidate_ids),
+                    "candidate_case_ids": candidate_ids,
+                    "candidate_arguments_sha256": [
+                        candidate_map[candidate_id]["arguments_sha256"]
+                        for candidate_id in candidate_ids
+                    ],
+                    "failing_candidate_case_ids": [
+                        candidate["case_id"] for candidate in failing_candidates
+                    ],
+                    "original_arguments_sha256": original["arguments_sha256"],
+                    "smallest_observed_arguments_sha256": best["arguments_sha256"] if best else None,
+                    "oracle_property_sha256": original["oracle_property_sha256"],
+                    "oracle_property_kind": original["oracle_property"]["kind"],
+                    "source_sha256": source_sha256,
+                    "parent_execution_evidence_id": parent_execution_id,
+                    "shrink_execution_evidence_id": shrink_execution.evidence.evidence_id,
+                    "target_is_async": is_async,
+                },
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.ledger.append_evidence(shrink_evidence)
+
+        shrink_stdout = (shrink_execution.stdout_preview or "").encode("utf-8")
+        shrink_stderr = (shrink_execution.stderr_preview or "").encode("utf-8")
+        shrink_trace = EvidenceRecord(
+            evidence_id=uuid4().hex,
+            task_id=task_id,
+            kind="trace",
+            source="grounded-shrink-trace",
+            claim="Captured the bounded property-shrinking execution status and output fingerprints.",
+            passed=None,
+            artifact_ref=f"trace:{task_id}:{shrink_execution.evidence.evidence_id}",
+            metadata={
+                "execution_evidence_id": shrink_execution.evidence.evidence_id,
+                "parent_execution_evidence_id": parent_execution_id,
+                "target_sha256": source_sha256,
+                "generated_test_sha256": shrink_metadata["generated_test_sha256"],
+                "exit_code": shrink_execution.exit_code,
+                "timed_out": shrink_execution.timed_out,
+                "sandboxed": shrink_execution.sandboxed,
+                "stdout_sha256": shrink_execution.evidence.metadata.get("stdout_sha256"),
+                "stderr_sha256": shrink_execution.evidence.metadata.get("stderr_sha256"),
+                "stdout_preview_sha256": hashlib.sha256(shrink_stdout).hexdigest(),
+                "stderr_preview_sha256": hashlib.sha256(shrink_stderr).hexdigest(),
+                "candidate_count": len(candidate_cases),
+            },
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        shrink_trace.metadata["trace_sha256"] = hashlib.sha256(
+            _json_text(shrink_trace.metadata, "Shrink trace").encode("utf-8")
+        ).hexdigest()
+        self.ledger.append_evidence(shrink_trace)
+        return results
 
     def run(
         self,
@@ -424,7 +856,11 @@ class GroundedTestVerifier:
                 task_id=task_id,
                 kind="oracle",
                 source="grounded-oracle",
-                claim=f"Expected output supplied for grounded case {case['case_id']}.",
+                claim=(
+                    f"Property oracle supplied for grounded case {case['case_id']}."
+                    if case["oracle_property"] is not None
+                    else f"Expected output supplied for grounded case {case['case_id']}."
+                ),
                 passed=None,
                 artifact_ref=f"oracle-case:{task_id}:{case['case_id']}",
                 metadata={
@@ -434,6 +870,8 @@ class GroundedTestVerifier:
                     "source_sha256": source_snapshot.sha256,
                     "arguments_sha256": case["arguments_sha256"],
                     "expected_sha256": case["expected_sha256"],
+                    "oracle_property_sha256": case["oracle_property_sha256"],
+                    "oracle_property": case["oracle_property"],
                     "oracle_kind": case["oracle_kind"],
                     "oracle_reference": case["oracle_reference"],
                     "oracle_artifact_path": case["oracle_artifact_path"],
@@ -478,6 +916,8 @@ class GroundedTestVerifier:
                     "reference": case["oracle_reference"],
                     "oracle_artifact_path": case["oracle_artifact_path"],
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
+                    "oracle_property_sha256": case["oracle_property_sha256"],
+                    "oracle_property": case["oracle_property"],
                     "probe_candidate_id": case["probe_candidate_id"],
                 }
                 for case in normalized
@@ -558,6 +998,7 @@ class GroundedTestVerifier:
                 probe_candidate_id=case["probe_candidate_id"],
                 oracle_kind=case["oracle_kind"],
                 oracle_reference=case["oracle_reference"],
+                oracle_property=case["oracle_property"],
                 actual_summary=actual_summary[:600],
             )
             counterexamples.append(counterexample)
@@ -577,6 +1018,13 @@ class GroundedTestVerifier:
                         "source_sha256": source_snapshot.sha256,
                         "arguments_sha256": case["arguments_sha256"],
                         "expected_sha256": case["expected_sha256"],
+                        "oracle_property_sha256": case["oracle_property_sha256"],
+                        "oracle_property": case["oracle_property"],
+                        "oracle_property_kind": (
+                            case["oracle_property"]["kind"]
+                            if case["oracle_property"]
+                            else None
+                        ),
                         "oracle_kind": case["oracle_kind"],
                         "oracle_reference": case["oracle_reference"],
                         "actual_type": marker["actual_type"],
@@ -585,6 +1033,40 @@ class GroundedTestVerifier:
                     created_at=datetime.now(timezone.utc).isoformat(),
                 )
             )
+
+        counterexample_case_ids = {
+            item.case_id for item in counterexamples
+            if case_by_id[item.case_id].get("oracle_property") is not None
+        }
+        shrinking_results: list[GroundedShrinkResult] = []
+        if (
+            counterexample_case_ids
+            and execution.status == "failed"
+            and execution.sandboxed
+            and not execution.timed_out
+        ):
+            shrinking_results = self._shrink_property_counterexamples(
+                task_id,
+                request,
+                normalized,
+                counterexample_case_ids,
+                source_snapshot.sha256,
+                is_async,
+                artifact_fingerprints,
+                workspace_root,
+                execution.evidence.evidence_id,
+            )
+        elif counterexample_case_ids:
+            shrinking_results = [
+                GroundedShrinkResult(
+                    case_id=case_id,
+                    status="unavailable",
+                    attempts=0,
+                    original_arguments_sha256=case_by_id[case_id]["arguments_sha256"],
+                    note="Shrinking requires a completed, sandboxed initial counterexample run.",
+                )
+                for case_id in sorted(counterexample_case_ids)
+            ]
 
         stdout_bytes = (execution.stdout_preview or "").encode("utf-8")
         stderr_bytes = (execution.stderr_preview or "").encode("utf-8")
@@ -633,6 +1115,7 @@ class GroundedTestVerifier:
             case_count=len(normalized),
             passed_cases=passed_cases,
             counterexamples=counterexamples,
+            shrinking_results=shrinking_results,
             execution_evidence=execution.evidence,
             trace_evidence=trace_evidence,
             oracle_evidence=oracle_events,
@@ -657,7 +1140,12 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     ]
     trace_events = [
         item for item in events
-        if item.kind == "trace" and item.source == "grounded-execution-trace"
+        if item.kind == "trace"
+        and item.source in {"grounded-execution-trace", "grounded-shrink-trace"}
+    ]
+    shrink_events = [
+        item for item in events
+        if item.kind == "shrink" and item.source == "grounded-property-shrinker"
     ]
     probes = [
         item for item in events
@@ -701,6 +1189,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
             probe_candidate_id=item.metadata.get("probe_candidate_id"),
             oracle_kind=item.metadata.get("oracle_kind", "user"),
             oracle_reference=str(item.metadata.get("oracle_reference", "Unspecified oracle reference")),
+            oracle_property=item.metadata.get("oracle_property"),
             actual_summary=(
                 f"{item.metadata.get('actual_type', 'unknown')}: "
                 f"{item.metadata.get('actual_summary', '')}"
@@ -728,7 +1217,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
 
     risks = list(snapshot.contract.unknowns)
     if not oracle_events:
-        risks.append("No user- or specification-referenced expected outputs have been executed.")
+        risks.append("No user- or specification-referenced exact or property oracle contracts have been executed.")
     else:
         risks.append(
             "Oracle provenance is requester-supplied; a workspace artifact hash proves content integrity only, not publisher identity, authorship, authority or correctness."
@@ -752,7 +1241,7 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     risks.extend(
         [
             "Existing passing tests and a clean Python parse are evidence, not proof of complete semantic correctness.",
-            "The verifier currently does not perform automatic shrinking, symbolic execution, or an independent model review.",
+            "Shrinking only tries bounded integer reductions under a caller-supplied fixed property; it does not prove global minimality or support floats, strings, collections, symbolic execution or independent model review.",
         ]
     )
 
@@ -764,9 +1253,15 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         grounded_case_count=len(oracle_events),
         grounded_run_count=len(grounded_runs),
         grounded_counterexample_count=len(counterexample_events),
+        shrink_attempt_count=sum(int(item.metadata.get("attempts", 0)) for item in shrink_events),
+        shrunk_counterexample_count=sum(
+            1 for item in shrink_events
+            if item.metadata.get("status") == "smaller_failure_observed"
+        ),
         unverified_probe_candidate_count=unverified_count,
         counterexamples=counterexamples,
         oracle_evidence=oracle_events[-100:],
+        shrink_evidence=shrink_events[-100:],
         execution_traces=trace_events[-30:],
         unresolved_risks=risks,
         limitations=list(_LIMITATIONS),

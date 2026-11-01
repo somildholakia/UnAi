@@ -90,7 +90,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace", "shrink"]
     source: str
     claim: str
     passed: bool | None = None
@@ -245,10 +245,30 @@ class TaskProofResponse(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class GroundedPropertyOracle(BaseModel):
+    """A fixed, non-executable predicate the observed return value must satisfy."""
+
+    kind: Literal[
+        "output_non_negative",
+        "output_positive",
+        "output_truthy",
+        "output_falsy",
+        "output_is_none",
+        "output_not_none",
+        "output_is_empty",
+        "output_not_empty",
+        "output_equals_argument",
+    ]
+    argument_name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+    ] | None = None
+
+
 class GroundedOracleCase(BaseModel):
     case_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")]
     arguments: dict[str, Any]
-    expected_output: Any
+    expected_output: Any = None
+    oracle_property: GroundedPropertyOracle | None = None
     oracle_kind: Literal["user", "specification"]
     oracle_reference: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=5, max_length=500)
@@ -277,7 +297,24 @@ class GroundedCounterexample(BaseModel):
     probe_candidate_id: str | None = None
     oracle_kind: Literal["user", "specification"]
     oracle_reference: str
+    oracle_property: GroundedPropertyOracle | None = None
     actual_summary: str
+
+
+class GroundedShrinkResult(BaseModel):
+    case_id: str
+    status: Literal[
+        "smaller_failure_observed",
+        "no_smaller_failure_observed",
+        "no_supported_integer_arguments",
+        "budget_exhausted",
+        "unavailable",
+    ]
+    attempts: int = Field(ge=0)
+    original_arguments_sha256: str
+    smallest_observed_arguments_sha256: str | None = None
+    smallest_observed_arguments: dict[str, Any] | None = None
+    note: str
 
 
 class GroundedTestResponse(BaseModel):
@@ -289,6 +326,7 @@ class GroundedTestResponse(BaseModel):
     case_count: int = Field(ge=1)
     passed_cases: int | None = Field(default=None, ge=0)
     counterexamples: list[GroundedCounterexample] = Field(default_factory=list)
+    shrinking_results: list[GroundedShrinkResult] = Field(default_factory=list)
     execution_evidence: EvidenceRecord
     trace_evidence: EvidenceRecord
     oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
@@ -309,9 +347,12 @@ class TaskProofBundleResponse(BaseModel):
     grounded_case_count: int = Field(ge=0)
     grounded_run_count: int = Field(ge=0)
     grounded_counterexample_count: int = Field(ge=0)
+    shrink_attempt_count: int = Field(ge=0)
+    shrunk_counterexample_count: int = Field(ge=0)
     unverified_probe_candidate_count: int = Field(ge=0)
     counterexamples: list[GroundedCounterexample] = Field(default_factory=list)
     oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    shrink_evidence: list[EvidenceRecord] = Field(default_factory=list)
     execution_traces: list[EvidenceRecord] = Field(default_factory=list)
     unresolved_risks: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
