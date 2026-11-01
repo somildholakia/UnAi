@@ -642,3 +642,28 @@ def test_specification_artifact_is_rechecked_before_sandbox_staging(tmp_path: Pa
     assert raised.value.status_code == 409
     assert artifact_reads == 2
     assert runner.calls == []
+
+
+
+def test_user_oracle_does_not_create_missing_specification_pin_risk(tmp_path: Path) -> None:
+    task_id, _workspace_root, _target, _source, ledger, _snapshot, _probes, _runner, _verifier = _setup(tmp_path)
+    ledger.append_evidence(
+        EvidenceRecord(
+            evidence_id="user-oracle-only",
+            task_id=task_id,
+            kind="oracle",
+            source="grounded-oracle",
+            claim="Expected output supplied directly by the user.",
+            metadata={"case_id": "user-case", "oracle_kind": "user"},
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+    )
+
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    bundle = build_proof_bundle(saved)
+
+    assert not any(
+        "specification references are not bound" in risk
+        for risk in bundle.unresolved_risks
+    )
