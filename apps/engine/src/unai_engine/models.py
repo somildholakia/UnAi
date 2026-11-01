@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 
 TaskKind = Literal["bugfix", "feature", "review", "research", "general"]
@@ -279,6 +280,25 @@ class GroundedPropertyOracle(BaseModel):
     ] | None = None
 
 
+class GroundedOracleAttestation(BaseModel):
+    """Ed25519 signature over one exact, source-bound specification assertion."""
+
+    key_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    ]
+    issued_at: datetime
+    signature_b64: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")
+    ]
+
+    @field_validator("issued_at")
+    @classmethod
+    def require_timezone_aware_issued_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("issued_at must include an explicit timezone.")
+        return value
+
+
 class GroundedOracleCase(BaseModel):
     case_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")]
     arguments: dict[str, Any]
@@ -294,6 +314,7 @@ class GroundedOracleCase(BaseModel):
     oracle_artifact_sha256: Annotated[
         str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")
     ] | None = None
+    oracle_attestation: GroundedOracleAttestation | None = None
     probe_candidate_id: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
     ] | None = None
