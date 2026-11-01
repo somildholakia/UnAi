@@ -83,7 +83,7 @@
 
 - The AST probe generator still produces unverified candidates; it never infers expected outputs.
 - POST /api/tasks/{task_id}/grounded-tests accepts explicit user- or specification-supplied expected JSON outputs, a human-readable oracle reference, exact source SHA-256, and optional probe candidate IDs.
-- A case linked to a probe must preserve that candidate's parameter assignments and exact JSON types. The selected synchronous or async, undecorated, module-level Python function's signature is inspected; unknown/missing arguments are rejected.
+- A case linked to a probe must preserve that candidate's parameter assignments and exact JSON types. The selected module-level function or explicitly bound ClassName.method target is inspected; unknown/missing arguments are rejected, and a classmethod's implicit cls parameter is not caller-controlled.
 - The target is re-read and its source fingerprint is checked immediately before test generation. A stale source/probe returns a conflict and does not execute.
 - Caller data is JSON-serialized into a fixed generated pytest harness. The generated test is added only to the disposable filtered workspace under unai_generated_tests; it is never written to the original workspace. Per-value and aggregate oracle payload sizes are bounded.
 - Execution requires both workspace_read and run_tests permissions already approved on the task, as well as the separate exact run-grounded-oracle-tests confirmation. Only the fixed python -m pytest -q command runs in the Docker sandbox; no model-supplied shell command is accepted.
