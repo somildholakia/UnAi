@@ -34,7 +34,7 @@ def summarize_proof(snapshot: TaskEvidenceSnapshot) -> TaskProofResponse:
 
     test_events = [
         item for item in events
-        if item.source == "docker-sandbox" and item.kind == "execution"
+        if item.source in {"docker-sandbox", "grounded-oracle-sandbox"} and item.kind == "execution"
     ]
     latest_test = test_events[-1] if test_events else None
     quality_events = [

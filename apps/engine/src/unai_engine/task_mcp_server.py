@@ -127,6 +127,12 @@ class TaskMCPBridge:
             result = await client.get_proof(task_id)
         return self._serialize(result)
 
+    async def get_task_proof_bundle(self, task_id: str) -> dict:
+        """Retrieve grounded cases, counterexamples, execution traces and open risks."""
+        async with self._client() as client:
+            result = await client.get_proof_bundle(task_id)
+        return self._serialize(result)
+
 
 try:
     from mcp.server import MCPServer
@@ -197,6 +203,12 @@ async def task_get_evidence(task_id: str) -> dict:
 async def task_get_proof(task_id: str) -> dict:
     """Retrieve verification status, freshness and unresolved risks."""
     return await bridge.get_task_proof(task_id)
+
+
+@server.tool()
+async def task_get_proof_bundle(task_id: str) -> dict:
+    """Retrieve oracle-backed cases, counterexamples, execution traces and open risks."""
+    return await bridge.get_task_proof_bundle(task_id)
 
 
 def run() -> None:

@@ -19,6 +19,7 @@ from unai_engine.models import (
     TaskInspectRequest,
     TaskInspectionResponse,
     TaskProofResponse,
+    TaskProofBundleResponse,
     TaskQualityCheckResponse,
     TaskTestRunResponse,
     WorkspaceFileSnapshot,
@@ -188,3 +189,8 @@ class EngineClient:
     async def get_proof(self, task_id: str) -> TaskProofResponse:
         path = f"/api/tasks/{_segment(task_id)}/proof"
         return await self._request("GET", path, TaskProofResponse)
+
+
+    async def get_proof_bundle(self, task_id: str) -> TaskProofBundleResponse:
+        path = f"/api/tasks/{_segment(task_id)}/proof-bundle"
+        return await self._request("GET", path, TaskProofBundleResponse)

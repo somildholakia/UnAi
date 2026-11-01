@@ -47,6 +47,10 @@ class FakeClient:
         self.calls["proof"] = task_id
         return FakeResult()
 
+    async def get_proof_bundle(self, task_id):
+        self.calls["proof_bundle"] = task_id
+        return FakeResult()
+
 
 def make_factory(calls: dict, constructor_args: list) -> Callable[..., FakeClient]:
     def factory(base_url: str, api_token: str = "") -> FakeClient:
@@ -143,9 +147,11 @@ async def test_read_and_evidence_tools_delegate_to_typed_client() -> None:
     assert (await bridge.read_workspace_file("task-1", "src/app.py"))["ok"] is True
     assert (await bridge.get_task_evidence("task-1"))["ok"] is True
     assert (await bridge.get_task_proof("task-1"))["ok"] is True
+    assert (await bridge.get_task_proof_bundle("task-1"))["ok"] is True
     assert calls["read_file"] == ("task-1", "src/app.py")
     assert calls["evidence"] == "task-1"
     assert calls["proof"] == "task-1"
+    assert calls["proof_bundle"] == "task-1"
 
 
 @pytest.mark.asyncio
