@@ -520,6 +520,58 @@ def test_publisher_keyring_supports_rotation_and_strict_issuer_metadata(monkeypa
     assert keys["publisher-2026"].revoked is False
 
 
+@pytest.mark.parametrize(
+    "config_value,error",
+    [
+        ("[]", "must be a JSON object"),
+        ("{", "must be a JSON object"),
+        (
+            json.dumps({"bad-key": {"issuer_id": "issuer.example", "public_key_b64": "not-base64"}}),
+            "not valid base64",
+        ),
+        (
+            json.dumps({
+                "bad-key": {
+                    "issuer_id": "issuer.example",
+                    "public_key_b64": base64.b64encode(b"x" * 32).decode("ascii"),
+                    "not_before": "2026-01-01T00:00:00",
+                }
+            }),
+            "must include a timezone",
+        ),
+        (
+            json.dumps({
+                "bad-key": {
+                    "issuer_id": "issuer.example",
+                    "public_key_b64": base64.b64encode(b"x" * 32).decode("ascii"),
+                    "not_before": "2026-12-01T00:00:00Z",
+                    "not_after": "2026-01-01T00:00:00Z",
+                }
+            }),
+            "invalid issuance window",
+        ),
+        (
+            json.dumps({
+                "bad-key": {
+                    "issuer_id": "issuer.example",
+                    "public_key_b64": base64.b64encode(b"x" * 32).decode("ascii"),
+                    "unknown": "not-allowed",
+                }
+            }),
+            "supported metadata fields",
+        ),
+    ],
+)
+def test_publisher_keyring_rejects_malformed_or_unsafe_configuration(
+    monkeypatch, config_value: str, error: str
+) -> None:
+    from unai_engine.config import _publisher_keys_from_env
+
+    monkeypatch.setenv("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS", config_value)
+    with pytest.raises(ValueError, match=error):
+        _publisher_keys_from_env()
+
+
 def test_publisher_attestation_model_validates_issuer_identifier() -> None:
     signature_b64 = base64.b64encode(b"x" * 64).decode("ascii")
     with pytest.raises(ValidationError):
