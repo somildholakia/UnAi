@@ -123,7 +123,15 @@ def _setup(tmp_path: Path, permissions=None):
     return contract.task_id, workspace_root, target, source, ledger, snapshot, probes, runner, verifier
 
 
-def _request(snapshot, *, candidate_id="probe-1", expected=0, source_hash=None):
+def _request(
+    snapshot,
+    *,
+    candidate_id="probe-1",
+    expected=0,
+    source_hash=None,
+    oracle_artifact_path=None,
+    oracle_artifact_sha256=None,
+):
     return GroundedTestApprovalRequest(
         confirm="run-grounded-oracle-tests",
         file_path="service.py",
@@ -136,6 +144,8 @@ def _request(snapshot, *, candidate_id="probe-1", expected=0, source_hash=None):
                 expected_output=expected,
                 oracle_kind="specification",
                 oracle_reference="product-spec.md#clamp-lower-bound",
+                oracle_artifact_path=oracle_artifact_path,
+                oracle_artifact_sha256=oracle_artifact_sha256,
                 probe_candidate_id=candidate_id,
             )
         ],
@@ -492,5 +502,84 @@ def test_decorated_async_function_remains_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(GroundedVerificationError, match="Decorated functions"):
         verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+
+def test_specification_artifact_hash_is_recorded_and_verified(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec = workspace_root / "demo" / "product-spec.md"
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    spec.write_text(spec_content, encoding="utf-8")
+    expected_hash = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
+
+    result = verifier.run(
+        task_id,
+        _request(
+            snapshot,
+            oracle_artifact_path="product-spec.md",
+            oracle_artifact_sha256=expected_hash,
+        ),
+        workspace_root,
+    )
+
+    metadata = result.oracle_evidence[0].metadata
+    assert metadata["oracle_artifact_path"] == "product-spec.md"
+    assert metadata["oracle_artifact_sha256"] == expected_hash
+    assert metadata["oracle_artifact_integrity"] == "workspace-file-sha256-verified"
+    assert metadata["oracle_artifact_size_bytes"] == len(spec_content.encode("utf-8"))
+    assert runner.calls[0]["metadata"]["oracle_references"][0]["oracle_artifact_sha256"] == expected_hash
+
+
+def test_specification_artifact_hash_mismatch_rejects_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec = workspace_root / "demo" / "product-spec.md"
+    spec.write_text("# Actual specification\\n", encoding="utf-8")
+
+    with pytest.raises(GroundedVerificationError, match="does not match its supplied SHA-256") as raised:
+        verifier.run(
+            task_id,
+            _request(
+                snapshot,
+                oracle_artifact_path="product-spec.md",
+                oracle_artifact_sha256="0" * 64,
+            ),
+            workspace_root,
+        )
+
+    assert raised.value.status_code == 409
+    assert runner.calls == []
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert not any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_specification_artifact_requires_a_path_hash_pair(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    with pytest.raises(GroundedVerificationError, match="must supply both"):
+        verifier.run(
+            task_id,
+            _request(snapshot, oracle_artifact_path="product-spec.md"),
+            workspace_root,
+        )
+
+    assert runner.calls == []
+
+
+def test_specification_artifact_path_rejects_traversal_and_non_text_files(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+
+    with pytest.raises(GroundedVerificationError, match="workspace-relative"):
+        verifier.run(
+            task_id,
+            _request(
+                snapshot,
+                oracle_artifact_path="../outside.md",
+                oracle_artifact_sha256="0" * 64,
+            ),
+            workspace_root,
+        )
 
     assert runner.calls == []
