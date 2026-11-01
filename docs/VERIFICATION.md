@@ -79,9 +79,21 @@ When a probe ID is supplied, every input/value pair generated for that candidate
 
 The target is re-read immediately before execution. If its SHA-256 differs from the request or the referenced probe, execution is rejected as stale. The verifier supports synchronous and async, undecorated module-level Python functions, plus explicitly decorated @staticmethod and @classmethod methods on top-level classes. Class targets use the exact ClassName.method symbol syntax; the generated harness resolves the class and bound method explicitly. For classmethods, the first bound class parameter is supplied by Python and is not exposed as a caller oracle argument. Async targets are awaited through asyncio.run inside the generated synchronous pytest case. Ordinary instance methods, nested classes, positional-only arguments, *args, **kwargs and all other decorators are rejected. Expected-exception cases are supported only through the fixed `raises_exception` property and the exception allowlist below; custom exception classes and arbitrary exception names remain unsupported.
 
-A matching artifact hash proves the workspace document bytes match the supplied fingerprint; by itself it does not prove who authored or published the document. A specification case may additionally include an oracle attestation signed by a reviewer whose Ed25519 public key is configured by the Engine operator. The signature covers the task/workspace, target file/function/source hash, case ID, oracle reference, artifact path/hash, argument hash, expected-output/property hash, reviewer key ID and issuance time. Therefore the signature approves one exact test assertion and cannot be replayed for a different input, expected value, source version, artifact or task.
+A matching artifact hash proves the workspace document bytes match the supplied fingerprint; by itself it does not prove who authored or published the document. A specification case may include either a reviewer attestation or an issuer-bound publisher attestation. Both use Ed25519 and sign the exact task/workspace, target file/function/source hash, case ID, oracle reference, artifact path/hash, argument hash, expected-output/property hash, key ID and issuance time. Publisher attestations additionally sign the stable issuer ID and publisher role, so the issuer or role cannot be substituted without invalidating the signature.
 
-Configure trusted reviewer keys in the UNAI_ORACLE_TRUSTED_PUBLIC_KEYS setting as a JSON object mapping stable key IDs to base64-encoded 32-byte raw Ed25519 public keys. Keep private keys outside the Engine and workspace. Removing a key from this operator-managed keyring revokes trust in signatures from that key. An unknown key or invalid signature is rejected before oracle evidence is appended or tests execute. User oracles and un-attested specification references remain usable but visibly untrusted.
+Configure reviewer keys in UNAI_ORACLE_TRUSTED_PUBLIC_KEYS as a JSON object mapping stable key IDs to base64-encoded 32-byte raw Ed25519 public keys. Configure publisher keys separately in UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS as a JSON object mapping key IDs to metadata objects:
+
+    {
+      "acme-specs-2026": {
+        "issuer_id": "acme.example",
+        "public_key_b64": "<base64 raw Ed25519 public key>",
+        "not_before": "2026-01-01T00:00:00Z",
+        "not_after": "2026-12-31T23:59:59Z",
+        "revoked": false
+      }
+    }
+
+The issuer_id is operator-assigned and must exactly match the signed publisher attestation. Multiple key IDs may share one issuer to support rotation. Keep an old key with its not_after issuance cutoff while adding a new key ID for the next period; historical signatures issued inside the old key window remain verifiable. Setting revoked to true immediately rejects every attestation from that key, including historical ones. Unknown keys, issuer mismatches, revoked keys, out-of-window issuance times and invalid signatures are rejected before oracle evidence is appended or tests execute. Keep all private keys outside the Engine and workspace. User oracles and un-attested specification references remain usable but visibly untrusted.
 
 The reviewer signs the canonical UTF-8 JSON assertion produced by the Engine's build_oracle_attestation_statement and canonical_attestation_message helpers in unai_engine.verification.attestations. The assertion binds the exact case inputs, expected output or property, target source hash, workspace, task and pinned specification artifact hash. A valid signature authenticates approval by the configured key, not the truth of the requirement itself; trusted reviewers must inspect the specification and expected assertion before signing.
 
