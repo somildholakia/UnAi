@@ -461,6 +461,31 @@ class GroundedTestVerifier:
             ],
             "generated_test_path": generated_path,
         }
+
+        # Re-check both the implementation and any pinned specification files
+        # immediately before the staging runner copies the workspace.
+        latest_source = self.patch_manager.read_file(
+            task_id, request.file_path, workspace_root
+        )
+        if latest_source.sha256.lower() != source_snapshot.sha256.lower():
+            raise GroundedVerificationError(
+                "The target source changed after test generation and before sandbox staging.",
+                409,
+            )
+        for artifact_path, fingerprint in artifact_fingerprints.items():
+            latest_artifact = self.patch_manager.read_file(
+                task_id, artifact_path, workspace_root
+            )
+            if latest_artifact.sha256.lower() != fingerprint["sha256"].lower():
+                raise GroundedVerificationError(
+                    f"Specification artifact changed after test generation and before sandbox staging: {artifact_path}.",
+                    409,
+                )
+        run_metadata["source_fingerprint_rechecked_before_staging"] = True
+        run_metadata["oracle_artifact_fingerprints_rechecked_before_staging"] = sorted(
+            artifact_fingerprints
+        )
+
         execution = self.test_runner.run_generated_test(
             task_id,
             workspace_root,
