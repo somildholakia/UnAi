@@ -134,6 +134,10 @@
 - M4 string-shrinking PR CI: https://github.com/somildholakia/UnAi/actions/runs/41294014101
 - M4 string-shrinking post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41294070349
 - Both PR #11 workflows reported 173 tests passed; python -m compileall -q apps/engine/src training passed.
+- M4 top-level collection shrinking PR #13 was squash-merged as 958d3c11655213ceeafe37d7b0ebe01e3b0c61e1.
+- M4 collection-shrinking PR CI: https://github.com/somildholakia/UnAi/actions/runs/41294275727
+- M4 collection-shrinking post-merge CI: https://github.com/somildholakia/UnAi/actions/runs/41294344686
+- Both PR #13 workflows reported 175 tests passed; python -m compileall -q apps/engine/src training passed.
 - Earlier M4 CI failures were fixed before merge: generated-source injection assertion now inspects AST imports, the probe fixture is retained in the proof test, and oracle payload values are size-bounded. The async harness newline escaping was also caught and corrected before the successful PR run.
 
 ## Important limits and safety boundaries
