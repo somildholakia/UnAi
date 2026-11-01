@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
 
@@ -299,6 +301,61 @@ class GroundedOracleAttestation(BaseModel):
         return value
 
 
+class GroundedOraclePublisherAttestation(BaseModel):
+    """External publisher signature over one immutable specification artifact revision."""
+
+    key_id: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    ]
+    issuer: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=128)
+    ]
+    artifact_uri: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=12, max_length=1024)
+    ]
+    artifact_revision: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$")
+    ]
+    issued_at: datetime
+    signature_b64: Annotated[
+        str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")
+    ]
+
+    @field_validator("issued_at")
+    @classmethod
+    def require_timezone_aware_issued_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("issued_at must include an explicit timezone.")
+        return value
+
+    @field_validator("artifact_uri")
+    @classmethod
+    def require_public_https_artifact_uri(cls, value: str) -> str:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.port not in (None, 443)
+        ):
+            raise ValueError(
+                "Publisher artifact_uri must be a public HTTPS URL without credentials, query, fragment or non-standard port."
+            )
+        host = parsed.hostname
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("Publisher artifact_uri must use a public DNS hostname, not an IP address.")
+        if host.casefold() in {"localhost"} or host.endswith(".localhost") or "." not in host:
+            raise ValueError("Publisher artifact_uri must use a public hostname.")
+        return value
+
+
 class GroundedOracleCase(BaseModel):
     case_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")]
     arguments: dict[str, Any]
@@ -315,6 +372,7 @@ class GroundedOracleCase(BaseModel):
         str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")
     ] | None = None
     oracle_attestation: GroundedOracleAttestation | None = None
+    oracle_publisher_attestation: GroundedOraclePublisherAttestation | None = None
     probe_candidate_id: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
     ] | None = None
