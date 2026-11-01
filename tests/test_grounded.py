@@ -510,7 +510,7 @@ def test_decorated_async_function_remains_rejected(tmp_path: Path) -> None:
 def test_specification_artifact_hash_is_recorded_and_verified(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
     spec = workspace_root / "demo" / "product-spec.md"
-    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    spec_content = "# Clamp requirement\nValues below 10 return zero.\n"
     spec.write_text(spec_content, encoding="utf-8")
     expected_hash = hashlib.sha256(spec_content.encode("utf-8")).hexdigest()
 
@@ -589,7 +589,7 @@ def test_specification_artifact_path_rejects_traversal_and_non_text_files(tmp_pa
 def test_specification_artifact_is_rechecked_before_sandbox_staging(tmp_path: Path, monkeypatch) -> None:
     task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
     spec = workspace_root / "demo" / "product-spec.md"
-    initial_content = "# Original specification\\n"
+    initial_content = "# Original specification\n"
     spec.write_text(initial_content, encoding="utf-8")
     expected_hash = hashlib.sha256(initial_content.encode("utf-8")).hexdigest()
     original_read = verifier.patch_manager.read_file
