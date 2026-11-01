@@ -570,10 +570,28 @@ class IsolatedPythonTestRunner:
                         replay_records, replay_status = _validated_replay_trace(
                             stage_path,
                             replay_trace_relative_path,
-                            effective_evidence_metadata.get("replay_case_ids", []),
+                            effective_evidence_metadata.get("trace_case_ids", []),
                         )
                         effective_evidence_metadata["replay_trace_records"] = replay_records
                         effective_evidence_metadata["replay_trace_status"] = replay_status
+                        filesystem_case_ids = effective_evidence_metadata.get("filesystem_case_ids", [])
+                        if filesystem_case_ids:
+                            filesystem_records = {
+                                record["case_id"]: record
+                                for record in replay_records
+                                if record.get("kind") == "workspace_filesystem_unchanged"
+                            }
+                            effective_evidence_metadata["filesystem_audit_status"] = (
+                                "complete"
+                                if set(filesystem_records) == set(filesystem_case_ids)
+                                and all(record.get("status") == "complete" for record in filesystem_records.values())
+                                else "unavailable"
+                            )
+                            effective_evidence_metadata["filesystem_audit_unavailable_case_ids"] = sorted(
+                                case_id
+                                for case_id in filesystem_case_ids
+                                if filesystem_records.get(case_id, {}).get("status") != "complete"
+                            )
                 if result.exit_code != 0 and (
                     "No module named pytest" in stderr
                     or "No module named pytest" in stdout
@@ -589,6 +607,27 @@ class IsolatedPythonTestRunner:
                         stdout=stdout,
                         stderr=stderr,
                         error="pytest_missing_from_sandbox_image",
+                        sandboxed=True,
+                        evidence_source=evidence_source,
+                        evidence_metadata=effective_evidence_metadata,
+                        artifact_ref=artifact_ref,
+                    )
+                if (
+                    result.exit_code == 0
+                    and not result.timed_out
+                    and effective_evidence_metadata.get("filesystem_audit_status") == "unavailable"
+                ):
+                    return self._response(
+                        snapshot,
+                        "unavailable",
+                        None,
+                        "Workspace filesystem audit exceeded its safe snapshot budget or could not read the disposable workspace; no unchanged verdict is available.",
+                        exit_code=result.exit_code,
+                        timed_out=result.timed_out,
+                        staged=staged,
+                        stdout=stdout,
+                        stderr=stderr,
+                        error="workspace_filesystem_audit_unavailable",
                         sandboxed=True,
                         evidence_source=evidence_source,
                         evidence_metadata=effective_evidence_metadata,
