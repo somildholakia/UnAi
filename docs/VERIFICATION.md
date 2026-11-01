@@ -105,6 +105,17 @@ Example request field:
       "signature_b64": "<base64 Ed25519 signature>"
     }
 
+For an issuer-bound publisher attestation, include the registered issuer ID in the signed request and sign the publisher statement schema:
+
+    "oracle_attestation": {
+      "key_id": "acme-specs-2026",
+      "issuer_id": "acme.example",
+      "issued_at": "2026-11-01T09:00:00Z",
+      "signature_b64": "<base64 Ed25519 signature over the publisher statement>"
+    }
+
+The publisher key ID must exist in UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS, and the key's configured issuer_id must match this signed value. Keep private signing keys with the publisher; only raw public keys belong in Engine configuration.
+
 The signature is public verification material, not a secret. The Engine stores it with append-only oracle evidence and does not embed it into generated pytest input.
 
 The expected values and request fields are serialized as JSON data embedded in a fixed generated pytest template. Caller text is never interpolated as Python statements. For async targets the fixed harness imports asyncio and invokes the coroutine with asyncio.run; it does not accept caller-provided event-loop code or commands. The generated test is placed in unai_generated_tests/ inside the disposable filtered copy only; it is not written to the original workspace. The existing fixed command python -m pytest -q is executed through Docker with networking disabled and the existing CPU, memory, PID and timeout limits. There is no host-shell fallback.
