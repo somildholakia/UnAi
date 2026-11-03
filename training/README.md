@@ -98,7 +98,7 @@ The evaluation harness consumes one JSONL row per system and held-out case. For 
 - `adapter`: the same base model with the specialist adapter;
 - `tool_augmented`: the tool-augmented system, including non-empty tool names and tool evidence IDs.
 
-Each row needs `model_id`, `base_model`, `latency_ms`, `tokens`, a consented/licensed provenance object and a `verification` object containing a status, named boolean checks, an evidence ID and verifier identifier. The evaluator rejects incomplete or duplicate matched sets, contradictory pass/check results, model mismatches and missing tool traces.
+Each row needs `model_id`, `base_model`, a SHA-256 `case_sha256` of the canonical task prompt plus acceptance criteria, `latency_ms`, `tokens`, a consented/licensed provenance object and a `verification` object containing a status, named boolean checks, an evidence ID and verifier identifier. The same `suite_id + case_id + specialist` must carry the same `case_sha256` for all three systems. Unavailable runs are excluded rather than counted as failures or wins. The evaluator rejects incomplete or duplicate matched sets, contradictory status/check pairs, model or case-content mismatches and missing tool traces.
 
 ```bash
 python training/evaluate_results.py \
@@ -106,7 +106,7 @@ python training/evaluate_results.py \
   --output reports/next-action-evaluation.json
 ```
 
-The report includes verified success rates, paired improvements/regressions, latency and token summaries. An adapter counts as an improvement only when its verified success rate exceeds the matched base baseline with zero base-pass/adapter-fail regressions. This is a measurement on the supplied held-out set, not proof of general capability.
+The report includes verified success rates, paired improvements/regressions, latency and token summaries, plus an exact two-sided McNemar test on discordant paired outcomes. The release floor is 30 matched held-out cases and significance alpha is capped at 0.05. An adapter must improve the matched verified success rate, have zero base-pass/adapter-fail regressions, and pass the exact paired test; a tiny sample can show a descriptive gain but cannot pass the release gate. The evaluator stores the case-content hashes and the release gate recomputes p-values from paired counts instead of trusting a reported boolean. This is a measurement on the supplied held-out set, not proof of general capability.
 
 ## 5. Physical-device release gate
 
@@ -132,7 +132,7 @@ The evaluation report alone cannot approve a mobile release. Provide a separate 
 }
 ```
 
-The numbers above are an example schema only, not measured results or product defaults. Use actual recorded values and choose explicit budgets for your test protocol. The release gate checks the adapter artifact hash, specialist/base-model identity, a memory budget no higher than 6144 MiB, measured peak RSS, TTFT, sustained tokens/second and thermal throttling:
+The numbers above are an example schema only, not measured results or product defaults. Use actual recorded values and choose explicit budgets for your test protocol. The release gate independently checks the adapter artifact hash, specialist/base-model identity, the minimum 30-case paired significance threshold and exact p-value, a memory budget no higher than 6144 MiB, measured peak RSS, TTFT, sustained tokens/second and thermal throttling:
 
 ```bash
 python training/release_gate.py \
