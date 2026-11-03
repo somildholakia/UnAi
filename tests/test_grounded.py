@@ -612,7 +612,7 @@ def test_unconfigured_reviewer_key_is_rejected_before_execution(tmp_path: Path) 
     )
     verifier.trusted_oracle_public_keys = {}
 
-    with pytest.raises(GroundedVerificationError, match="not in the configured trusted reviewer keyring") as raised:
+    with pytest.raises(GroundedVerificationError, match="not in the configured trusted keyring for reviewers") as raised:
         verifier.run(task_id, request, workspace_root)
 
     assert raised.value.status_code == 403
