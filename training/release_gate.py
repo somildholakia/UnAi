@@ -106,17 +106,12 @@ def decide(
         or tool_regressions + tool_improvements + tool_unchanged != matched_cases
     ):
         raise ValueError("Evaluation report has inconsistent paired-comparison counts.")
-    reported_delta = _finite_number(
-        abs(paired.get("adapter_success_rate_delta")), "absolute adapter success-rate delta"
+    signed_delta = _finite_number(
+        paired.get("adapter_success_rate_delta"), "adapter success-rate delta"
     )
     if not math.isclose(
-        paired.get("adapter_success_rate_delta"),
+        signed_delta,
         adapter_rate - base_rate,
-        rel_tol=0,
-        abs_tol=1e-12,
-    ) or not math.isclose(
-        reported_delta,
-        abs(adapter_rate - base_rate),
         rel_tol=0,
         abs_tol=1e-12,
     ):
