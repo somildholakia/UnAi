@@ -1,9 +1,9 @@
 # Development checkpoint
 
-**Checkpoint:** M4 — offline signed publisher trust bundles implemented and validated in PR #27; merge pending
+**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure implemented on feature branch; CI pending
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
-**Branch:** feat/m4-publisher-trust-bundles
+**Branch:** feat/m4-instance-methods-m5-specialists
 **M4 grounded-verification implementation PR:** https://github.com/somildholakia/UnAi/pull/2 (merged)
 **M4 first-milestone merge commit:** 1c0e82d1bb2a75789170278e4e31c81f68d74297
 **M4 async extension PR:** https://github.com/somildholakia/UnAi/pull/3 (merged)
@@ -20,6 +20,30 @@
 **M4 cumulative multi-argument shrinking merge commit:** 8c2ff696c33efd905374e6c11527465a5deff111
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
+
+## 2026-11-03 continuation checkpoint
+
+**Current development PR base:** https://github.com/somildholakia/UnAi/pull/27 (publisher trust-bundle work; still not merged to main)
+**Current feature branch:** `feat/m4-instance-methods-m5-specialists`
+**Current feature head:** pending CI
+**Working tree:** GitHub commits only; no local model training has been run.
+
+### M4 additions in this continuation
+
+- Added ordinary instance-method targets on undecorated top-level classes with no inheritance, class decorators or metaclass keywords.
+- Added explicit JSON `instance_arguments` per oracle case; constructor and method signatures are validated separately. Custom `__new__`, async/decorated `__init__`, positional-only parameters, `*args` and `**kwargs` are rejected.
+- Generated tests construct one fresh instance per case/replay inside the disposable Docker workspace. Method lookup uses the class namespace directly; caller text is never interpolated as Python source.
+- Constructor fixture SHA-256 is included in append-only oracle evidence and optional reviewer-attestation statements. Existing module/static/class-method signatures remain compatible.
+- Added sync/async instance-method, unsafe-constructor, signature and fixture-attestation tests. CI has not yet run on this continuation branch.
+
+### M5 additions in this continuation
+
+- Added consent/license/verification-gated `training/prepare_corpus.py`, with hashed repository grouping, deterministic train/eval splits by project, deduplication, common-secret redaction and per-specialist corpus manifests.
+- Reworked `training/train_lora.py` to train one named specialist at a time, require repository-disjoint train/eval files, mask only assistant continuation tokens, preserve responses during prompt truncation, pad labels correctly and emit reproducible data/library/hardware/adapter artifact hashes.
+- Added `training/evaluate_results.py` for matched base/adapter/tool-augmented held-out verification outcomes and `training/release_gate.py` for paired quality gains, zero regression, matching adapter artifacts and physical-device RAM/TTFT/throughput/thermal limits.
+- Added training-corpus and evaluator/release-gate tests plus a complete training guide.
+
+**M5 is not a completed model-training milestone:** no dataset has been supplied, no specialist weights have been trained, and no physical Android benchmark has been measured. The infrastructure is ready for those external inputs. The 6 GB memory ceiling is a release budget, not a measured result.
 
 ## What is implemented
 
