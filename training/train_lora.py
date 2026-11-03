@@ -21,6 +21,27 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_adapter_artifacts(root: Path) -> str:
+    """Hash deployable adapter/tokenizer files, excluding training checkpoints and manifests."""
+    digest = hashlib.sha256()
+    files = sorted(
+        path for path in root.rglob("*")
+        if path.is_file()
+        and not any(part.startswith("checkpoint-") for part in path.relative_to(root).parts)
+        and path.name not in {"unai_adapter_manifest.json"}
+    )
+    if not files:
+        raise ValueError("Training completed without any adapter/tokenizer artifact files.")
+    for path in files:
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -38,17 +59,20 @@ def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
         verification = row.get("verification")
         record_id = row.get("record_id")
         group_id = row.get("group_id")
-        if (
-            not isinstance(messages, list)
-            or len(messages) < 2
-            or messages[-1].get("role") != "assistant"
-            or not all(
+        valid_messages = (
+            isinstance(messages, list)
+            and len(messages) >= 2
+            and all(
                 isinstance(message, dict)
                 and message.get("role") in {"system", "user", "assistant", "tool"}
                 and isinstance(message.get("content"), str)
                 and message["content"].strip()
                 for message in messages
             )
+            and messages[-1].get("role") == "assistant"
+        ) if isinstance(messages, list) and messages else False
+        if (
+            not valid_messages
             or not isinstance(provenance, dict)
             or provenance.get("consented") is not True
             or not provenance.get("source")
@@ -293,8 +317,10 @@ def main() -> None:
         except importlib.metadata.PackageNotFoundError:
             return None
 
+    adapter_artifacts_sha256 = sha256_adapter_artifacts(args.output_dir)
     manifest = {
         "schema": "unai.specialist-adapter.v1",
+        "adapter_artifacts_sha256": adapter_artifacts_sha256,
         "specialist": args.specialist,
         "base_model": args.model,
         "base_model_revision": args.revision,
