@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -56,6 +57,8 @@ def test_prepare_splits_each_specialist_by_repository_without_leakage(tmp_path: 
     assert manifest["schema"] == "unai.specialist-sft-corpus.v1"
     assert manifest["accepted_records"] == 18
     assert manifest["rejected_records"] == 0
+    assert manifest["source_file_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    assert manifest["source_file_bytes"] == source.stat().st_size
     for specialist in SPECIALISTS:
         split = manifest["specialists"][specialist]
         train = [json.loads(line) for line in (output / split["train_file"]).read_text().splitlines()]
@@ -156,3 +159,38 @@ def test_prepare_rejects_invalid_eval_fraction_and_missing_source(tmp_path: Path
         prepare(source, tmp_path / "output", eval_fraction=0.8)
     with pytest.raises(FileNotFoundError):
         prepare(tmp_path / "missing.jsonl", tmp_path / "other")
+
+
+
+def test_prepare_validates_all_specialists_before_replacing_existing_outputs(tmp_path: Path) -> None:
+    valid_rows = [
+        _record(specialist, f"repo-{index}", f"{specialist}-{index}")
+        for specialist in SPECIALISTS
+        for index in range(4)
+    ]
+    source = tmp_path / "raw.jsonl"
+    output = tmp_path / "prepared"
+    _write_rows(source, valid_rows)
+    prepare(source, output, seed=31)
+
+    before = {
+        path.name: path.read_bytes()
+        for path in output.iterdir()
+        if path.is_file()
+    }
+    invalid_rows = [
+        _record(specialist, f"repo-{index}", f"changed-{specialist}-{index}")
+        for specialist in SPECIALISTS
+        for index in (range(4) if specialist != "verifier" else range(1))
+    ]
+    _write_rows(source, invalid_rows)
+
+    with pytest.raises(ValueError, match="at least two distinct"):
+        prepare(source, output, seed=31)
+
+    after = {
+        path.name: path.read_bytes()
+        for path in output.iterdir()
+        if path.is_file()
+    }
+    assert after == before

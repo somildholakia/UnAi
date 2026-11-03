@@ -25,14 +25,11 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = "".join(
+def _jsonl_payload(rows: list[dict[str, Any]]) -> bytes:
+    return "".join(
         json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
         for row in rows
     ).encode("utf-8")
-    path.write_bytes(payload)
-    return _sha256(payload)
 
 
 def _validated_messages(value: Any) -> list[dict[str, str]] | None:
@@ -144,9 +141,13 @@ def prepare(
     }
     records: dict[str, list[dict[str, Any]]] = {name: [] for name in SPECIALISTS}
     seen: set[str] = set()
+    source_digest = hashlib.sha256()
+    source_bytes = 0
 
     with source.open("rb") as handle:
         for raw_line in handle:
+            source_digest.update(raw_line)
+            source_bytes += len(raw_line)
             if not raw_line.strip():
                 continue
             counts["input"] += 1
@@ -206,8 +207,9 @@ def prepare(
             except (UnicodeDecodeError, json.JSONDecodeError, TypeError, AttributeError, ValueError):
                 counts["rejected"] += 1
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Validate and serialize every specialist before touching the output directory.
     specialist_manifest: dict[str, Any] = {}
+    prepared_payloads: dict[Path, bytes] = {}
     total_train = 0
     total_eval = 0
 
@@ -224,8 +226,10 @@ def prepare(
 
         train_path = output_dir / f"{specialist}.train.jsonl"
         eval_path = output_dir / f"{specialist}.eval.jsonl"
-        train_sha = _write_jsonl(train_path, train_rows)
-        eval_sha = _write_jsonl(eval_path, eval_rows)
+        train_payload = _jsonl_payload(train_rows)
+        eval_payload = _jsonl_payload(eval_rows)
+        train_sha = _sha256(train_payload)
+        eval_sha = _sha256(eval_payload)
 
         if {row["group_id"] for row in train_rows} & {row["group_id"] for row in eval_rows}:
             raise AssertionError("Repository/project group leakage detected.")
@@ -240,6 +244,8 @@ def prepare(
             "eval_file": eval_path.name,
             "eval_sha256": eval_sha,
         }
+        prepared_payloads[train_path] = train_payload
+        prepared_payloads[eval_path] = eval_payload
         total_train += len(train_rows)
         total_eval += len(eval_rows)
 
@@ -247,6 +253,8 @@ def prepare(
         "schema": "unai.specialist-sft-corpus.v1",
         "seed": seed,
         "eval_fraction": eval_fraction,
+        "source_file_sha256": source_digest.hexdigest(),
+        "source_file_bytes": source_bytes,
         "input_records": counts["input"],
         "accepted_records": counts["accepted"],
         "rejected_records": counts["rejected"],
@@ -258,6 +266,10 @@ def prepare(
         "split_policy": "deterministic repository/project-group split; no group appears in both train and eval",
         "privacy_note": "group IDs are SHA-256 pseudonyms; review sanitized examples manually before training",
     }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for path, payload in prepared_payloads.items():
+        path.write_bytes(payload)
     (output_dir / "corpus_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
