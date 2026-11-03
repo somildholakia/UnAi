@@ -48,7 +48,7 @@ provider = OpenAICompatibleProvider(
     api_key=settings.model_api_key,
     timeout=settings.model_timeout_seconds,
 )
-plugins = build_registry()
+plugins = build_registry(code_graph_db_path=settings.code_graph_db_path)
 brain = MarkdownVault(settings.brain_vault_root, settings.brain_index_path)
 agent = AgentOrchestrator(
     provider,
