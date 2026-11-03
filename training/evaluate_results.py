@@ -34,6 +34,14 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
         raise ValueError(f"Line {line_number}: benchmark result must be an object.")
     if row.get("schema") != "unai.benchmark-result.v1":
         raise ValueError(f"Line {line_number}: benchmark result schema must be unai.benchmark-result.v1.")
+    allowed_fields = {
+        "schema", "suite_id", "case_id", "case_sha256", "specialist", "system",
+        "model_id", "base_model", "latency_ms", "tokens", "verification",
+        "provenance", "tool_trace",
+    }
+    unexpected_fields = set(row) - allowed_fields
+    if unexpected_fields:
+        raise ValueError(f"Line {line_number}: unexpected benchmark fields: {', '.join(sorted(unexpected_fields))}.")
     suite_id = row.get("suite_id")
     case_id = row.get("case_id")
     case_sha256 = row.get("case_sha256")
@@ -53,6 +61,8 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
         raise ValueError(f"Line {line_number}: invalid suite/case/specialist/system/model identity.")
     if not isinstance(verification, dict):
         raise ValueError(f"Line {line_number}: verification object is required.")
+    if set(verification) - {"status", "checks", "evidence_id", "verifier"}:
+        raise ValueError(f"Line {line_number}: verification contains unexpected fields.")
     status = verification.get("status")
     checks = verification.get("checks")
     evidence_id = verification.get("evidence_id")
@@ -73,6 +83,7 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
         raise ValueError(f"Line {line_number}: verification needs status, checks, evidence_id and verifier.")
     if any(
         not isinstance(check, dict)
+        or set(check) != {"name", "passed"}
         or not isinstance(check.get("name"), str)
         or not check["name"].strip()
         or not isinstance(check.get("passed"), bool)
@@ -86,6 +97,7 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
         raise ValueError(f"Line {line_number}: failed status contradicts all-passing verification checks.")
     if (
         not isinstance(provenance, dict)
+        or set(provenance) - {"consented", "source", "license"}
         or provenance.get("consented") is not True
         or not isinstance(provenance.get("source"), str)
         or not provenance["source"].strip()
@@ -98,6 +110,7 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
     if system == "tool_augmented":
         if (
             not isinstance(tool_trace, dict)
+            or set(tool_trace) - {"tools", "evidence_ids"}
             or not isinstance(tool_trace.get("tools"), list)
             or not tool_trace["tools"]
             or not all(isinstance(tool, str) and tool.strip() for tool in tool_trace["tools"])
