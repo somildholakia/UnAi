@@ -69,18 +69,21 @@ def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
                 and message["content"].strip()
                 for message in messages
             )
-            and messages[-1].get("role") == "assistant"
+            and messages[-1]["role"] == "assistant"
         ) if isinstance(messages, list) and messages else False
         if (
             not valid_messages
             or not isinstance(provenance, dict)
             or provenance.get("consented") is not True
-            or not provenance.get("source")
-            or not provenance.get("license")
+            or not isinstance(provenance.get("source"), str)
+            or not provenance.get("source").strip()
+            or not isinstance(provenance.get("license"), str)
+            or not provenance.get("license").strip()
             or not isinstance(verification, dict)
             or verification.get("status") != "passed"
             or not isinstance(verification.get("check_names"), list)
             or not verification["check_names"]
+            or not all(isinstance(name, str) and name.strip() for name in verification["check_names"])
             or not isinstance(record_id, str)
             or not isinstance(group_id, str)
         ):
