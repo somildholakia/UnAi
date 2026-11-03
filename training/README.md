@@ -166,7 +166,27 @@ python training/release_gate.py \
 
 A missing mobile measurement, a failed performance comparison, any regression, a hash mismatch, an out-of-budget measurement or thermal throttling blocks release. Do not edit a release decision manually to mark an adapter ready.
 
-## 6. DPO is optional and later
+## 6. Serve and route the three specialists
+
+The Engine can route a request to a separately served OpenAI-compatible adapter model. Configure only model IDs that your local inference server actually exposes:
+
+```dotenv
+UNAI_SPECIALIST_NEXT_ACTION_MODEL=unai-next-action-lora
+UNAI_SPECIALIST_PLANNER_MODEL=unai-planner-lora
+UNAI_SPECIALIST_VERIFIER_MODEL=unai-verifier-lora
+```
+
+Leave a value blank until that adapter is trained, validated and loaded by the serving runtime. The model ID is selected by server configuration, never by caller input. The routes are:
+
+```text
+POST /api/specialists/next_action/chat
+POST /api/specialists/planner/chat
+POST /api/specialists/verifier/chat
+```
+
+Each request accepts `message` and optional user/assistant `history`; the response identifies the selected specialist and configured model ID. The API inherits the Engine bearer-token/loopback perimeter. If a specialist model is missing, the endpoint returns HTTP 503 and does not silently use the base model. This is model routing, not proof that a specialist adapter has been trained or released.
+
+## 7. DPO is optional and later
 
 The existing preference-data and DPO scripts remain an experimental second stage. Use them only after a stable SFT baseline and only with chosen/rejected answers whose outcomes have been independently verified. A failed answer is not automatically a useful negative example.
 
