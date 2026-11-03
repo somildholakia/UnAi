@@ -10,6 +10,7 @@ from training.release_gate import decide
 
 def _row(case_id: str, system: str, passed: bool, *, specialist: str = "next_action") -> dict:
     row = {
+        "schema": "unai.benchmark-result.v1",
         "suite_id": "heldout-v1",
         "case_id": case_id,
         "case_sha256": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
