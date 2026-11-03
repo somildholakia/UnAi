@@ -56,14 +56,19 @@
 - [ ] Extend deeper or broader recursive reductions only with additional per-type correctness/resource policies.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [x] Support explicitly decorated top-level-class @staticmethod and @classmethod targets with bound invocation, async support, signature validation and generated-harness tests.
-- [ ] Extend grounded tests to ordinary instance methods, nested classes, other decorators and broader Python signatures only with explicit construction/invocation rules.
+- [x] Support ordinary instance methods on top-level classes with JSON-only constructor fixtures, explicit self/constructor signatures, no inheritance/metaclass/custom __new__, and the existing Docker-only runner; bind fixture hashes into reviewer attestations.
+- [ ] Extend grounded tests to nested classes, other decorators and broader Python signatures only with separately reviewed construction/invocation rules.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
 
 ## M5 — Specialist training
-- [ ] Collect consented, licensed and verified trajectories.
-- [ ] Train separate next-action, planner and verifier adapters.
-- [ ] Compare base, adapter and tool-augmented systems on held-out coding tasks.
-- [ ] Export only adapters that improve verified outcomes without exceeding mobile budgets.
+- [x] Build consent/license/verification-gated corpus preparation with sanitized deduplication, hashed repository groups and deterministic repository-disjoint specialist train/eval splits.
+- [x] Add separate next-action, planner and verifier LoRA/QLoRA training runs with provenance checks, leakage rejection and reproducible data/library/hardware manifests.
+- [x] Add a matched held-out evaluator for base, specialist-adapter and tool-augmented outcomes, including paired regression reporting.
+- [x] Add a release gate requiring a verified success-rate gain with zero regressions plus a matching physical-device memory/TTFT/throughput/thermal report.
+- [ ] Collect a real, consented/licensed multi-repository trajectory corpus; none has been supplied to this repository.
+- [ ] Train all three specialist adapters on suitable GPU hardware and retain reproducible artifacts.
+- [ ] Run the held-out comparison and physical Android measurements for each adapter.
+- [ ] Package/promote only adapters that pass both gates. No weights have been trained or released.
 
 ## M6 — Mobile and deployment validation
 - [ ] Benchmark on physical Android hardware.
