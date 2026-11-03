@@ -201,8 +201,8 @@ def evaluate_rows(
     adapter_rate = metrics["adapter"]["verified_success_rate"]
     base_rate = metrics["base"]["verified_success_rate"]
     quality_improved = adapter_rate > base_rate and regressions == 0
-    minimum_heldout_cases = 30
-    significance_alpha = 0.05
+    minimum_heldout_cases = minimum_heldout_cases
+    significance_alpha = significance_alpha
     adapter_p_value = exact_mcnemar_pvalue(improvements, regressions)
     tool_p_value = exact_mcnemar_pvalue(tool_improvements, tool_regressions)
     statistical_passed = (
