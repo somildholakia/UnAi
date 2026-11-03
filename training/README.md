@@ -98,7 +98,7 @@ The evaluation harness consumes one JSONL row per system and held-out case. For 
 - `adapter`: the same base model with the specialist adapter;
 - `tool_augmented`: the tool-augmented system, including non-empty tool names and tool evidence IDs.
 
-Each row must declare `schema: "unai.benchmark-result.v1"` and needs `model_id`, `base_model`, a SHA-256 `case_sha256` of the canonical task prompt plus acceptance criteria, `latency_ms`, `tokens`, a consented/licensed provenance object and a `verification` object containing a status, named boolean checks, an evidence ID and verifier identifier. The same `suite_id + case_id + specialist` must carry the same `case_sha256` for all three systems. The accepted record shape is published in [benchmark-result.schema.json](schemas/benchmark-result.schema.json); unknown fields are rejected by the evaluator. Unavailable runs are excluded rather than counted as failures or wins. The evaluator rejects incomplete or duplicate matched sets, contradictory status/check pairs, model or case-content mismatches and missing tool traces.
+Each row must declare `schema: "unai.benchmark-result.v1"` and include a `case_contract` object with the exact `prompt` and non-empty `acceptance_criteria` list. It also needs `model_id`, `base_model`, a SHA-256 `case_sha256` recomputed from that canonical contract, `latency_ms`, `tokens`, a consented/licensed provenance object and a `verification` object containing a status, named boolean checks, an evidence ID and verifier identifier. The same `suite_id + case_id + specialist` must carry the same `case_sha256` for all three systems. The accepted record shape is published in [benchmark-result.schema.json](schemas/benchmark-result.schema.json); unknown fields are rejected by the evaluator. Unavailable runs are excluded rather than counted as failures or wins. The evaluator rejects incomplete or duplicate matched sets, contradictory status/check pairs, model or case-content mismatches and missing tool traces.
 
 Compute `case_sha256` from the exact task and acceptance contract that all three systems receive, not from the response or observed outcome:
 
@@ -110,6 +110,15 @@ case_contract = {
     "prompt": "Fix the off-by-one error in the range calculation.",
     "acceptance_criteria": ["boundary test passes", "no unrelated file changes"],
 }
+case_sha256 = hashlib.sha256(
+    json.dumps(
+        case_contract,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+).hexdigest()
 canonical = json.dumps(
     case_contract,
     ensure_ascii=False,
@@ -120,7 +129,7 @@ canonical = json.dumps(
 case_sha256 = hashlib.sha256(canonical).hexdigest()
 ```
 
-Use the same canonical case contract and digest for the base, adapter and tool-augmented runs. Keep the task suite frozen before evaluating any adapter; do not derive acceptance checks after seeing model outputs.
+Include the same canonical case contract and its digest in every base, adapter and tool-augmented row. The evaluator recomputes the digest and rejects mismatches. Keep the task suite frozen before evaluating any adapter; do not derive acceptance checks after seeing model outputs.
 
 ```bash
 python training/evaluate_results.py \
