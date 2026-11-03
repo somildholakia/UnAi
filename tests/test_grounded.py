@@ -1222,6 +1222,235 @@ def test_classmethod_bound_parameter_is_not_exposed_as_oracle_argument(tmp_path:
     assert runner.calls == []
 
 
+
+def test_instance_method_uses_explicit_json_constructor_fixture(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class Counter:\\n"
+        "    def __init__(self, start, step=1):\\n"
+        "        self.value = start\\n"
+        "        self.step = step\\n"
+        "    def advance(self, amount=1):\\n"
+        "        self.value += amount * self.step\\n"
+        "        return self.value\\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Counter.advance",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="counter-advance",
+                arguments={"amount": 3},
+                instance_arguments={"start": 10, "step": 2},
+                expected_output=16,
+                oracle_kind="user",
+                oracle_reference="User supplied Counter.advance result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None" in generated
+    assert "_FUNCTION(_CLASS(**case['instance_arguments']), **case['arguments'])" in generated
+    assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
+    fixture_hash = result.oracle_evidence[0].metadata["instance_arguments_sha256"]
+    assert fixture_hash == hashlib.sha256(
+        json.dumps(
+            {"start": 10, "step": 2},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_async_instance_method_uses_fresh_constructor_fixture(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class AsyncCounter:\\n"
+        "    def __init__(self, start):\\n"
+        "        self.value = start\\n"
+        "    async def advance(self, amount):\\n"
+        "        return self.value + amount\\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="AsyncCounter.advance",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="async-instance",
+                arguments={"amount": 5},
+                instance_arguments={"start": 7},
+                expected_output=12,
+                oracle_kind="user",
+                oracle_reference="User supplied async instance-method result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "asyncio.run(_FUNCTION(_CLASS(**case['instance_arguments']), **case['arguments']))" in generated
+    assert runner.calls[0]["metadata"]["target_is_async"] is True
+    assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
+
+
+@pytest.mark.parametrize(
+    "source,instance_arguments,error",
+    [
+        (
+            "class Counter:\\n    def __init__(self, start):\\n        self.start = start\\n"
+            "    def read(self, amount):\\n        return self.start + amount\\n",
+            {},
+            "missing required constructor parameters: start",
+        ),
+        (
+            "class Counter:\\n    def __init__(self):\\n        pass\\n"
+            "    def read(self, amount):\\n        return amount\\n",
+            {"unexpected": 1},
+            "unknown constructor parameters: unexpected",
+        ),
+        (
+            "class Base:\\n    pass\\nclass Counter(Base):\\n"
+            "    def read(self, amount):\\n        return amount\\n",
+            {},
+            "without bases or metaclass keywords",
+        ),
+        (
+            "class Counter:\\n    def __new__(cls):\\n        return object.__new__(cls)\\n"
+            "    def read(self, amount):\\n        return amount\\n",
+            {},
+            "custom __new__",
+        ),
+        (
+            "class Counter:\\n    async def __init__(self):\\n        pass\\n"
+            "    def read(self, amount):\\n        return amount\\n",
+            {},
+            "synchronous, undecorated method",
+        ),
+    ],
+)
+def test_instance_method_rejects_unsafe_or_invalid_fixture_construction(
+    tmp_path: Path, source: str, instance_arguments: dict, error: str
+) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Counter.read",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="bad-instance-fixture",
+                arguments={"amount": 1},
+                instance_arguments=instance_arguments,
+                expected_output=1,
+                oracle_kind="user",
+                oracle_reference="User supplied instance fixture check",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match=error):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_instance_fixture_is_rejected_for_static_method_targets(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class Calculator:\\n"
+        "    @staticmethod\\n"
+        "    def add(value):\\n"
+        "        return value + 1\\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Calculator.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="static-fixture-rejected",
+                arguments={"value": 1},
+                instance_arguments={},
+                expected_output=2,
+                oracle_kind="user",
+                oracle_reference="User supplied static method fixture check",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="only for an ordinary instance-method"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_instance_fixture_hash_is_covered_by_reviewer_attestation_statement() -> None:
+    statement = build_oracle_attestation_statement(
+        key_id="reviewer-release",
+        issued_at=datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc),
+        task_id="task-1",
+        workspace="demo",
+        file_path="service.py",
+        symbol_name="Counter.advance",
+        source_sha256="a" * 64,
+        case_id="counter-case",
+        oracle_kind="specification",
+        oracle_reference="product-spec.md#counter",
+        oracle_artifact_path="product-spec.md",
+        oracle_artifact_sha256="b" * 64,
+        arguments_sha256="c" * 64,
+        expected_output_sha256="d" * 64,
+        oracle_property_sha256=None,
+        instance_arguments_sha256="e" * 64,
+    )
+    assert statement["instance_arguments_sha256"] == "e" * 64
+
+    legacy_statement = build_oracle_attestation_statement(
+        key_id="reviewer-release",
+        issued_at=datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc),
+        task_id="task-1",
+        workspace="demo",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256="a" * 64,
+        case_id="clamp-case",
+        oracle_kind="specification",
+        oracle_reference="product-spec.md#clamp",
+        oracle_artifact_path="product-spec.md",
+        oracle_artifact_sha256="b" * 64,
+        arguments_sha256="c" * 64,
+        expected_output_sha256="d" * 64,
+        oracle_property_sha256=None,
+    )
+    assert "instance_arguments_sha256" not in legacy_statement
+
+
 def test_decorated_async_function_remains_rejected(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
