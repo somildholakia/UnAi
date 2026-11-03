@@ -98,7 +98,7 @@ class AgentOrchestrator:
         messages = [
             {
                 "role": "system",
-                "content": SYSTEM_PROMPT + "\\n\\n" + SPECIALIST_PROMPTS[specialist],
+                "content": SYSTEM_PROMPT + "\n\n" + SPECIALIST_PROMPTS[specialist],
             }
         ]
         memory = self._memory_context(message)
