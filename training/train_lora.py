@@ -6,11 +6,15 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 
 SPECIALISTS = ("next_action", "planner", "verifier")
+_MAX_MESSAGES = 100
+_MAX_MESSAGE_CHARS = 100_000
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def sha256_file(path: Path) -> str:
@@ -19,6 +23,79 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def verify_corpus_manifest(
+    train_path: Path,
+    eval_path: Path,
+    specialist: str,
+    train_rows: list[dict[str, Any]],
+    eval_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Verify prepared split bytes and counts before importing/loading model weights."""
+    if train_path.parent.resolve() != eval_path.parent.resolve():
+        raise ValueError("Train and eval files must share the prepared corpus directory.")
+    manifest_path = train_path.parent / "corpus_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"Prepared corpus manifest is missing: {manifest_path}. "
+            "Re-run training.prepare_corpus before training."
+        ) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Prepared corpus manifest is not valid UTF-8 JSON.") from exc
+
+    if not isinstance(manifest, dict) or manifest.get("schema") != "unai.specialist-sft-corpus.v1":
+        raise ValueError("Prepared corpus manifest has an unsupported schema.")
+    specialists = manifest.get("specialists")
+    entry = specialists.get(specialist) if isinstance(specialists, dict) else None
+    if not isinstance(entry, dict):
+        raise ValueError(f"Prepared corpus manifest has no {specialist!r} split.")
+
+    expected_files = (
+        ("train", train_path, train_rows),
+        ("eval", eval_path, eval_rows),
+    )
+    group_sets: dict[str, set[str]] = {}
+    for split, path, rows in expected_files:
+        declared_name = entry.get(f"{split}_file")
+        declared_sha = entry.get(f"{split}_sha256")
+        if declared_name != path.name:
+            raise ValueError(
+                f"Prepared corpus manifest {split} filename does not match {path.name!r}."
+            )
+        if not isinstance(declared_sha, str) or not _SHA256_RE.fullmatch(declared_sha):
+            raise ValueError(f"Prepared corpus manifest has an invalid {split} SHA-256.")
+        if sha256_file(path) != declared_sha:
+            raise ValueError(
+                f"Prepared corpus {split} file SHA-256 does not match corpus_manifest.json."
+            )
+
+        declared_examples = entry.get(f"{split}_examples")
+        if (
+            isinstance(declared_examples, bool)
+            or not isinstance(declared_examples, int)
+            or declared_examples != len(rows)
+        ):
+            raise ValueError(
+                f"Prepared corpus manifest {split} example count does not match the file."
+            )
+        groups = {row["group_id"] for row in rows}
+        declared_groups = entry.get(f"{split}_groups")
+        if (
+            isinstance(declared_groups, bool)
+            or not isinstance(declared_groups, int)
+            or declared_groups != len(groups)
+        ):
+            raise ValueError(
+                f"Prepared corpus manifest {split} group count does not match the file."
+            )
+        group_sets[split] = groups
+
+    if group_sets["train"] & group_sets["eval"]:
+        raise ValueError("Prepared corpus manifest contains train/eval repository-group leakage.")
+    return manifest
 
 
 def sha256_adapter_artifacts(root: Path) -> str:
@@ -61,14 +138,17 @@ def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
         group_id = row.get("group_id")
         valid_messages = (
             isinstance(messages, list)
-            and len(messages) >= 2
+            and 2 <= len(messages) <= _MAX_MESSAGES
             and all(
                 isinstance(message, dict)
+                and isinstance(message.get("role"), str)
                 and message.get("role") in {"system", "user", "assistant", "tool"}
                 and isinstance(message.get("content"), str)
                 and message["content"].strip()
+                and len(message["content"]) <= _MAX_MESSAGE_CHARS
                 for message in messages
             )
+            and any(message["role"] == "user" for message in messages)
             and messages[-1]["role"] == "assistant"
         ) if isinstance(messages, list) and messages else False
         if (
@@ -77,8 +157,10 @@ def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
             or provenance.get("consented") is not True
             or not isinstance(provenance.get("source"), str)
             or not provenance.get("source").strip()
+            or len(provenance.get("source", "")) > 500
             or not isinstance(provenance.get("license"), str)
-            or not provenance.get("license").strip()
+            or provenance.get("license", "").strip().casefold() in {"", "unknown", "none", "unlicensed"}
+            or len(provenance.get("license", "")) > 120
             or not isinstance(verification, dict)
             or verification.get("status") != "passed"
             or not isinstance(verification.get("check_names"), list)
@@ -86,8 +168,21 @@ def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
             or not all(isinstance(name, str) and name.strip() for name in verification["check_names"])
             or not isinstance(record_id, str)
             or not isinstance(group_id, str)
+            or not _SHA256_RE.fullmatch(record_id)
+            or not _SHA256_RE.fullmatch(group_id)
+            or provenance.get("group_id") != group_id
         ):
             raise ValueError(f"{path}:{line_number} is missing verified consent/provenance metadata.")
+        expected_record_id = hashlib.sha256(
+            json.dumps(
+                {"specialist": specialist, "messages": messages},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if record_id != expected_record_id:
+            raise ValueError(f"{path}:{line_number} record_id does not match canonical messages.")
         if record_id in seen:
             raise ValueError(f"{path}:{line_number} duplicates record_id {record_id}.")
         seen.add(record_id)
@@ -168,6 +263,13 @@ def main() -> None:
 
     train_rows = read_specialist_jsonl(args.train_file, args.specialist)
     eval_rows = read_specialist_jsonl(args.eval_file, args.specialist)
+    verify_corpus_manifest(
+        args.train_file,
+        args.eval_file,
+        args.specialist,
+        train_rows,
+        eval_rows,
+    )
     train_groups = {row["group_id"] for row in train_rows}
     eval_groups = {row["group_id"] for row in eval_rows}
     if train_groups & eval_groups:
