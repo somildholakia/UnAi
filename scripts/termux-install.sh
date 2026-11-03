@@ -3,13 +3,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENGINE_DIR="$ROOT/apps/engine"
 WEB_DIR="$ROOT/apps/web"
-LLAMA_CPP_DIR="\${UNAI_LLAMA_CPP_DIR:-$HOME/src/llama.cpp}"
-MODEL_DIR="\${UNAI_MODEL_DIR:-$HOME/models/unai}"
-MODEL_FILE="\${UNAI_MODEL_FILE:-$MODEL_DIR/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf}"
+LLAMA_CPP_DIR="${UNAI_LLAMA_CPP_DIR:-$HOME/src/llama.cpp}"
+MODEL_DIR="${UNAI_MODEL_DIR:-$HOME/models/unai}"
+MODEL_FILE="${UNAI_MODEL_FILE:-$MODEL_DIR/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf}"
 MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
-BUILD_JOBS="\${UNAI_BUILD_JOBS:-2}"
+BUILD_JOBS="${UNAI_BUILD_JOBS:-2}"
 
-if [[ -z "\${PREFIX:-}" || ! -d "$PREFIX" ]]; then
+if [[ -z "${PREFIX:-}" || ! -d "$PREFIX" ]]; then
   echo "Run this installer inside Termux on Android."
   echo "For desktop setup, follow docs/LOCAL_INSTALL.md."
   exit 1
