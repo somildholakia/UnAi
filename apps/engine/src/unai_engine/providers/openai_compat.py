@@ -20,12 +20,25 @@ class OpenAICompatibleProvider:
     def configured(self) -> bool:
         return bool(self.base_url and self.model)
 
-    async def complete(self, messages: list[dict[str, str]]) -> str:
+    async def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model_override: str | None = None,
+    ) -> str:
+        selected_model = self.model if model_override is None else model_override
+        if (
+            not isinstance(selected_model, str)
+            or not selected_model.strip()
+            or len(selected_model) > 256
+            or any(ord(character) < 33 for character in selected_model)
+        ):
+            raise ProviderError("The configured model identifier is invalid.")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         body = {
-            "model": self.model,
+            "model": selected_model,
             "messages": messages,
             "temperature": 0.2,
             "stream": False,
