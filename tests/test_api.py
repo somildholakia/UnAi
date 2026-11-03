@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 import unai_engine.main as main_module
 from unai_engine.agent.inspection import TaskInspector
+from unai_engine.agent.orchestrator import AgentOrchestrator
 from unai_engine.main import app
 from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
@@ -554,3 +555,47 @@ def test_engine_api_preflight_allows_authorization_header(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert "authorization" in response.headers.get("access-control-allow-headers", "").lower()
+
+def test_specialist_chat_endpoint_uses_configured_model_and_returns_role() -> None:
+    class FakeProvider:
+        async def complete(self, messages, *, model_override=None):
+            assert model_override == "local-next-action-lora"
+            assert "next-action specialist" in messages[0]["content"]
+            return "Inspect the source file first."
+
+    main_module.agent = AgentOrchestrator(
+        FakeProvider(),
+        specialist_models={"next_action": "local-next-action-lora"},
+    )
+    response = TestClient(app).post(
+        "/api/specialists/next_action/chat",
+        json={"message": "What should happen next?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["specialist"] == "next_action"
+    assert response.json()["model"] == "local-next-action-lora"
+    assert response.json()["message"] == "Inspect the source file first."
+
+
+def test_specialist_chat_endpoint_returns_unavailable_without_base_model_fallback() -> None:
+    class FakeProvider:
+        async def complete(self, messages, *, model_override=None):
+            raise AssertionError("Unconfigured specialists must not invoke the provider.")
+
+    main_module.agent = AgentOrchestrator(FakeProvider())
+    response = TestClient(app).post(
+        "/api/specialists/verifier/chat",
+        json={"message": "Verify this patch."},
+    )
+
+    assert response.status_code == 503
+    assert "not configured" in response.json()["detail"]
+
+
+def test_specialist_chat_endpoint_rejects_unknown_role() -> None:
+    response = TestClient(app).post(
+        "/api/specialists/general/chat",
+        json={"message": "Do work."},
+    )
+    assert response.status_code == 422
