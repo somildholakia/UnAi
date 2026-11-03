@@ -110,15 +110,6 @@ case_contract = {
     "prompt": "Fix the off-by-one error in the range calculation.",
     "acceptance_criteria": ["boundary test passes", "no unrelated file changes"],
 }
-case_sha256 = hashlib.sha256(
-    json.dumps(
-        case_contract,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-).hexdigest()
 canonical = json.dumps(
     case_contract,
     ensure_ascii=False,
