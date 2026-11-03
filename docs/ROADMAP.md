@@ -63,7 +63,7 @@
 ## M5 — Specialist training
 - [x] Build consent/license/verification-gated corpus preparation with sanitized deduplication, hashed repository groups and deterministic repository-disjoint specialist train/eval splits.
 - [x] Add separate next-action, planner and verifier LoRA/QLoRA training runs with provenance checks, leakage rejection and reproducible data/library/hardware manifests.
-- [x] Add a matched held-out evaluator for base, specialist-adapter and tool-augmented outcomes, including canonical task-content fingerprints, unavailable-run rejection, paired regression reporting and exact two-sided McNemar significance (minimum 30 held-out cases, alpha no higher than 0.05).
+- [x] Add a matched held-out evaluator for base, specialist-adapter and tool-augmented outcomes, requiring the exact prompt/acceptance contract and recomputing its canonical SHA-256, rejecting unavailable runs, reporting paired regressions and exact two-sided McNemar significance (minimum 30 held-out cases, alpha no higher than 0.05).
 - [x] Add a release gate that independently recomputes exact paired significance and sample thresholds, requires a verified success-rate gain with zero regressions, verifies evaluation input digests, and requires a matching physical-device memory/TTFT/throughput/thermal report.
 - [x] Add server-configured OpenAI-compatible runtime routing for the three named specialists; unavailable roles fail closed instead of falling back to the base model.
 - [ ] Collect a real, consented/licensed multi-repository trajectory corpus; none has been supplied to this repository.
