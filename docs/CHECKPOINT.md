@@ -38,6 +38,14 @@
 - Constructor fixture SHA-256 is included in append-only oracle evidence and optional reviewer-attestation statements. Existing module/static/class-method signatures remain compatible.
 - Added sync/async instance-method, unsafe-constructor, signature and fixture-attestation tests. CI has not yet run on this continuation branch.
 
+### M5 evaluation hardening in this continuation
+
+- Added SHA-256 task/acceptance-content fingerprints to each matched base/adapter/tool result; all three systems must run the same exact case bytes.
+- Added exact two-sided McNemar paired significance reporting for both adapter and tool-augmented comparisons.
+- Made the release floor explicit: at least 30 matched held-out cases, alpha no higher than 0.05, a positive adapter success-rate delta and zero adapter regressions.
+- The release gate independently recomputes p-values from paired discordant counts and verifies consistency of the sample/count/rate report fields. Unavailable runs and contradictory verification statuses are rejected.
+- Added tests for small-sample non-promotion, case-hash mismatch, failed/all-passing contradictions, significance calculations and tampered reported p-values.
+
 ### M5 additions in this continuation
 
 - Added consent/license/verification-gated `training/prepare_corpus.py`, with hashed repository grouping, deterministic train/eval splits by project, deduplication, common-secret redaction and per-specialist corpus manifests.
