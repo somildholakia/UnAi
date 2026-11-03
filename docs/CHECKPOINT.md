@@ -26,7 +26,7 @@
 **Current integration PR:** https://github.com/somildholakia/UnAi/pull/28 (combined PR against main; includes the publisher trust-bundle work formerly in PR #27)
 **Earlier publisher trust-bundle PR:** https://github.com/somildholakia/UnAi/pull/27 (overlapping predecessor; do not merge separately while PR #28 is the integration PR)
 **Current feature branch:** `feat/m4-instance-methods-m5-specialists`
-**Current feature head:** `b79ea0751a76b06e102be797d38a249b9bbf110c`
+**Current feature head:** `0fe7aea602baa2e4aed82fddc71ba75d76f86852`
 **CI:** run #209 — 262 tests passed; compileall passed.
 **Working tree:** GitHub commits only; no local model training has been run.
 
