@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""Create leakage-resistant, consented specialist SFT splits with provenance.
+
+A project/repository group is kept entirely in either train or evaluation.
+This tool does not make unverified tasks eligible for training.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+from typing import Any
+
+from training.prepare_dataset import sanitise
+
+SPECIALISTS = ("next_action", "planner", "verifier")
+_ALLOWED_ROLES = {"system", "user", "assistant", "tool"}
+_MAX_LINE_BYTES = 1_000_000
+_MAX_MESSAGES = 100
+_MAX_MESSAGE_CHARS = 100_000
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = "".join(
+        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+        for row in rows
+    ).encode("utf-8")
+    path.write_bytes(payload)
+    return _sha256(payload)
+
+
+def _validated_messages(value: Any) -> list[dict[str, str]] | None:
+    if not isinstance(value, list) or not 2 <= len(value) <= _MAX_MESSAGES:
+        return None
+    cleaned: list[dict[str, str]] = []
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or item.get("role") not in _ALLOWED_ROLES
+            or not isinstance(item.get("content"), str)
+            or not item["content"].strip()
+            or len(item["content"]) > _MAX_MESSAGE_CHARS
+        ):
+            return None
+        text, _count = sanitise(item["content"])
+        if not text.strip():
+            return None
+        cleaned.append({"role": item["role"], "content": text})
+    if cleaned[-1]["role"] != "assistant":
+        return None
+    if not any(item["role"] == "user" for item in cleaned):
+        return None
+    return cleaned
+
+
+def _provenance(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or value.get("consented") is not True:
+        return None
+    source = value.get("source")
+    license_name = value.get("license")
+    group = (
+        value.get("group_id")
+        or value.get("repository")
+        or value.get("project")
+    )
+    if (
+        not isinstance(source, str)
+        or not source.strip()
+        or len(source) > 500
+        or not isinstance(license_name, str)
+        or license_name.strip().casefold() in {"", "unknown", "none", "unlicensed"}
+        or len(license_name) > 120
+        or not isinstance(group, str)
+        or not group.strip()
+        or len(group) > 500
+    ):
+        return None
+    return {
+        "source": source.strip(),
+        "license": license_name.strip(),
+        "consented": True,
+        "group_id": _sha256(group.strip().casefold().encode("utf-8")),
+    }
+
+
+def _verified(value: Any, outcome: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or outcome != "passed" or value.get("status") != "passed":
+        return None
+    checks = value.get("checks")
+    if not isinstance(checks, list) or not checks:
+        return None
+    names: list[str] = []
+    for check in checks:
+        if (
+            not isinstance(check, dict)
+            or check.get("passed") is not True
+            or not isinstance(check.get("name"), str)
+            or not check["name"].strip()
+        ):
+            return None
+        names.append(check["name"].strip()[:120])
+    return {"status": "passed", "check_names": names}
+
+
+def _split_groups(groups: set[str], *, seed: int, specialist: str, fraction: float) -> tuple[set[str], set[str]]:
+    if len(groups) < 2:
+        raise ValueError(
+            f"Specialist {specialist!r} needs verified examples from at least two distinct repository/project groups."
+        )
+    ordered = sorted(
+        groups,
+        key=lambda group: _sha256(f"{seed}\0{specialist}\0{group}".encode("utf-8")),
+    )
+    eval_count = max(1, round(len(ordered) * fraction))
+    eval_count = min(len(ordered) - 1, eval_count)
+    eval_groups = set(ordered[:eval_count])
+    return set(ordered[eval_count:]), eval_groups
+
+
+def prepare(
+    source: Path,
+    output_dir: Path,
+    *,
+    seed: int = 20261103,
+    eval_fraction: float = 0.2,
+) -> dict[str, Any]:
+    if not 0.05 <= eval_fraction <= 0.5:
+        raise ValueError("eval_fraction must be between 0.05 and 0.5.")
+    if not source.is_file():
+        raise FileNotFoundError(source)
+
+    counts = {
+        "input": 0,
+        "accepted": 0,
+        "rejected": 0,
+        "duplicates": 0,
+        "redactions": 0,
+    }
+    records: dict[str, list[dict[str, Any]]] = {name: [] for name in SPECIALISTS}
+    seen: set[str] = set()
+
+    with source.open("rb") as handle:
+        for raw_line in handle:
+            if not raw_line.strip():
+                continue
+            counts["input"] += 1
+            if len(raw_line) > _MAX_LINE_BYTES:
+                counts["rejected"] += 1
+                continue
+            try:
+                row = json.loads(raw_line.decode("utf-8"))
+                if not isinstance(row, dict):
+                    raise ValueError("Record must be a JSON object.")
+                specialist = row.get("specialist")
+                messages = _validated_messages(row.get("messages"))
+                provenance = _provenance(row.get("provenance"))
+                verification = _verified(row.get("verification"), row.get("outcome"))
+                if (
+                    specialist not in SPECIALISTS
+                    or messages is None
+                    or provenance is None
+                    or verification is None
+                ):
+                    counts["rejected"] += 1
+                    continue
+
+                redaction_count = 0
+                for source_message, cleaned_message in zip(row["messages"], messages):
+                    _cleaned, redactions = sanitise(source_message["content"])
+                    redaction_count += redactions
+                counts["redactions"] += redaction_count
+
+                record_identity = {
+                    "specialist": specialist,
+                    "messages": messages,
+                }
+                record_id = _sha256(
+                    json.dumps(
+                        record_identity,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                )
+                if record_id in seen:
+                    counts["duplicates"] += 1
+                    continue
+                seen.add(record_id)
+                records[specialist].append(
+                    {
+                        "specialist": specialist,
+                        "messages": messages,
+                        "record_id": record_id,
+                        "group_id": provenance["group_id"],
+                        "provenance": provenance,
+                        "verification": verification,
+                    }
+                )
+                counts["accepted"] += 1
+            except (UnicodeDecodeError, json.JSONDecodeError, TypeError, AttributeError, ValueError):
+                counts["rejected"] += 1
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    specialist_manifest: dict[str, Any] = {}
+    total_train = 0
+    total_eval = 0
+
+    for specialist in SPECIALISTS:
+        rows = records[specialist]
+        groups = {row["group_id"] for row in rows}
+        train_groups, eval_groups = _split_groups(
+            groups, seed=seed, specialist=specialist, fraction=eval_fraction
+        )
+        train_rows = [row for row in rows if row["group_id"] in train_groups]
+        eval_rows = [row for row in rows if row["group_id"] in eval_groups]
+        if not train_rows or not eval_rows:
+            raise ValueError(f"Specialist {specialist!r} produced an empty train/eval split.")
+
+        train_path = output_dir / f"{specialist}.train.jsonl"
+        eval_path = output_dir / f"{specialist}.eval.jsonl"
+        train_sha = _write_jsonl(train_path, train_rows)
+        eval_sha = _write_jsonl(eval_path, eval_rows)
+
+        if {row["group_id"] for row in train_rows} & {row["group_id"] for row in eval_rows}:
+            raise AssertionError("Repository/project group leakage detected.")
+
+        specialist_manifest[specialist] = {
+            "train_examples": len(train_rows),
+            "eval_examples": len(eval_rows),
+            "train_groups": len(train_groups),
+            "eval_groups": len(eval_groups),
+            "train_file": train_path.name,
+            "train_sha256": train_sha,
+            "eval_file": eval_path.name,
+            "eval_sha256": eval_sha,
+        }
+        total_train += len(train_rows)
+        total_eval += len(eval_rows)
+
+    manifest = {
+        "schema": "unai.specialist-sft-corpus.v1",
+        "seed": seed,
+        "eval_fraction": eval_fraction,
+        "input_records": counts["input"],
+        "accepted_records": counts["accepted"],
+        "rejected_records": counts["rejected"],
+        "duplicate_records": counts["duplicates"],
+        "redactions": counts["redactions"],
+        "train_examples": total_train,
+        "eval_examples": total_eval,
+        "specialists": specialist_manifest,
+        "split_policy": "deterministic repository/project-group split; no group appears in both train and eval",
+        "privacy_note": "group IDs are SHA-256 pseudonyms; review sanitized examples manually before training",
+    }
+    (output_dir / "corpus_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--seed", type=int, default=20261103)
+    parser.add_argument("--eval-fraction", type=float, default=0.2)
+    args = parser.parse_args()
+    report = prepare(
+        args.input,
+        args.output_dir,
+        seed=args.seed,
+        eval_fraction=args.eval_fraction,
+    )
+    print(json.dumps(report, indent=2))
+    if report["accepted_records"] == 0:
+        raise SystemExit("No examples passed consent, provenance and verification checks.")
+
+
+if __name__ == "__main__":
+    main()
