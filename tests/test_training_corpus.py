@@ -94,7 +94,7 @@ def test_prepare_rejects_unconsented_unlicensed_and_unverified_records(tmp_path:
     rows = [
         _record(role, f"repo-{index}", f"{role}-{index}")
         for role in SPECIALISTS
-        for index in range(3)
+        for index in range(5)
     ]
     rows[0]["provenance"]["consented"] = False
     rows[1]["provenance"]["license"] = "unknown"
