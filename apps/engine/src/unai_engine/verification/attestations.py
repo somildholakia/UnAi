@@ -43,6 +43,7 @@ def build_oracle_attestation_statement(
     arguments_sha256: str,
     expected_output_sha256: str | None,
     oracle_property_sha256: str | None,
+    instance_arguments_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Build the exact assertion envelope that a trusted reviewer must sign."""
     return {
@@ -62,6 +63,11 @@ def build_oracle_attestation_statement(
         "arguments_sha256": arguments_sha256.lower(),
         "expected_output_sha256": expected_output_sha256.lower() if expected_output_sha256 else None,
         "oracle_property_sha256": oracle_property_sha256.lower() if oracle_property_sha256 else None,
+        **(
+            {"instance_arguments_sha256": instance_arguments_sha256.lower()}
+            if instance_arguments_sha256
+            else {}
+        ),
     }
 
 
