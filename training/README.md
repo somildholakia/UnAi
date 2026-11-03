@@ -100,6 +100,28 @@ The evaluation harness consumes one JSONL row per system and held-out case. For 
 
 Each row must declare `schema: "unai.benchmark-result.v1"` and needs `model_id`, `base_model`, a SHA-256 `case_sha256` of the canonical task prompt plus acceptance criteria, `latency_ms`, `tokens`, a consented/licensed provenance object and a `verification` object containing a status, named boolean checks, an evidence ID and verifier identifier. The same `suite_id + case_id + specialist` must carry the same `case_sha256` for all three systems. Unavailable runs are excluded rather than counted as failures or wins. The evaluator rejects incomplete or duplicate matched sets, contradictory status/check pairs, model or case-content mismatches and missing tool traces.
 
+Compute `case_sha256` from the exact task and acceptance contract that all three systems receive, not from the response or observed outcome:
+
+```python
+import hashlib
+import json
+
+case_contract = {
+    "prompt": "Fix the off-by-one error in the range calculation.",
+    "acceptance_criteria": ["boundary test passes", "no unrelated file changes"],
+}
+canonical = json.dumps(
+    case_contract,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+).encode("utf-8")
+case_sha256 = hashlib.sha256(canonical).hexdigest()
+```
+
+Use the same canonical case contract and digest for the base, adapter and tool-augmented runs. Keep the task suite frozen before evaluating any adapter; do not derive acceptance checks after seeing model outputs.
+
 ```bash
 python training/evaluate_results.py \
   --input data/heldout-results.jsonl \
