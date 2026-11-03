@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 — offline signed publisher trust-bundle implementation on feature branch; CI pending
+**Checkpoint:** M4 — offline signed publisher trust bundles implemented and validated in PR #27; merge pending
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-publisher-trust-bundles
@@ -81,7 +81,7 @@
 
 ### M4 — grounded adversarial verification (first milestone implemented)
 
-- [WIP] Added an opt-in offline publisher trust-bundle verifier on
+- [x] Added an opt-in offline publisher trust-bundle verifier on
   `feat/m4-publisher-trust-bundles`: operator-pinned Ed25519 roots sign a
   canonical JSON snapshot with publisher keys, issuer labels and exact host
   allowlists. It enforces a 256 KiB bundle limit, 256-entry limit, 30-day
@@ -89,7 +89,7 @@
   supplied minimum sequence. Oracle evidence carries the verified bundle
   sequence, root ID and payload digest. Direct publisher-key configuration
   remains supported and is mutually exclusive with bundle mode. Tests and CI
-  are pending; do not treat this feature as merged or validated until checks pass.
+  passed GitHub Actions run #193 (235 tests passed; Python compile check passed). PR #27 remains open for review and has not been merged.
 
 - The AST probe generator still produces unverified candidates; it never infers expected outputs.
 - POST /api/tasks/{task_id}/grounded-tests accepts explicit user- or specification-supplied expected JSON outputs, a human-readable oracle reference, exact source SHA-256, and optional probe candidate IDs.
