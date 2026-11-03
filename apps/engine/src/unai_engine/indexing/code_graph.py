@@ -129,6 +129,46 @@ class _SymbolVisitor(ast.NodeVisitor):
         self._scope_lines = parent_lines
 
 
+class _LocalBindingVisitor(ast.NodeVisitor):
+    """Collect names bound in one function without entering nested scopes."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.names.add(alias.asname or alias.name.split(".")[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name != "*":
+                self.names.add(alias.asname or alias.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name:
+            self.names.add(node.name)
+        if node.type:
+            self.visit(node.type)
+        for child in node.body:
+            self.visit(child)
+
+
 class _CallSiteVisitor(ast.NodeVisitor):
     """Collect bounded dotted-name calls from the innermost lexical function."""
 
@@ -139,6 +179,7 @@ class _CallSiteVisitor(ast.NodeVisitor):
         self.caller_stack: list[str] = []
         self.call_sites: list[dict[str, Any]] = []
         self.truncated = False
+        self.bound_stack: list[set[str]] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.class_stack.append(node.name)
@@ -149,9 +190,25 @@ class _CallSiteVisitor(ast.NodeVisitor):
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         qualified = ".".join([*self.class_stack, node.name])
         caller = f"symbol:{self.path}::{qualified}@{node.lineno}"
+        bound_names = {
+            argument.arg
+            for argument in (
+                node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+            )
+        }
+        if node.args.vararg:
+            bound_names.add(node.args.vararg.arg)
+        if node.args.kwarg:
+            bound_names.add(node.args.kwarg.arg)
+        local_bindings = _LocalBindingVisitor()
+        for child in node.body:
+            local_bindings.visit(child)
+        bound_names.update(local_bindings.names)
         self.caller_stack.append(caller)
+        self.bound_stack.append(bound_names)
         for child in node.body:
             self.visit(child)
+        self.bound_stack.pop()
         self.caller_stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -169,6 +226,7 @@ class _CallSiteVisitor(ast.NodeVisitor):
                         "caller_id": self.caller_stack[-1],
                         "callee": callee,
                         "class_name": self.class_stack[-1] if self.class_stack else None,
+                        "shadowed_names": sorted(self.bound_stack[-1]),
                         "line": int(getattr(node, "lineno", 1)),
                     })
                 else:
@@ -214,7 +272,7 @@ def _import_groups(tree: ast.AST, relative: Path) -> list[list[str]]:
 def _import_bindings(tree: ast.AST, relative: Path) -> list[dict[str, str]]:
     """Keep only the syntactic names needed for conservative imported-call linking."""
     bindings: list[dict[str, str]] = []
-    for item in ast.walk(tree):
+    for item in tree.body:
         if isinstance(item, ast.Import):
             for alias in item.names:
                 local = alias.asname or alias.name.split(".")[0]
@@ -432,6 +490,7 @@ class PythonCodeGraphIndexer:
                 target: dict[str, Any] | None = None
                 edge_type = "calls"
                 class_name = site.get("class_name")
+                shadowed_names = set(site.get("shadowed_names", []))
                 if callee.startswith(("self.", "cls.")) and isinstance(class_name, str):
                     target = self._unique_callable(
                         symbols_by_path, source_path, f"{class_name}.{callee.split('.', 1)[1]}"
@@ -441,7 +500,8 @@ class PythonCodeGraphIndexer:
                     # Explicit module aliases, e.g. import service as s; s.save().
                     module_bindings = [
                         item for item in bindings
-                        if item.get("kind") == "module" and item.get("local") == first
+                        if first not in shadowed_names
+                        and item.get("kind") == "module" and item.get("local") == first
                     ]
                     if len(module_bindings) == 1:
                         module_path = self._resolve_module(module_bindings[0]["module"], module_paths)
@@ -450,10 +510,10 @@ class PythonCodeGraphIndexer:
                             target = self._unique_class(symbols_by_path, module_path, suffix)
                             if target is not None:
                                 edge_type = "instantiates"
-                    if target is None:
+                    if target is None and first not in shadowed_names:
                         # Local class-qualified method calls, e.g. Worker.run().
                         target = self._unique_callable(symbols_by_path, source_path, callee)
-                    if target is None:
+                    if target is None and first not in shadowed_names:
                         # Imported class aliases, e.g. from worker import Worker as W.
                         symbol_bindings = [
                             item for item in bindings
@@ -466,7 +526,7 @@ class PythonCodeGraphIndexer:
                                 symbols_by_path, module_path,
                                 ".".join(part for part in (binding["name"], suffix) if part),
                             )
-                else:
+                elif callee not in shadowed_names:
                     target = self._unique_callable(symbols_by_path, source_path, callee)
                     if target is None:
                         target = self._unique_class(symbols_by_path, source_path, callee)

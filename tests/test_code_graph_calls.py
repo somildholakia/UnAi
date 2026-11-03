@@ -58,7 +58,7 @@ async def test_graph_resolves_only_conservative_local_and_imported_call_edges(tm
     ) in resolved
     assert graph["summary"]["call_edges"] == 4
     assert graph["summary"]["instantiation_edges"] == 1
-    assert graph["summary"]["call_sites_indexed"] == 7
+    assert graph["summary"]["call_sites_indexed"] == 8
     assert graph["summary"]["call_sites_unresolved"] == 2
     assert any(
         edge["type"] == "instantiates"
@@ -121,3 +121,30 @@ async def test_call_site_budget_is_reported_as_truncated(tmp_path: Path) -> None
     assert graph["summary"]["call_sites_indexed"] == 100
     assert graph["summary"]["call_sites_truncated"] is True
     assert graph["summary"]["truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_graph_does_not_resolve_shadowed_import_aliases(tmp_path: Path) -> None:
+    (tmp_path / "worker.py").write_text(
+        "def normalize(value):\n    return value\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "consumer.py").write_text(
+        "from worker import normalize\n"
+        "import worker as worker_module\n\n"
+        "def parameter_shadow(normalize):\n"
+        "    return normalize('x')\n\n"
+        "def module_parameter_shadow(worker_module):\n"
+        "    return worker_module.normalize('x')\n\n"
+        "def local_assignment_shadow():\n"
+        "    worker_module = object()\n"
+        "    return worker_module.normalize('x')\n",
+        encoding="utf-8",
+    )
+
+    graph = await PythonCodeGraphIndexer().index(str(tmp_path))
+
+    assert not any(
+        edge["type"] in {"calls", "instantiates"} for edge in graph["edges"]
+    )
+    assert graph["summary"]["call_sites_unresolved"] == 3
