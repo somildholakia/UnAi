@@ -31,6 +31,13 @@ def _csv(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def _specialist_model_from_env(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if value and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}", value) is None:
+        raise ValueError(f"{name} must be a safe model identifier with no spaces or control characters.")
+    return value
+
+
 def _oracle_public_keys_from_env() -> dict[str, str]:
     """Load reviewer key IDs mapped to base64 raw Ed25519 public keys."""
     raw = os.getenv("UNAI_ORACLE_TRUSTED_PUBLIC_KEYS", "{}")
@@ -197,6 +204,9 @@ class Settings:
     model_name: str = os.getenv("UNAI_MODEL_NAME", "qwen3-coder:latest")
     model_api_key: str = os.getenv("UNAI_MODEL_API_KEY", "")
     model_timeout_seconds: float = float(os.getenv("UNAI_MODEL_TIMEOUT_SECONDS", "180"))
+    specialist_next_action_model: str = field(default_factory=lambda: _specialist_model_from_env("UNAI_SPECIALIST_NEXT_ACTION_MODEL"))
+    specialist_planner_model: str = field(default_factory=lambda: _specialist_model_from_env("UNAI_SPECIALIST_PLANNER_MODEL"))
+    specialist_verifier_model: str = field(default_factory=lambda: _specialist_model_from_env("UNAI_SPECIALIST_VERIFIER_MODEL"))
     cors_origins: tuple[str, ...] = _csv(os.getenv("UNAI_CORS_ORIGINS", "http://localhost:5173"))
     api_token: str = os.getenv("UNAI_API_TOKEN", "")
     workspace_root: Path = _path_setting("UNAI_WORKSPACE_ROOT", ".workspaces")
