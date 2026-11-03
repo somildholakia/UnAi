@@ -65,6 +65,7 @@
 - [x] Record the raw corpus input SHA-256/byte count and preflight all specialist splits before writing outputs, preserving previous artifacts on split-validation failures.
 - [x] Add separate next-action, planner and verifier LoRA/QLoRA training runs with provenance checks, leakage rejection and reproducible data/library/hardware manifests.
 - [x] Verify the prepared corpus manifest, split filenames/hashes/counts, repository disjointness and canonical record IDs before model loading.
+- [x] Hash and parse the same train/eval byte snapshots so manifest verification covers the exact in-memory rows consumed by training.
 - [x] Add a matched held-out evaluator for base, specialist-adapter and tool-augmented outcomes, requiring the exact prompt/acceptance contract and recomputing its canonical SHA-256, rejecting unavailable runs, reporting paired regressions and exact two-sided McNemar significance (minimum 30 held-out cases, alpha no higher than 0.05).
 - [x] Add a release gate that independently recomputes exact paired significance and sample thresholds, requires a verified success-rate gain with zero regressions, verifies evaluation input digests, and requires a matching physical-device memory/TTFT/throughput/thermal report.
 - [x] Add server-configured OpenAI-compatible runtime routing for the three named specialists; unavailable roles fail closed instead of falling back to the base model.

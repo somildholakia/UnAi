@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure hardened with corpus manifest verification and source lineage; CI passed (295 tests)
+**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure hardened with corpus manifest verification, source lineage and exact-snapshot hashing; CI passed (297 tests)
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -330,3 +330,16 @@ These commits change documentation only; CI #247 validates the unchanged code he
 These changes harden the training data boundary; they do not represent a training run. No consented/licensed real corpus has been supplied, no specialist adapters have been trained, no held-out model comparison has been run, and no physical Android memory/latency/throughput/thermal measurements have been collected. M5 remains infrastructure-complete but not trained or released.
 
 PR #28 remains open and unmerged. Main remains unchanged. Do not merge PR #28 or overlapping PR #27 without explicit user instruction.
+
+
+### M5 exact-snapshot integrity follow-up
+
+**Code commit:** `2173651b1fd84da4104088a6240f749bc7edab2f`  
+**GitHub Actions:** [run #254](https://github.com/somildholakia/UnAi/actions/runs/41661499858) — 297 tests passed in 7.70s; Python compile check passed.
+
+- The trainer now reads each JSONL split into one in-memory byte snapshot, computes SHA-256 from those exact bytes, decodes/parses that same snapshot, then compares its digest with the prepared corpus manifest before model loading.
+- This removes the prior two-read time-of-check/time-of-use gap where the file could change after parsing but before the separate hash operation.
+- Added regression tests for a file changed after loading (the manifest is checked against the loaded snapshot actually used) and for a changed snapshot that no longer matches the manifest.
+- Updated the training guide to explain that corpus digests are tied to the exact data snapshot used for training.
+
+The change does not alter M5's external prerequisites: no approved real corpus, trained weights, held-out model comparison or physical Android performance measurements exist yet.
