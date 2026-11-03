@@ -35,12 +35,16 @@ if [[ ! -x "$LLAMA_SERVER" ]]; then
 fi
 
 echo "[3/5] Downloading the compact local coding model..."
-if [[ ! -s "$MODEL_FILE" ]]; then
+MODEL_BYTES=0
+if [[ -f "$MODEL_FILE" ]]; then
+  MODEL_BYTES="$(wc -c < "$MODEL_FILE" | tr -d ' ')"
+fi
+if [[ "$MODEL_BYTES" -lt 1000000000 ]]; then
   curl --fail --location --retry 3 --retry-delay 2 --continue-at - \
     "$MODEL_URL" --output "$MODEL_FILE"
 fi
 MODEL_BYTES="$(wc -c < "$MODEL_FILE" | tr -d ' ')"
-if [[ "$MODEL_BYTES" -lt 800000000 ]]; then
+if [[ "$MODEL_BYTES" -lt 1000000000 ]]; then
   echo "Model file looks incomplete ($MODEL_BYTES bytes): $MODEL_FILE"
   echo "Re-run this installer to resume the download."
   exit 1
