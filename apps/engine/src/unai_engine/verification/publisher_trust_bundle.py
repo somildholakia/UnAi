@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import ipaddress
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -147,6 +148,12 @@ def _validate_publisher_entries(entries: Any) -> dict[str, dict[str, Any]]:
                 raise PublisherTrustBundleError(f"Publisher key {key_id!r} contains an invalid exact hostname.")
             if normalized in {"localhost"} or normalized.endswith(".localhost") or "." not in normalized:
                 raise PublisherTrustBundleError(f"Publisher key {key_id!r} contains a non-public hostname.")
+            try:
+                ipaddress.ip_address(normalized)
+            except ValueError:
+                pass
+            else:
+                raise PublisherTrustBundleError(f"Publisher key {key_id!r} must use a DNS hostname, not an IP literal.")
             if normalized not in normalized_domains:
                 normalized_domains.append(normalized)
 
