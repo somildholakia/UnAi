@@ -60,8 +60,8 @@ minimum; it is not automatically persisted.
 
 **Active integration PR:** https://github.com/somildholakia/UnAi/pull/28
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest code-validation commit:** `37152a46fae2f74c81900d1de8e328473548664a`
-**Latest CI:** run #225 — 277 tests passed in 7.05s and Python compilation passed.
+**Latest tested code commit:** `c9fd14aa894d759d146a63ea7277fce6af607953`
+**Latest CI:** run #239 — 288 tests passed in 6.79s and Python compilation passed.
 **PR relationship:** PR #28 is the combined integration PR against `main`; its branch contains the publisher trust-bundle implementation from PR #27 plus instance-method support and M5 infrastructure. Do not merge overlapping PR #27 independently while PR #28 remains the combined integration change.
 
 M5 software infrastructure is implemented and CI-tested. The evaluator now requires exact task-content fingerprints on matched base/adapter/tool runs and reports two-sided exact McNemar significance. The release gate recomputes p-values from paired outcomes, enforces at least 30 matched cases, alpha ≤ 0.05, higher verified adapter success and zero regressions, then also checks the matching adapter digest and physical-device memory/TTFT/throughput/thermal metrics.
