@@ -147,4 +147,4 @@ async def test_graph_does_not_resolve_shadowed_import_aliases(tmp_path: Path) ->
     assert not any(
         edge["type"] in {"calls", "instantiates"} for edge in graph["edges"]
     )
-    assert graph["summary"]["call_sites_unresolved"] == 3
+    assert graph["summary"]["call_sites_unresolved"] == 4

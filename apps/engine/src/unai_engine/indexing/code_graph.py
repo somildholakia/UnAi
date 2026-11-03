@@ -552,8 +552,8 @@ class PythonCodeGraphIndexer:
                 if caller_id not in indexed_symbol_ids:
                     unresolved_sites += 1
                     continue
-                add_edge(caller_id, target["id"], edge_type)
-                if edge_type == "instantiates":
+                edge_added = add_edge(caller_id, target["id"], edge_type)
+                if edge_added and edge_type == "instantiates":
                     instantiation_edges += 1
         return indexed_sites, unresolved_sites, instantiation_edges
 
@@ -627,16 +627,17 @@ class PythonCodeGraphIndexer:
         seen_edges: set[tuple[str, str, str]] = set()
         edge_truncated = False
 
-        def add_edge(source: str, target: str, kind: str) -> None:
+        def add_edge(source: str, target: str, kind: str) -> bool:
             nonlocal edge_truncated
             key = (source, target, kind)
             if key in seen_edges:
-                return
+                return False
             if len(edges) >= MAX_EDGES:
                 edge_truncated = True
-                return
+                return False
             seen_edges.add(key)
             edges.append({"source": source, "target": target, "type": kind})
+            return True
 
         for edge in structural_edges:
             add_edge(edge["source"], edge["target"], edge["type"])
