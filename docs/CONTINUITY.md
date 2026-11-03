@@ -56,26 +56,48 @@ a public transparency log, certificate-chain validation or proof of legal
 identity. The rollback floor is only as strong as the operator's configured
 minimum; it is not automatically persisted.
 
-## Current resume point
+## Current resume point — authoritative handoff (2026-11-03)
 
-**Active integration PR:** https://github.com/somildholakia/UnAi/pull/28
-**Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest validated code commit:** `674726cbcc2b554bf564186f5fe49a7abb323bf4`
-**Latest CI:** run #243 — 289 tests passed in 6.10s and Python compilation passed.
-**PR relationship:** PR #28 is the combined integration PR against `main`; its branch contains the publisher trust-bundle implementation from PR #27 plus instance-method support and M5 infrastructure. Do not merge overlapping PR #27 independently while PR #28 remains the combined integration change.
+**Repository:** https://github.com/somildholakia/UnAi  
+**Active branch:** `feat/m4-instance-methods-m5-specialists`  
+**Exact branch HEAD:** `3494bb1ffffe8af063d3469340f118ff60f2d46d`  
+**Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open and mergeable; not merged.  
+**Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.  
+**Latest CI:** [run #247](https://github.com/somildholakia/UnAi/actions/runs/41659235207) — current HEAD validated; 290 tests passed in 5.72s and Python compileall passed.
 
-M5 software infrastructure is implemented and CI-tested. The evaluator now requires exact task-content fingerprints on matched base/adapter/tool runs and reports two-sided exact McNemar significance. The release gate recomputes p-values from paired outcomes, enforces at least 30 matched cases, alpha ≤ 0.05, higher verified adapter success and zero regressions, then also checks the matching adapter digest and physical-device memory/TTFT/throughput/thermal metrics.
+### Latest commits
 
-Still outstanding: a real consented/licensed corpus, GPU training runs for the three adapters, held-out measurements from real model runs and physical Android benchmarks. Do not claim trained weights or mobile readiness before those artifacts exist. Next steps are to supply eligible data, train each specialist separately, capture all three benchmark systems on the same frozen tasks, and run the physical-device release gate.
+- `4a66efde06b56f0c085c2f314f0fd20f497b83f3` — release gate now accepts negative adapter success-rate deltas as valid numeric results and blocks promotion through the quality gate rather than throwing an exception.
+- `3494bb1ffffe8af063d3469340f118ff60f2d46d` — regression test for adapter performance worse than base.
 
+### Implemented
 
-**Active integration PR:** https://github.com/somildholakia/UnAi/pull/28
-**Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest checkpoint:** `0fe7aea602baa2e4aed82fddc71ba75d76f86852`
-**Latest code validation:** GitHub Actions run #209 at `b79ea0751a76b06e102be797d38a249b9bbf110c` — 262 tests passed and Python compilation passed. The subsequent checkpoint update only changed documentation.
-**PR relationship:** PR #28 is the combined integration PR against `main`; its branch contains the publisher trust-bundle implementation from PR #27 plus instance-method support and M5 infrastructure. Do not merge the overlapping PR #27 independently while PR #28 remains the combined integration change.
+- M4: grounded verification for module functions, static/class methods and bounded ordinary instance methods; constructor fixture hashes are bound to evidence.
+- Publisher trust: issuer-bound signatures, rotation/revocation and offline root-signed trust bundles with explicit operator-managed rollback floor.
+- M5 data pipeline: consent/license/verification-gated corpus preparation, sanitization, deterministic repository-group train/eval splits.
+- M5 training infrastructure: separate next_action, planner and verifier LoRA/QLoRA training jobs, prompt-only loss masking, provenance/leakage validation and reproducibility manifests.
+- M5 evaluation: matched base/adapter/tool-augmented runs, frozen case contracts with recomputed SHA-256, strict evidence checks, paired improvements/regressions and exact two-sided McNemar significance.
+- M5 promotion: release gate recomputes paired statistics and requires quality gain without regressions plus matching physical-device memory, TTFT, throughput and thermal measurements.
+- Runtime: server-configured specialist routes fail closed with HTTP 503 when an adapter mapping is missing; no silent base-model fallback.
 
-The Engine also supports server-configured OpenAI-compatible routing to the three specialist IDs (`UNAI_SPECIALIST_NEXT_ACTION_MODEL`, `UNAI_SPECIALIST_PLANNER_MODEL`, `UNAI_SPECIALIST_VERIFIER_MODEL`) through `/api/specialists/{role}/chat`; missing mappings fail closed with HTTP 503 and never fall back to the base model. M5 evaluation hardening now requires the exact `case_contract` (canonical prompt and acceptance-criteria array) in each result row, recomputes its SHA-256 digest during validation, and requires every matched `suite_id + case_id + specialist` trio to carry the same verified fingerprint. Unavailable executions and failed statuses with all checks passing are rejected. The evaluator reports exact two-sided McNemar p-values for adapter-vs-base and tool-vs-base comparisons; the release gate enforces at least 30 matched cases, alpha ≤ 0.05, a positive verified success-rate delta, zero adapter regressions and recomputes the p-value from paired counts. A descriptive gain on a smaller set is not promotable. M5 status: corpus preparation, three-role LoRA/QLoRA training code, matched held-out evaluation and physical-device release gating are implemented and CI-tested. A real consented/licensed corpus, GPU training run, adapter weights and physical Android benchmark are still outstanding. Continue by onboarding real eligible data, running the three separate specialist jobs on suitable GPU hardware, collecting matched held-out verification results and measuring the release candidate on physical Android hardware. Do not mark M5 trained/released until those artifacts and measurements exist.
+### Not completed — do not overclaim
 
+- No consented/licensed real training corpus has been provided.
+- No specialist weights have been trained; training code is implemented but not executed.
+- No real held-out model comparison has been run.
+- No physical Android RSS/TTFT/throughput/thermal benchmark has been collected.
+- Therefore M5 is infrastructure-complete, not trained/released; M6 device/deployment validation remains open.
 
-M4 now includes grounded exact-output/property-oracle verification, source/specification fingerprint checks, separate Ed25519 reviewer assertions and publisher-signed artifact manifests with operator-configured issuer/hostname trust, publisher key rotation and revocation, async module-level functions, top-level-class static/class methods, bounded JSON-fixture ordinary instance methods, bounded cumulative recursive shrinking and structured counterexample traces. It includes opt-in same-process output replay (2–4 calls, fresh JSON argument copies, 24-call request budget) and a separate workspace_filesystem_unchanged property. The latter compares bounded before/after manifests in the disposable Docker workspace, never follows symlinks, records only hashes/counts, and returns unavailable when the scan exceeds 1,024 entries, 2 MiB/file or 16 MiB/request. Neither replay nor filesystem audit results are automatically shrunk. Remaining M4 work includes public key-transparency inclusion/consistency proofs or certificate/organization identity discovery (the offline signed bundle is not a public transparency log), ordinary instance-method support, richer side-effect fixtures beyond the filtered workspace and coverage/mutation verification under deterministic budgets. M5 training infrastructure now prepares consented repository-disjoint specialist splits, trains separate role-specific LoRA/QLoRA adapters, compares matched base/adapter/tool-augmented evidence and blocks release until physical-device budgets pass. No real corpus has been supplied, no weights have been trained, and no physical Android benchmark is complete.
+### PR relationship and merge safety
+
+PR #28 is the combined integration PR against main and contains the publisher trust-bundle work formerly tracked in PR #27 plus M4/M5 changes. PR #27 remains open and overlaps with #28. Do not merge #27 separately while #28 is the integration candidate. Do not merge #28 unless the user explicitly asks. Keep all further work on the active feature branch unless a deliberate branch strategy is documented.
+
+### Resume instructions for a new chat
+
+1. Start by fetching the active branch, PR #28 and current workflow status; confirm HEAD still matches this checkpoint.
+2. Read `docs/CHECKPOINT.md`, `docs/ROADMAP.md` and this file before changing code.
+3. Continue from `3494bb1ffffe8af063d3469340f118ff60f2d46d`; preserve main.
+4. For actual model training, first obtain an explicitly user-approved consented/licensed dataset and select a feasible base model/training environment. Never use private chats or private repositories as training data without explicit consent.
+5. For mobile release, collect real instrumented Android measurements; schema example numbers are not measured results.
+6. After each meaningful milestone, update this checkpoint and continuity file with exact commit and CI evidence.
+
