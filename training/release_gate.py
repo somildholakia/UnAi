@@ -18,12 +18,13 @@ except ImportError:  # Support direct execution: python training/release_gate.py
 MAX_UNAI_MEMORY_BUDGET_MB = 6144
 
 
-def _finite_number(value: Any, label: str) -> float:
+def _finite_number(value: Any, label: str, *, allow_negative: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be numeric.")
     number = float(value)
-    if not math.isfinite(number) or number < 0:
-        raise ValueError(f"{label} must be finite and non-negative.")
+    if not math.isfinite(number) or (number < 0 and not allow_negative):
+        qualifier = "finite" if allow_negative else "finite and non-negative"
+        raise ValueError(f"{label} must be {qualifier}.")
     return number
 
 
@@ -110,7 +111,7 @@ def decide(
     ):
         raise ValueError("Evaluation report has inconsistent paired-comparison counts.")
     signed_delta = _finite_number(
-        paired.get("adapter_success_rate_delta"), "adapter success-rate delta"
+        paired.get("adapter_success_rate_delta"), "adapter success-rate delta", allow_negative=True
     )
     if not math.isclose(
         signed_delta,
