@@ -362,6 +362,8 @@ class GroundedOraclePublisherAttestation(BaseModel):
 class GroundedOracleCase(BaseModel):
     case_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")]
     arguments: dict[str, Any]
+    # Explicit constructor fixture for the narrowly supported ordinary instance-method path.
+    instance_arguments: dict[str, Any] | None = None
     expected_output: Any = None
     oracle_property: GroundedPropertyOracle | None = None
     oracle_kind: Literal["user", "specification"]
