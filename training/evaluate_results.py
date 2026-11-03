@@ -32,6 +32,8 @@ def _number(value: Any, name: str, *, minimum: float = 0) -> float:
 def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ValueError(f"Line {line_number}: benchmark result must be an object.")
+    if row.get("schema") != "unai.benchmark-result.v1":
+        raise ValueError(f"Line {line_number}: benchmark result schema must be unai.benchmark-result.v1.")
     suite_id = row.get("suite_id")
     case_id = row.get("case_id")
     case_sha256 = row.get("case_sha256")
