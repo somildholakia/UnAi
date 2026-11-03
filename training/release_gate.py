@@ -10,6 +10,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+try:
+    from .metrics import exact_mcnemar_pvalue
+except ImportError:  # Support direct execution: python training/release_gate.py
+    from metrics import exact_mcnemar_pvalue
+
 MAX_UNAI_MEMORY_BUDGET_MB = 6144
 
 
@@ -87,10 +92,19 @@ def decide(
     regressions = paired.get("adapter_regressions_vs_base")
     improvements = paired.get("adapter_improvements_over_base")
     unchanged = paired.get("adapter_unchanged_vs_base")
+    tool_regressions = paired.get("tool_augmented_regressions_vs_base")
+    tool_improvements = paired.get("tool_augmented_improvements_over_base")
+    tool_unchanged = paired.get("tool_augmented_unchanged_vs_base")
     if any(
         not isinstance(value, int) or isinstance(value, bool) or value < 0
-        for value in (regressions, improvements, unchanged)
-    ) or regressions + improvements + unchanged != matched_cases:
+        for value in (
+            regressions, improvements, unchanged,
+            tool_regressions, tool_improvements, tool_unchanged,
+        )
+    ) or (
+        regressions + improvements + unchanged != matched_cases
+        or tool_regressions + tool_improvements + tool_unchanged != matched_cases
+    ):
         raise ValueError("Evaluation report has inconsistent paired-comparison counts.")
     reported_delta = _finite_number(
         abs(paired.get("adapter_success_rate_delta")), "absolute adapter success-rate delta"
@@ -107,10 +121,40 @@ def decide(
         abs_tol=1e-12,
     ):
         raise ValueError("Evaluation report paired success-rate delta is inconsistent.")
-    quality_passed = adapter_rate > base_rate and regressions == 0
+    statistical = evaluation.get("statistical_gate")
+    if not isinstance(statistical, dict):
+        raise ValueError("Evaluation report is missing the paired statistical release gate.")
+    minimum_heldout_cases = statistical.get("minimum_heldout_cases")
+    alpha = _finite_number(statistical.get("significance_alpha"), "statistical significance alpha")
+    if (
+        not isinstance(minimum_heldout_cases, int)
+        or isinstance(minimum_heldout_cases, bool)
+        or minimum_heldout_cases < 30
+        or alpha <= 0
+        or alpha > 0.05
+    ):
+        raise ValueError("Evaluation report has a weaker-than-allowed statistical release threshold.")
+    adapter_p_value = exact_mcnemar_pvalue(improvements, regressions)
+    tool_p_value = exact_mcnemar_pvalue(tool_improvements, tool_regressions)
+    for field, expected in (
+        ("adapter_mcnemar_exact_p_value", adapter_p_value),
+        ("tool_augmented_mcnemar_exact_p_value", tool_p_value),
+    ):
+        reported = _finite_number(statistical.get(field), field)
+        if not math.isclose(reported, expected, rel_tol=0, abs_tol=1e-12):
+            raise ValueError(f"Evaluation report {field} does not match paired outcome counts.")
+    quality_passed = (
+        matched_cases >= minimum_heldout_cases
+        and matched_cases >= 30
+        and alpha <= 0.05
+        and adapter_rate > base_rate
+        and regressions == 0
+        and adapter_p_value <= alpha
+        and statistical.get("adapter_passed") is True
+    )
     if not quality_passed:
         reasons.append(
-            "The adapter did not improve the matched verified success rate over base without regressions."
+            "The adapter did not meet the minimum held-out sample, verified gain, zero-regression and exact paired-significance requirements."
         )
 
     mobile_checks: dict[str, Any] = {
@@ -172,6 +216,10 @@ def decide(
         "adapter_artifacts_sha256": manifest.get("adapter_artifacts_sha256"),
         "heldout_quality_gate": {
             "passed": quality_passed,
+            "minimum_heldout_cases": minimum_heldout_cases,
+            "matched_cases": matched_cases,
+            "significance_alpha": alpha,
+            "adapter_mcnemar_exact_p_value": adapter_p_value,
             "base_verified_success_rate": base_rate,
             "adapter_verified_success_rate": adapter_rate,
             "adapter_regressions_vs_base": regressions,
