@@ -31,6 +31,8 @@ def verify_corpus_manifest(
     specialist: str,
     train_rows: list[dict[str, Any]],
     eval_rows: list[dict[str, Any]],
+    train_file_sha256: str | None = None,
+    eval_file_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Verify prepared split bytes and counts before importing/loading model weights."""
     if train_path.parent.resolve() != eval_path.parent.resolve():
@@ -67,7 +69,12 @@ def verify_corpus_manifest(
             )
         if not isinstance(declared_sha, str) or not _SHA256_RE.fullmatch(declared_sha):
             raise ValueError(f"Prepared corpus manifest has an invalid {split} SHA-256.")
-        if sha256_file(path) != declared_sha:
+        actual_sha = train_file_sha256 if split == "train" else eval_file_sha256
+        if actual_sha is None:
+            actual_sha = sha256_file(path)
+        if not isinstance(actual_sha, str) or not _SHA256_RE.fullmatch(actual_sha):
+            raise ValueError(f"Loaded corpus {split} snapshot has an invalid SHA-256.")
+        if actual_sha != declared_sha:
             raise ValueError(
                 f"Prepared corpus {split} file SHA-256 does not match corpus_manifest.json."
             )
@@ -119,10 +126,18 @@ def sha256_adapter_artifacts(root: Path) -> str:
     return digest.hexdigest()
 
 
-def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
+def read_specialist_jsonl_with_hash(
+    path: Path, specialist: str
+) -> tuple[list[dict[str, Any]], str]:
+    """Parse a single byte snapshot and return its digest for manifest verification."""
+    raw_bytes = path.read_bytes()
+    try:
+        source_text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path} is not valid UTF-8 JSONL.") from exc
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(source_text.splitlines(), 1):
         if not line.strip():
             continue
         try:
@@ -189,6 +204,12 @@ def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
         rows.append(row)
     if not rows:
         raise ValueError(f"No validated specialist examples in {path}.")
+    return rows, hashlib.sha256(raw_bytes).hexdigest()
+
+
+def read_specialist_jsonl(path: Path, specialist: str) -> list[dict[str, Any]]:
+    """Compatibility wrapper for callers that need rows but not manifest checking."""
+    rows, _digest = read_specialist_jsonl_with_hash(path, specialist)
     return rows
 
 
@@ -261,14 +282,20 @@ def main() -> None:
     if args.train_file.resolve() == args.eval_file.resolve():
         raise SystemExit("Training and evaluation files must be different.")
 
-    train_rows = read_specialist_jsonl(args.train_file, args.specialist)
-    eval_rows = read_specialist_jsonl(args.eval_file, args.specialist)
+    train_rows, train_file_sha256 = read_specialist_jsonl_with_hash(
+        args.train_file, args.specialist
+    )
+    eval_rows, eval_file_sha256 = read_specialist_jsonl_with_hash(
+        args.eval_file, args.specialist
+    )
     verify_corpus_manifest(
         args.train_file,
         args.eval_file,
         args.specialist,
         train_rows,
         eval_rows,
+        train_file_sha256,
+        eval_file_sha256,
     )
     train_groups = {row["group_id"] for row in train_rows}
     eval_groups = {row["group_id"] for row in eval_rows}

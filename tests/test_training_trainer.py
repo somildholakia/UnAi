@@ -8,6 +8,7 @@ import pytest
 from training.train_lora import (
     encode_messages,
     read_specialist_jsonl,
+    read_specialist_jsonl_with_hash,
     sha256_file,
     verify_corpus_manifest,
 )
@@ -221,3 +222,51 @@ def test_read_specialist_jsonl_rejects_malformed_message_shapes_without_attribut
 
     with pytest.raises(ValueError, match="verified consent/provenance"):
         read_specialist_jsonl(path, "next_action")
+
+
+def test_manifest_verification_hashes_the_exact_loaded_snapshot_not_a_later_disk_read(tmp_path) -> None:
+    train_path, eval_path, train_rows, eval_rows = _write_prepared_pair(tmp_path)
+    loaded_train_rows, train_digest = read_specialist_jsonl_with_hash(
+        train_path, "next_action"
+    )
+    loaded_eval_rows, eval_digest = read_specialist_jsonl_with_hash(
+        eval_path, "next_action"
+    )
+    assert loaded_train_rows == train_rows
+    assert loaded_eval_rows == eval_rows
+
+    # A concurrent writer changes the path after parsing. Training continues with
+    # the already-loaded rows, so the manifest must be checked against those bytes.
+    train_path.write_text(train_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+    manifest = verify_corpus_manifest(
+        train_path,
+        eval_path,
+        "next_action",
+        loaded_train_rows,
+        loaded_eval_rows,
+        train_digest,
+        eval_digest,
+    )
+
+    assert manifest["schema"] == "unai.specialist-sft-corpus.v1"
+
+
+def test_manifest_verification_rejects_a_changed_snapshot_digest(tmp_path) -> None:
+    train_path, eval_path, _train_rows, _eval_rows = _write_prepared_pair(tmp_path)
+    train_path.write_text(train_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    changed_rows, changed_digest = read_specialist_jsonl_with_hash(
+        train_path, "next_action"
+    )
+    eval_rows, eval_digest = read_specialist_jsonl_with_hash(eval_path, "next_action")
+
+    with pytest.raises(ValueError, match="train file SHA-256"):
+        verify_corpus_manifest(
+            train_path,
+            eval_path,
+            "next_action",
+            changed_rows,
+            eval_rows,
+            changed_digest,
+            eval_digest,
+        )
