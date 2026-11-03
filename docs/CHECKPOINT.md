@@ -296,3 +296,11 @@ M4 instance-method fixture support and M5 corpus-preparation, LoRA/QLoRA trainin
 PR #28 is the combined integration PR and includes the publisher trust-bundle work previously tracked by PR #27. PR #27 remains open but overlaps; do not merge it separately while #28 is the integration candidate. Do not merge PR #28 unless the user explicitly asks.
 
 **Next chat instruction:** continue from branch `feat/m4-instance-methods-m5-specialists`, exact HEAD `3494bb1ffffe8af063d3469340f118ff60f2d46d`. First inspect PR #28, branch and latest CI; read this section and `docs/CONTINUITY.md` / `docs/ROADMAP.md`. Preserve main. Continue with M5 real-data/training readiness and remaining M4 security/verification work without fabricating datasets, training runs or device metrics.
+
+
+### Handoff documentation commit references
+
+The code validated by CI #247 is `3494bb1ffffe8af063d3469340f118ff60f2d46d`. Cross-chat handoff documentation was then refreshed in:
+- `d6ac7380dd79919348ae6f4d3844212a929f41cb` — this checkpoint file.
+- `9b3ae7e8add28b675fdf8c161fa63f892969456d` — continuity handoff (followed by a clarification-only continuity update).
+These commits change documentation only; CI #247 validates the unchanged code head above. Fetch the branch before resuming to get the exact newest documentation commit.
