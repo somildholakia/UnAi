@@ -37,3 +37,10 @@ This is a stringent target; model weights, KV cache, tokenizer, JNI/native runti
 - Airplane mode verified:
 
 Do not call mobile support complete until this record is populated on at least one physical 6 GB device.
+
+
+## First local runtime preset
+
+The current Android smoke-test preset uses `Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF` at `Q4_K_M`, served by a CPU-only `llama.cpp` process with a 2K context. This is an installability baseline, not a measured fit or performance guarantee for every 6 GB device. The GGUF file is approximately 1.12 GB; runtime memory additionally includes the KV cache, graph buffers, tokenizer and application processes. Start with the supplied thread/context settings and collect the device record above before increasing them.
+
+The Termux scripts keep the model and llama.cpp build in `$HOME`, bind inference/API/UI listeners to `127.0.0.1`, and provide no cloud fallback. See [LOCAL_INSTALL.md](LOCAL_INSTALL.md).

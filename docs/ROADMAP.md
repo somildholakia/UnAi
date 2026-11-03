@@ -80,3 +80,12 @@
 - [ ] Record peak PSS/RSS, load time, TTFT, tokens/sec, power and sustained thermals.
 - [ ] Deploy optional hosted Brain services with authentication, quotas and tenant isolation.
 - [ ] Keep local/offline inference functional without hosted model credits.
+
+
+## M6 — local packaging checkpoint
+
+- [x] Add a repeatable Android/Termux install script for a CPU `llama.cpp` runtime, local GGUF model, Engine venv and Web UI dependencies.
+- [x] Add a single tmux-based local launcher with model/Engine/UI windows bound to loopback.
+- [x] Add CI checks for Python, web production build and shell syntax.
+- [ ] Verify install and offline chat on a physical Android device; record RSS/PSS, TTFT, throughput and thermal behavior.
+- [ ] Validate memory, process lifecycle and recovery after Android background/low-memory kills.

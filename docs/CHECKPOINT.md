@@ -430,3 +430,26 @@ These are conservative source-level AST relationships, not runtime traces or a c
 - Continue on `feat/m4-instance-methods-m5-specialists`; preserve `main`.
 - PR #28 remains open and must not be merged without explicit permission. PR #27 overlaps and must not be merged separately.
 - M5 still requires a real consented/licensed corpus, actual specialist training, held-out comparison and physical Android measurements; none is claimed complete.
+
+
+## Local-first Android install path — initial testable package
+
+**Install implementation commit:** `0ad600ca5a34573a7d156620a9ad265ff9f0b355` (script-shell expansion fix).  
+**Feature implementation commit:** `f56e3e216a4e0d201b0588d06ca82cd36a1cf9c5`.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`.
+
+### Installability changes
+
+- Added `scripts/termux-install.sh`: installs Termux build/runtime packages, builds CPU `llama-server`, resumably downloads Qwen2.5-Coder 1.5B Q4_K_M GGUF, creates the Python virtual environment, installs Engine dependencies and installs the web UI.
+- Added `scripts/termux-start.sh`: starts model, Engine and Vite UI in separate tmux windows, bound to loopback. Default context is 2K and CPU thread count defaults to four.
+- Fixed malformed `@vitejs/plugin-react` version syntax in `apps/web/package.json`; browser/API loopback defaults and CORS origins now agree.
+- Changed Engine's default model endpoint/ID to the local llama.cpp alias, and removed Uvicorn's optional `standard` extras from mandatory dependencies to avoid unnecessarily requiring uvloop/httptools on Android.
+- Added a web production build and shell syntax validation to the CI workflow.
+- Added `docs/LOCAL_INSTALL.md` and replaced the README's manual-only setup with a Termux first-run path.
+
+### Boundaries
+
+- This is a local inference path using an existing open-weight base model. No custom unAI weights or specialist adapters are trained by this change.
+- Local inference removes hosted API quotas and per-token billing, but is limited by RAM, storage, battery, thermal throttling and speed.
+- The 1.5B Q4_K_M starter model is a smoke-test model, not proof of large-model capability or quality parity.
+- A successful CI build does not prove the scripts have been executed on a physical Android device. M6 still requires on-device installation, offline test, PSS/RSS, TTFT, throughput and thermal measurements.

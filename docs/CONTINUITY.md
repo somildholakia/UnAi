@@ -102,7 +102,7 @@ PR #28 is the combined integration PR against main and contains the publisher tr
 1. Fetch the active branch and PR #28; verify the branch head, main SHA and latest Actions result.
 2. Read `docs/CHECKPOINT.md`, `docs/ROADMAP.md` and this file before editing.
 3. Latest validated code commit is `f083452af8bd16ed8cbfec70fb1157e8b76f7084` (Actions #264: 311 tests and compileall passed). Fetch the live branch head and latest workflow before editing; a docs-only checkpoint may follow the code commit.
-4. Next engineering candidate: design M3 per-user/scoped Engine credentials, revocation, rate limiting and tenant isolation with a documented threat model and explicit security regression tests. Keep public deployment disabled until reviewed.
+4. Current priority: install and smoke-test the local Termux package on a physical Android device; record install failures and measured RSS/PSS, TTFT, throughput and thermal behavior. Then address tenant-scoped credentials/rate limits before any public Engine deployment.
 5. For actual M5 model training, first obtain an explicitly user-approved consented/licensed corpus and select a feasible base model/training environment. Never use private chats or private repositories without explicit permission and compatible licenses.
 6. For mobile release, collect real instrumented Android measurements. Example/schema numbers are not measured results.
 7. After each meaningful milestone, update checkpoint and continuity docs with exact commit and CI evidence.
@@ -175,3 +175,14 @@ Tests cover local/imported calls, module aliases, class instantiation, `self` me
 - The graph remains Python-only. Broader dependency relationships should be added only with explicit resolution rules and regression evidence.
 - M5 still has no supplied approved corpus, trained adapters, held-out comparison or Android measurements. M6 physical device/deployment validation remains open.
 - Keep `main` unchanged and do not merge PR #28 or overlapping PR #27 absent explicit permission.
+
+
+## Local-first install milestone — resume from here
+
+- Branch: `feat/m4-instance-methods-m5-specialists`
+- Previous branch head before install work: `5c7eba929748ddd70c118e16335dc43852df6aad`
+- New work adds Termux build/install/start scripts, a local llama.cpp + Qwen2.5-Coder 1.5B Q4_K_M preset, corrected web package metadata, loopback API/CORS alignment and Node production-build CI.
+- Start with `docs/LOCAL_INSTALL.md`; run `bash scripts/termux-install.sh` then `bash scripts/termux-start.sh` inside Termux.
+- CI must pass before recording the final code/docs SHAs. Do not call this physically Android-tested until actual device results are recorded.
+- Local inference means no provider usage quotas or token billing; hardware resources still impose limits. The current model is not trained by unAI.
+- PR #28 remains the active integration PR; do not merge it or alter `main` without explicit user approval.

@@ -82,24 +82,48 @@ Read training/README.md before preparing data. Never train on private conversati
 
 These are targets, not results. See docs/MOBILE_PROFILE.md.
 
-## Run locally
+## Install and test locally
 
-    cd apps/engine
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -e '.[dev,mcp]'
-    cp .env.example .env
-    uvicorn unai_engine.main:app --host 127.0.0.1 --port 8000
+The fastest first test is Android/Termux. It installs a local CPU inference runtime, downloads a compact GGUF coding model, then starts the model server, Engine and Web UI in one tmux session:
 
-Start a compatible local model server separately. Then index your Markdown vault:
+```bash
+pkg update -y && pkg install -y git
+git clone --branch feat/m4-instance-methods-m5-specialists --single-branch https://github.com/somildholakia/UnAi.git
+cd UnAi
+bash scripts/termux-install.sh
+bash scripts/termux-start.sh
+```
 
-    curl -X POST http://127.0.0.1:8000/api/brain/index
+Open `http://127.0.0.1:5173` on the same device. The first install compiles `llama.cpp` and downloads approximately 1.12 GB of Qwen2.5-Coder 1.5B Q4_K_M weights. Keep the initial 2K context; mobile memory and thermal performance must still be measured. See [the local install guide](docs/LOCAL_INSTALL.md).
 
-Run the web UI in apps/web with npm install && npm run dev.
+For desktop setup, point the Engine at any local OpenAI-compatible model server using `UNAI_MODEL_BASE_URL` and `UNAI_MODEL_NAME`. The default preset expects a llama.cpp server at `127.0.0.1:8080`. Ollama can also be used by changing those two settings to its local OpenAI-compatible endpoint and a model that is already installed.
+
+Local mode removes hosted model quotas and per-token provider billing. It is not infinite compute: device RAM, storage, battery, thermals and generation speed remain practical limits. No cloud inference fallback is configured. The starter model is an existing open-weight coding model, not a custom unAI model trained by this repository.
+
+### Run the Engine and UI manually
+
+```bash
+cd apps/engine
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+uvicorn unai_engine.main:app --host 127.0.0.1 --port 8000
+```
+
+In another terminal:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
 
 Tests:
 
-    PYTHONPATH=apps/engine/src pytest -q tests
+```bash
+PYTHONPATH=apps/engine/src pytest -q tests
+```
 
 ## Current research hypothesis
 
