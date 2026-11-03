@@ -1,72 +1,153 @@
-# unAI training and fine-tuning
+# unAI training and specialist adapters
 
-Training is an optional offline workflow. The phone runs inference only. Training requires suitable GPU hardware, storage and a reproducible dataset; having a free API key or model endpoint does not mean model weights can be fine-tuned for free.
+M5 has a reproducible training and evaluation workflow for three separate LoRA/QLoRA adapters:
 
-## Training strategy
+- `next_action`: select the next approved inspection, retrieval, edit or test action.
+- `planner`: convert a user goal into bounded plans, acceptance checks and permission requirements.
+- `verifier`: interpret test evidence, distinguish failures from unavailable checks, and report unresolved risks.
 
-Use small specialist adapters, not a from-scratch frontier pretraining run:
+These are separate adapter roles, not three claims of autonomous capability. Training is offline and requires a compatible model, a suitable machine and a curated dataset. The 6 GB Android profile is an inference/release target, not a training device. No adapter weights are currently committed or claimed trained.
 
-1. Collect task trajectories only from sources with explicit consent and compatible licenses.
-2. Keep only tasks with verifiable outcomes, acceptance checks and source provenance.
-3. Remove secrets, deduplicate records and split by repository/project so evaluation does not leak training examples.
-4. LoRA/QLoRA supervised fine-tuning teaches task execution style, tool selection and structured responses.
-5. DPO is a later optional stage using a chosen and rejected response whose outcomes have been independently checked.
-6. Evaluate the adapter on held-out coding tasks with the same budget as the base model before deployment.
+## 1. Collect eligible trajectories
 
-The trainer writes an adapter and a JSON manifest. It does not create a self-contained model; keep the original base model and its license with the adapter.
+Each raw JSONL record must include:
 
-## Install
+```json
+{
+  "specialist": "next_action",
+  "messages": [
+    {"role": "user", "content": "Inspect the failing function and its tests."},
+    {"role": "assistant", "content": "Read the target file and the linked test first."}
+  ],
+  "outcome": "passed",
+  "verification": {
+    "status": "passed",
+    "checks": [
+      {"name": "independent acceptance suite", "passed": true}
+    ]
+  },
+  "provenance": {
+    "source": "consented task trajectory source",
+    "license": "Apache-2.0",
+    "consented": true,
+    "repository": "project-or-repository-group"
+  }
+}
+```
 
-From repository root:
+Only the three named specialist values are accepted. Messages must be valid user/assistant conversation turns and end with an assistant response. A trajectory is rejected unless the outcome and every independent verification check passed, explicit consent is true, a license is named, and a repository/project grouping key exists.
 
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -e "./apps/engine[train]"
+Never add private conversations, private repositories, credentials, or third-party data without explicit permission and compatible rights. Automated redaction covers common secret formats only; it is not a privacy guarantee. Inspect the prepared examples before training.
 
-QLoRA needs a supported CUDA GPU and bitsandbytes. Non-quantized LoRA can run on supported hardware but CPU-only training is generally impractical for useful coding models. Do not run training on the 6 GB Android target.
+## 2. Build deterministic specialist splits
 
-## SFT JSONL format
+From the repository root:
 
-Each line contains a messages array, a verified outcome and provenance:
+```bash
+python -m training.prepare_corpus \
+  --input data/raw-trajectories.jsonl \
+  --output-dir data/specialists \
+  --seed 20261103 \
+  --eval-fraction 0.2
+```
 
-    {
-      "messages": [
-        {"role": "user", "content": "Fix the bug..."},
-        {"role": "assistant", "content": "The verified fix is..."}
-      ],
-      "outcome": "passed",
-      "verification": {
-        "status": "passed",
-        "checks": [{"name": "unit tests", "passed": true}]
-      },
-      "provenance": {
-        "source": "your consented task dataset",
-        "license": "Apache-2.0",
-        "consented": true
-      }
-    }
+The preparation command:
+- validates consent, license and passing verification;
+- redacts common token/key patterns and deduplicates sanitized conversations;
+- hashes repository/project IDs before storing them in output;
+- keeps every repository/project group entirely in train or eval;
+- requires at least two distinct groups for every specialist;
+- writes `next_action.train.jsonl` / `next_action.eval.jsonl`, likewise for planner and verifier, plus `corpus_manifest.json` with dataset hashes and split counts.
 
-Prepare and inspect the cleaned file:
+Do not train if the manifest reports too few groups or examples. One task split into multiple messages is not independent evidence.
 
-    python training/prepare_dataset.py --input data/raw.jsonl --output data/sft.jsonl
+## 3. Train each adapter separately
 
-The filter rejects samples without explicit consent, source/license metadata and passing verification checks. It redacts common token/key patterns and deduplicates messages. Review the report and cleaned examples before training; automated redaction is not a guarantee of privacy.
+Install from the repository root:
 
-## Run LoRA / QLoRA
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e "./apps/engine[train]"
+```
 
-    python training/train_lora.py       --model YOUR_SMALL_BASE_MODEL       --train-file data/sft.jsonl       --eval-file data/heldout.jsonl       --output-dir artifacts/unai-sft       --qlora
+QLoRA requires supported CUDA hardware and bitsandbytes. LoRA can use supported hardware, but CPU-only training may be impractical. Training never runs from the Engine API or on the Android phone.
 
-Start with a small, supported open-weight coding model. The right size depends on your GPU memory, context length, runtime support and license. Do not infer mobile feasibility from parameter count alone.
+Example for the next-action adapter:
 
-## DPO preference stage
+```bash
+python training/train_lora.py \
+  --model YOUR_SMALL_OPEN_WEIGHT_BASE_MODEL \
+  --revision IMMUTABLE_MODEL_REVISION \
+  --specialist next_action \
+  --train-file data/specialists/next_action.train.jsonl \
+  --eval-file data/specialists/next_action.eval.jsonl \
+  --output-dir artifacts/unai-next-action \
+  --qlora
+```
 
-Preference JSONL must contain prompt, chosen and rejected message arrays, provenance, and independently measured checks. The chosen response must pass; rejected must fail.
+Repeat with `--specialist planner` and `--specialist verifier`, pointing to their respective prepared files and unique output directories. The trainer refuses a train/eval group overlap, requires provenance and verification metadata, masks prompt tokens from the loss, preserves assistant responses when truncating long prompts, pads labels with `-100`, and records data hashes, train/eval groups, hyperparameters, package versions, GPU details, metrics and an adapter artifact digest in `unai_adapter_manifest.json`.
 
-    python training/prepare_preferences.py --input data/preferences-raw.jsonl --output data/preferences.jsonl
-    python training/train_dpo.py       --model YOUR_BASE_MODEL       --train-file data/preferences.jsonl       --eval-file data/preferences-heldout.jsonl       --output-dir artifacts/unai-dpo
+A LoRA adapter is not a standalone model. Retain the exact compatible base-model revision and its license.
 
-DPO is optional and should only follow a stable SFT baseline. A rejected answer is not automatically a good negative example; keep the reason and evidence in your source data and curate it.
+## 4. Compare matched held-out results
 
-## Release gate
+The evaluation harness consumes one JSONL row per system and held-out case. For every `suite_id + case_id + specialist`, provide results for all three systems:
 
-Do not ship an adapter unless it passes held-out acceptance tests, has a reproducible manifest, respects the base model license, contains no secrets/private data, and fits the target inference budget. Compare base model, adapter-only and full unAI system separately. No custom weights are currently trained or included in this repository.
+- `base`: base model without tools;
+- `adapter`: the same base model with the specialist adapter;
+- `tool_augmented`: the tool-augmented system, including non-empty tool names and tool evidence IDs.
+
+Each row needs `model_id`, `base_model`, `latency_ms`, `tokens`, a consented/licensed provenance object and a `verification` object containing a status, named boolean checks, an evidence ID and verifier identifier. The evaluator rejects incomplete or duplicate matched sets, contradictory pass/check results, model mismatches and missing tool traces.
+
+```bash
+python training/evaluate_results.py \
+  --input data/heldout-results.jsonl \
+  --output reports/next-action-evaluation.json
+```
+
+The report includes verified success rates, paired improvements/regressions, latency and token summaries. An adapter counts as an improvement only when its verified success rate exceeds the matched base baseline with zero base-pass/adapter-fail regressions. This is a measurement on the supplied held-out set, not proof of general capability.
+
+## 5. Physical-device release gate
+
+The evaluation report alone cannot approve a mobile release. Provide a separate instrumented physical-device measurement JSON using schema `unai.mobile-benchmark.v1`:
+
+```json
+{
+  "schema": "unai.mobile-benchmark.v1",
+  "specialist": "next_action",
+  "base_model": "YOUR_SMALL_OPEN_WEIGHT_BASE_MODEL",
+  "adapter_artifacts_sha256": "SHA256_FROM_ADAPTER_MANIFEST",
+  "device_model": "physical Android device model",
+  "android_version": "recorded Android version",
+  "measured_at": "2026-11-03T12:00:00Z",
+  "measurement_method": "documented repeatable sustained local inference test",
+  "memory_budget_mb": 6144,
+  "peak_rss_mb": 5400,
+  "ttft_ms": 2200,
+  "ttft_budget_ms": 5000,
+  "sustained_tokens_per_second": 7.5,
+  "minimum_tokens_per_second": 5.0,
+  "thermal_throttling": false
+}
+```
+
+The numbers above are an example schema only, not measured results or product defaults. Use actual recorded values and choose explicit budgets for your test protocol. The release gate checks the adapter artifact hash, specialist/base-model identity, a memory budget no higher than 6144 MiB, measured peak RSS, TTFT, sustained tokens/second and thermal throttling:
+
+```bash
+python training/release_gate.py \
+  --adapter-manifest artifacts/unai-next-action/unai_adapter_manifest.json \
+  --evaluation-report reports/next-action-evaluation.json \
+  --mobile-metrics data/mobile/next-action-device.json \
+  --output reports/next-action-release-decision.json
+```
+
+A missing mobile measurement, a failed performance comparison, any regression, a hash mismatch, an out-of-budget measurement or thermal throttling blocks release. Do not edit a release decision manually to mark an adapter ready.
+
+## 6. DPO is optional and later
+
+The existing preference-data and DPO scripts remain an experimental second stage. Use them only after a stable SFT baseline and only with chosen/rejected answers whose outcomes have been independently verified. A failed answer is not automatically a useful negative example.
+
+## Current M5 status
+
+The consented-corpus preparation, repository-disjoint splitting, role-specific LoRA/QLoRA trainer, matched-result evaluator and physical-device release gate are implemented. No user-provided corpus has been supplied, no specialist adapter has been trained, and no physical Android benchmark has been run. M5 is therefore training-ready infrastructure, not a completed training or performance milestone.
