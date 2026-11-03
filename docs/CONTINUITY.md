@@ -60,6 +60,17 @@ minimum; it is not automatically persisted.
 
 **Active integration PR:** https://github.com/somildholakia/UnAi/pull/28
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
+**Latest code-validation commit:** `37152a46fae2f74c81900d1de8e328473548664a`
+**Latest CI:** run #225 — 277 tests passed in 7.05s and Python compilation passed.
+**PR relationship:** PR #28 is the combined integration PR against `main`; its branch contains the publisher trust-bundle implementation from PR #27 plus instance-method support and M5 infrastructure. Do not merge overlapping PR #27 independently while PR #28 remains the combined integration change.
+
+M5 software infrastructure is implemented and CI-tested. The evaluator now requires exact task-content fingerprints on matched base/adapter/tool runs and reports two-sided exact McNemar significance. The release gate recomputes p-values from paired outcomes, enforces at least 30 matched cases, alpha ≤ 0.05, higher verified adapter success and zero regressions, then also checks the matching adapter digest and physical-device memory/TTFT/throughput/thermal metrics.
+
+Still outstanding: a real consented/licensed corpus, GPU training runs for the three adapters, held-out measurements from real model runs and physical Android benchmarks. Do not claim trained weights or mobile readiness before those artifacts exist. Next steps are to supply eligible data, train each specialist separately, capture all three benchmark systems on the same frozen tasks, and run the physical-device release gate.
+
+
+**Active integration PR:** https://github.com/somildholakia/UnAi/pull/28
+**Active branch:** `feat/m4-instance-methods-m5-specialists`
 **Latest checkpoint:** `0fe7aea602baa2e4aed82fddc71ba75d76f86852`
 **Latest code validation:** GitHub Actions run #209 at `b79ea0751a76b06e102be797d38a249b9bbf110c` — 262 tests passed and Python compilation passed. The subsequent checkpoint update only changed documentation.
 **PR relationship:** PR #28 is the combined integration PR against `main`; its branch contains the publisher trust-bundle implementation from PR #27 plus instance-method support and M5 infrastructure. Do not merge the overlapping PR #27 independently while PR #28 remains the combined integration change.
