@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -35,12 +36,20 @@ def decide(
     mobile: dict[str, Any] | None,
     *,
     manifest_sha256: str | None = None,
+    evaluation_sha256: str | None = None,
+    mobile_metrics_sha256: str | None = None,
 ) -> dict[str, Any]:
     reasons: list[str] = []
     if manifest.get("schema") != "unai.specialist-adapter.v1":
         raise ValueError("Unsupported or missing specialist adapter manifest schema.")
     if evaluation.get("schema") != "unai.heldout-evaluation.v1":
         raise ValueError("Unsupported or missing held-out evaluation report schema.")
+    adapter_artifact_hash = manifest.get("adapter_artifacts_sha256")
+    if not isinstance(adapter_artifact_hash, str) or re.fullmatch(r"[a-fA-F0-9]{64}", adapter_artifact_hash) is None:
+        raise ValueError("Adapter manifest must contain a valid SHA-256 digest of the deployable adapter artifacts.")
+    matched_cases = evaluation.get("matched_cases")
+    if not isinstance(matched_cases, int) or isinstance(matched_cases, bool) or matched_cases < 1:
+        raise ValueError("Evaluation report must contain at least one matched held-out case.")
     specialist = manifest.get("specialist")
     if specialist not in {"next_action", "planner", "verifier"} or evaluation.get("specialist") != specialist:
         raise ValueError("Adapter manifest and evaluation specialist roles do not match.")
@@ -49,11 +58,55 @@ def decide(
     systems = evaluation.get("systems")
     if not isinstance(paired, dict) or not isinstance(systems, dict):
         raise ValueError("Evaluation report is missing paired comparison metrics.")
-    base_rate = _finite_number(systems.get("base", {}).get("verified_success_rate"), "base verified success rate")
-    adapter_rate = _finite_number(systems.get("adapter", {}).get("verified_success_rate"), "adapter verified success rate")
+    if any(not isinstance(systems.get(system), dict) for system in ("base", "adapter", "tool_augmented")):
+        raise ValueError("Evaluation report is missing one or more matched system metrics.")
+    validated_rates: dict[str, float] = {}
+    for system in ("base", "adapter", "tool_augmented"):
+        entry = systems[system]
+        cases = entry.get("cases")
+        successes = entry.get("verified_successes")
+        evidence_ids = entry.get("evidence_ids")
+        if (
+            cases != matched_cases
+            or not isinstance(successes, int)
+            or isinstance(successes, bool)
+            or not 0 <= successes <= matched_cases
+            or not isinstance(evidence_ids, list)
+            or len(evidence_ids) != matched_cases
+            or not all(isinstance(item, str) and item.strip() for item in evidence_ids)
+            or len(set(evidence_ids)) != matched_cases
+        ):
+            raise ValueError(f"Evaluation report has inconsistent {system} case/evidence counts.")
+        rate = _finite_number(entry.get("verified_success_rate"), f"{system} verified success rate")
+        expected_rate = successes / matched_cases
+        if not math.isclose(rate, expected_rate, rel_tol=0, abs_tol=1e-12):
+            raise ValueError(f"Evaluation report {system} success rate does not match its verified counts.")
+        validated_rates[system] = rate
+    base_rate = validated_rates["base"]
+    adapter_rate = validated_rates["adapter"]
     regressions = paired.get("adapter_regressions_vs_base")
-    if not isinstance(regressions, int) or isinstance(regressions, bool) or regressions < 0:
-        raise ValueError("Evaluation report has an invalid adapter regression count.")
+    improvements = paired.get("adapter_improvements_over_base")
+    unchanged = paired.get("adapter_unchanged_vs_base")
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in (regressions, improvements, unchanged)
+    ) or regressions + improvements + unchanged != matched_cases:
+        raise ValueError("Evaluation report has inconsistent paired-comparison counts.")
+    reported_delta = _finite_number(
+        abs(paired.get("adapter_success_rate_delta")), "absolute adapter success-rate delta"
+    )
+    if not math.isclose(
+        paired.get("adapter_success_rate_delta"),
+        adapter_rate - base_rate,
+        rel_tol=0,
+        abs_tol=1e-12,
+    ) or not math.isclose(
+        reported_delta,
+        abs(adapter_rate - base_rate),
+        rel_tol=0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("Evaluation report paired success-rate delta is inconsistent.")
     quality_passed = adapter_rate > base_rate and regressions == 0
     if not quality_passed:
         reasons.append(
@@ -114,6 +167,8 @@ def decide(
         "schema": "unai.adapter-release-decision.v1",
         "specialist": specialist,
         "adapter_manifest_sha256": manifest_sha256,
+        "evaluation_report_sha256": evaluation_sha256,
+        "mobile_metrics_sha256": mobile_metrics_sha256,
         "adapter_artifacts_sha256": manifest.get("adapter_artifacts_sha256"),
         "heldout_quality_gate": {
             "passed": quality_passed,
@@ -147,6 +202,8 @@ def main() -> None:
         evaluation,
         mobile,
         manifest_sha256=_file_sha256(args.adapter_manifest),
+        evaluation_sha256=_file_sha256(args.evaluation_report),
+        mobile_metrics_sha256=_file_sha256(args.mobile_metrics) if args.mobile_metrics else None,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(decision, indent=2, sort_keys=True) + "\n", encoding="utf-8")
