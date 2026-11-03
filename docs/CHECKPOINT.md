@@ -367,7 +367,7 @@ This delivers the previously open M2 task-specific retrieval item. The graph is 
 ## Handoff verification
 
 - Latest code commit: `7950c8a65ef4151530b599053079e94b8fdd0a32`; GitHub Actions #256 passed (300 tests, compileall).
-- Latest branch HEAD at handoff: `e752cecb10cc2c3eb0d44c5938f6fc316880a80d`; documentation CI #257 passed.
+- Previous handoff documentation revision: `e752cecb10cc2c3eb0d44c5938f6fc316880a80d`; documentation CI #257 passed. This checkpoint has since received another documentation-only refresh; fetch the live branch head before continuing.
 - Main remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
 - PR #28 remains open and unmerged. No merge was performed.
 - For a new chat, fetch the branch and CI again, then read this file, `docs/CONTINUITY.md`, and `docs/ROADMAP.md` before continuing.

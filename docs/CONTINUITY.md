@@ -110,7 +110,7 @@ PR #28 is the combined integration PR against main and contains the publisher tr
 
 ### Exact handoff revision
 
-- **Latest branch HEAD at handoff:** `e752cecb10cc2c3eb0d44c5938f6fc316880a80d`
+- **Previous handoff documentation revision:** `e752cecb10cc2c3eb0d44c5938f6fc316880a80d` (CI #257 passed); this file has since received another docs-only refresh, so fetch the live branch head at session start.
 - **Latest code commit:** `7950c8a65ef4151530b599053079e94b8fdd0a32`
 - **Code CI:** run #256, 300 tests passed; compileall passed.
 - **Handoff documentation CI:** run #257, success.
