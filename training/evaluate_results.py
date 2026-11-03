@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import math
 import re
@@ -96,7 +97,7 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
     ):
         raise ValueError(f"Line {line_number}: invalid suite/case/specialist/system/model identity.")
     computed_case_sha256 = _case_contract_sha256(case_contract, line_number)
-    if not hashlib.compare_digest(case_sha256.lower(), computed_case_sha256):
+    if not hmac.compare_digest(case_sha256.lower(), computed_case_sha256):
         raise ValueError(
             f"Line {line_number}: case_sha256 does not match the canonical prompt and acceptance criteria."
         )
