@@ -9,7 +9,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-from training.train_lora import SPECIALISTS
+SPECIALISTS = ("next_action", "planner", "verifier")
 
 SYSTEMS = ("base", "adapter", "tool_augmented")
 
