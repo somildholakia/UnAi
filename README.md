@@ -66,7 +66,7 @@ The Cloudflare Worker is a deployment scaffold, not a deployed service. It is pu
 
 ## Training and fine-tuning
 
-The training directory contains M5 specialist infrastructure: consent/license/verification-gated trajectories, deterministic repository-disjoint train/eval splits, separate next-action/planner/verifier LoRA/QLoRA runs, matched base/adapter/tool-augmented held-out evaluation, and a physical-device release gate. Train on suitable GPU hardware; the 6 GB phone is an inference target, not a training machine. No dataset has been supplied, no weights have been trained, and no Android release benchmark is claimed complete.
+The training directory contains M5 specialist infrastructure: consent/license/verification-gated trajectories, deterministic repository-disjoint train/eval splits, separate next-action/planner/verifier LoRA/QLoRA runs, matched base/adapter/tool-augmented held-out evaluation with case-content fingerprints and exact paired significance, and a physical-device release gate. Train on suitable GPU hardware; the 6 GB phone is an inference target, not a training machine. No dataset has been supplied, no weights have been trained, and no Android release benchmark is claimed complete.
 
 Read training/README.md before preparing data. Never train on private conversations or repositories without explicit permission and compatible licenses.
 
