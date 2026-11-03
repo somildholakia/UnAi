@@ -1146,14 +1146,9 @@ def test_async_classmethod_uses_bound_cls_and_asyncio_run(tmp_path: Path) -> Non
     "source,symbol_name,error",
     [
         (
-            "class Calculator:" + chr(10) + "    def add(self, value):" + chr(10) + "        return value" + chr(10),
-            "Calculator.add",
-            "Only explicitly decorated @staticmethod and @classmethod",
-        ),
-        (
             "class Calculator:" + chr(10) + "    @property" + chr(10) + "    def add(self):" + chr(10) + "        return 1" + chr(10),
             "Calculator.add",
-            "Only explicitly decorated @staticmethod and @classmethod",
+            "Only explicitly decorated @staticmethod/@classmethod",
         ),
         (
             "def marker(fn):" + chr(10) + "    return fn" + chr(10) + "@marker" + chr(10) + "def add(value):" + chr(10) + "    return value" + chr(10),
@@ -1226,13 +1221,13 @@ def test_classmethod_bound_parameter_is_not_exposed_as_oracle_argument(tmp_path:
 def test_instance_method_uses_explicit_json_constructor_fixture(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
-        "class Counter:\\n"
-        "    def __init__(self, start, step=1):\\n"
-        "        self.value = start\\n"
-        "        self.step = step\\n"
-        "    def advance(self, amount=1):\\n"
-        "        self.value += amount * self.step\\n"
-        "        return self.value\\n",
+        "class Counter:\n"
+        "    def __init__(self, start, step=1):\n"
+        "        self.value = start\n"
+        "        self.step = step\n"
+        "    def advance(self, amount=1):\n"
+        "        self.value += amount * self.step\n"
+        "        return self.value\n",
         encoding="utf-8",
     )
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
@@ -1278,11 +1273,11 @@ def test_instance_method_uses_explicit_json_constructor_fixture(tmp_path: Path) 
 def test_async_instance_method_uses_fresh_constructor_fixture(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
-        "class AsyncCounter:\\n"
-        "    def __init__(self, start):\\n"
-        "        self.value = start\\n"
-        "    async def advance(self, amount):\\n"
-        "        return self.value + amount\\n",
+        "class AsyncCounter:\n"
+        "    def __init__(self, start):\n"
+        "        self.value = start\n"
+        "    async def advance(self, amount):\n"
+        "        return self.value + amount\n",
         encoding="utf-8",
     )
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
@@ -1317,32 +1312,32 @@ def test_async_instance_method_uses_fresh_constructor_fixture(tmp_path: Path) ->
     "source,instance_arguments,error",
     [
         (
-            "class Counter:\\n    def __init__(self, start):\\n        self.start = start\\n"
-            "    def read(self, amount):\\n        return self.start + amount\\n",
+            "class Counter:\n    def __init__(self, start):\n        self.start = start\n"
+            "    def read(self, amount):\n        return self.start + amount\n",
             {},
             "missing required constructor parameters: start",
         ),
         (
-            "class Counter:\\n    def __init__(self):\\n        pass\\n"
-            "    def read(self, amount):\\n        return amount\\n",
+            "class Counter:\n    def __init__(self):\n        pass\n"
+            "    def read(self, amount):\n        return amount\n",
             {"unexpected": 1},
             "unknown constructor parameters: unexpected",
         ),
         (
-            "class Base:\\n    pass\\nclass Counter(Base):\\n"
-            "    def read(self, amount):\\n        return amount\\n",
+            "class Base:\n    pass\nclass Counter(Base):\n"
+            "    def read(self, amount):\n        return amount\n",
             {},
             "without bases or metaclass keywords",
         ),
         (
-            "class Counter:\\n    def __new__(cls):\\n        return object.__new__(cls)\\n"
-            "    def read(self, amount):\\n        return amount\\n",
+            "class Counter:\n    def __new__(cls):\n        return object.__new__(cls)\n"
+            "    def read(self, amount):\n        return amount\n",
             {},
             "custom __new__",
         ),
         (
-            "class Counter:\\n    async def __init__(self):\\n        pass\\n"
-            "    def read(self, amount):\\n        return amount\\n",
+            "class Counter:\n    async def __init__(self):\n        pass\n"
+            "    def read(self, amount):\n        return amount\n",
             {},
             "synchronous, undecorated method",
         ),
@@ -1380,10 +1375,10 @@ def test_instance_method_rejects_unsafe_or_invalid_fixture_construction(
 def test_instance_fixture_is_rejected_for_static_method_targets(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(
-        "class Calculator:\\n"
-        "    @staticmethod\\n"
-        "    def add(value):\\n"
-        "        return value + 1\\n",
+        "class Calculator:\n"
+        "    @staticmethod\n"
+        "    def add(value):\n"
+        "        return value + 1\n",
         encoding="utf-8",
     )
     fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
