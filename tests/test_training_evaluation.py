@@ -103,7 +103,7 @@ def test_evaluate_rows_rejects_missing_systems_duplicate_rows_and_unverified_too
 
     no_trace = [_row("case-1", system, True) for system in ("base", "adapter", "tool_augmented")]
     no_trace[-1].pop("tool_trace")
-    with pytest.raises(ValueError, match="require tool names and evidence IDs"):
+    with pytest.raises(ValueError, match="require named tools and evidence IDs"):
         evaluate_rows(no_trace)
 
 
