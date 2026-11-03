@@ -1,8 +1,8 @@
 """Bounded Python AST graph with incremental SQLite persistence.
 
-Only source fingerprints, symbol ranges and relationships are cached; source
-bodies are never stored. Every refresh hashes candidate files, reparses only
-changed/missing files, and atomically publishes a complete graph snapshot.
+Call edges are conservative static relationships: only unambiguous local or
+explicitly imported function/method targets are linked. Dynamic dispatch,
+unknown attributes and runtime behavior are not inferred.
 """
 from __future__ import annotations
 
@@ -21,6 +21,9 @@ MAX_FILES = 1_500
 MAX_FILE_BYTES = 300_000
 MAX_SYMBOLS = 12_000
 MAX_EDGES = 24_000
+MAX_CALL_SITES_PER_FILE = 100
+MAX_CALL_SITES = 12_000
+_GRAPH_RECORD_VERSION = 2
 
 
 def _is_test_file(path: Path) -> bool:
@@ -32,6 +35,15 @@ def _module_name(relative: Path) -> str:
     if parts and parts[-1] == "__init__":
         parts.pop()
     return ".".join(parts)
+
+
+def _dotted_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        return f"{parent}.{node.attr}" if parent else None
+    return None
 
 
 class _SymbolVisitor(ast.NodeVisitor):
@@ -117,26 +129,77 @@ class _SymbolVisitor(ast.NodeVisitor):
         self._scope_lines = parent_lines
 
 
-def _import_groups(tree: ast.AST, relative: Path) -> list[list[str]]:
-    """Return import statements as alternative local module paths."""
+class _CallSiteVisitor(ast.NodeVisitor):
+    """Collect bounded dotted-name calls from the innermost lexical function."""
+
+    def __init__(self, path: str, limit: int = MAX_CALL_SITES_PER_FILE) -> None:
+        self.path = path
+        self.limit = max(0, limit)
+        self.class_stack: list[str] = []
+        self.caller_stack: list[str] = []
+        self.call_sites: list[dict[str, Any]] = []
+        self.truncated = False
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.class_stack.append(node.name)
+        for child in node.body:
+            self.visit(child)
+        self.class_stack.pop()
+
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        qualified = ".".join([*self.class_stack, node.name])
+        caller = f"symbol:{self.path}::{qualified}@{node.lineno}"
+        self.caller_stack.append(caller)
+        for child in node.body:
+            self.visit(child)
+        self.caller_stack.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if self.caller_stack:
+            callee = _dotted_name(node.func)
+            if callee:
+                if len(self.call_sites) < self.limit:
+                    self.call_sites.append({
+                        "caller_id": self.caller_stack[-1],
+                        "callee": callee,
+                        "class_name": self.class_stack[-1] if self.class_stack else None,
+                        "line": int(getattr(node, "lineno", 1)),
+                    })
+                else:
+                    self.truncated = True
+        self.generic_visit(node)
+
+
+def _import_base(relative: Path, level: int, module: str | None) -> str:
     current_parts = list(relative.with_suffix("").parts)
     current_package = (
         current_parts
         if current_parts and current_parts[-1] == "__init__"
         else current_parts[:-1]
     )
+    base_parts = list(current_package) if level else []
+    for _ in range(max(0, level - 1)):
+        if base_parts:
+            base_parts.pop()
+    if module:
+        base_parts.extend(module.split("."))
+    return ".".join(base_parts)
+
+
+def _import_groups(tree: ast.AST, relative: Path) -> list[list[str]]:
+    """Return import statements as alternative local module paths."""
     groups: list[list[str]] = []
     for item in ast.walk(tree):
         if isinstance(item, ast.Import):
             groups.extend([[alias.name] for alias in item.names])
         elif isinstance(item, ast.ImportFrom):
-            base_parts = list(current_package) if item.level else []
-            for _ in range(max(0, item.level - 1)):
-                if base_parts:
-                    base_parts.pop()
-            if item.module:
-                base_parts.extend(item.module.split("."))
-            full_module = ".".join(base_parts)
+            full_module = _import_base(relative, item.level, item.module)
             candidates = [full_module] if full_module else []
             for alias in item.names:
                 if alias.name == "*":
@@ -148,6 +211,31 @@ def _import_groups(tree: ast.AST, relative: Path) -> list[list[str]]:
     return groups
 
 
+def _import_bindings(tree: ast.AST, relative: Path) -> list[dict[str, str]]:
+    """Keep only the syntactic names needed for conservative imported-call linking."""
+    bindings: list[dict[str, str]] = []
+    for item in ast.walk(tree):
+        if isinstance(item, ast.Import):
+            for alias in item.names:
+                local = alias.asname or alias.name.split(".")[0]
+                module = alias.name if alias.asname else alias.name.split(".")[0]
+                bindings.append({"kind": "module", "local": local, "module": module, "name": ""})
+        elif isinstance(item, ast.ImportFrom):
+            module = _import_base(relative, item.level, item.module)
+            if not module:
+                continue
+            for alias in item.names:
+                if alias.name == "*":
+                    continue
+                bindings.append({
+                    "kind": "symbol",
+                    "local": alias.asname or alias.name,
+                    "module": module,
+                    "name": alias.name,
+                })
+    return bindings[:2_000]
+
+
 def _parse_file(relative: Path, raw_source: bytes, source_sha256: str) -> dict[str, Any]:
     rel = relative.as_posix()
     file_id = f"file:{rel}"
@@ -157,6 +245,7 @@ def _parse_file(relative: Path, raw_source: bytes, source_sha256: str) -> dict[s
         return {
             "path": rel, "source_sha256": source_sha256, "parse_status": "decode_error",
             "nodes": [], "structural_edges": [], "import_groups": [],
+            "call_sites": [], "call_sites_truncated": False, "import_bindings": [],
             "error": {
                 "path": rel, "kind": type(exc).__name__, "line": None,
                 "message": str(exc)[:240],
@@ -169,6 +258,7 @@ def _parse_file(relative: Path, raw_source: bytes, source_sha256: str) -> dict[s
         return {
             "path": rel, "source_sha256": source_sha256, "parse_status": "syntax_error",
             "nodes": [], "structural_edges": [], "import_groups": [],
+            "call_sites": [], "call_sites_truncated": False, "import_bindings": [],
             "error": {
                 "path": rel, "kind": type(exc).__name__, "line": exc.lineno,
                 "message": str(exc)[:240],
@@ -179,6 +269,8 @@ def _parse_file(relative: Path, raw_source: bytes, source_sha256: str) -> dict[s
     edges: list[dict[str, str]] = []
     visitor = _SymbolVisitor(rel, file_id, nodes, edges, source_sha256, limit=MAX_SYMBOLS)
     visitor.visit(tree)
+    calls = _CallSiteVisitor(rel)
+    calls.visit(tree)
     return {
         "path": rel,
         "source_sha256": source_sha256,
@@ -186,6 +278,9 @@ def _parse_file(relative: Path, raw_source: bytes, source_sha256: str) -> dict[s
         "nodes": nodes,
         "structural_edges": edges,
         "import_groups": _import_groups(tree, relative),
+        "call_sites": calls.call_sites,
+        "call_sites_truncated": calls.truncated,
+        "import_bindings": _import_bindings(tree, relative),
         "error": None,
     }
 
@@ -268,6 +363,140 @@ class PythonCodeGraphIndexer:
         }
         return next(iter(suffix_matches)) if len(suffix_matches) == 1 else None
 
+    @staticmethod
+    def _unique_symbol(
+        symbols_by_path: dict[str, dict[str, list[dict[str, Any]]]],
+        path: str | None,
+        qualified_name: str,
+        allowed_types: set[str],
+    ) -> dict[str, Any] | None:
+        if path is None:
+            return None
+        matches = [
+            item for item in symbols_by_path.get(path, {}).get(qualified_name, [])
+            if item.get("type") in allowed_types
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    @classmethod
+    def _unique_callable(
+        cls,
+        symbols_by_path: dict[str, dict[str, list[dict[str, Any]]]],
+        path: str | None,
+        qualified_name: str,
+    ) -> dict[str, Any] | None:
+        return cls._unique_symbol(
+            symbols_by_path, path, qualified_name, {"function", "method"}
+        )
+
+    @classmethod
+    def _unique_class(
+        cls,
+        symbols_by_path: dict[str, dict[str, list[dict[str, Any]]]],
+        path: str | None,
+        qualified_name: str,
+    ) -> dict[str, Any] | None:
+        return cls._unique_symbol(
+            symbols_by_path, path, qualified_name, {"class"}
+        )
+
+    def _resolve_call_edges(
+        self,
+        files: dict[str, dict[str, Any]],
+        file_by_path: dict[str, str],
+        symbols_by_path: dict[str, dict[str, list[dict[str, Any]]]],
+        module_paths: dict[str, str],
+        add_edge: Any,
+    ) -> tuple[int, int, int]:
+        indexed_sites = 0
+        unresolved_sites = 0
+        instantiation_edges = 0
+        indexed_symbol_ids = {
+            item["id"]
+            for path_symbols in symbols_by_path.values()
+            for values in path_symbols.values()
+            for item in values
+        }
+        for source_path, record in files.items():
+            bindings = record.get("import_bindings", [])
+            for site in record.get("call_sites", []):
+                if indexed_sites >= MAX_CALL_SITES:
+                    return indexed_sites, unresolved_sites, instantiation_edges
+                indexed_sites += 1
+                caller_id = site.get("caller_id")
+                callee = site.get("callee")
+                if not isinstance(caller_id, str) or not isinstance(callee, str):
+                    unresolved_sites += 1
+                    continue
+
+                target: dict[str, Any] | None = None
+                edge_type = "calls"
+                class_name = site.get("class_name")
+                if callee.startswith(("self.", "cls.")) and isinstance(class_name, str):
+                    target = self._unique_callable(
+                        symbols_by_path, source_path, f"{class_name}.{callee.split('.', 1)[1]}"
+                    )
+                elif "." in callee:
+                    first, suffix = callee.split(".", 1)
+                    # Explicit module aliases, e.g. import service as s; s.save().
+                    module_bindings = [
+                        item for item in bindings
+                        if item.get("kind") == "module" and item.get("local") == first
+                    ]
+                    if len(module_bindings) == 1:
+                        module_path = self._resolve_module(module_bindings[0]["module"], module_paths)
+                        target = self._unique_callable(symbols_by_path, module_path, suffix)
+                        if target is None:
+                            target = self._unique_class(symbols_by_path, module_path, suffix)
+                            if target is not None:
+                                edge_type = "instantiates"
+                    if target is None:
+                        # Local class-qualified method calls, e.g. Worker.run().
+                        target = self._unique_callable(symbols_by_path, source_path, callee)
+                    if target is None:
+                        # Imported class aliases, e.g. from worker import Worker as W.
+                        symbol_bindings = [
+                            item for item in bindings
+                            if item.get("kind") == "symbol" and item.get("local") == first
+                        ]
+                        if len(symbol_bindings) == 1:
+                            binding = symbol_bindings[0]
+                            module_path = self._resolve_module(binding["module"], module_paths)
+                            target = self._unique_callable(
+                                symbols_by_path, module_path,
+                                ".".join(part for part in (binding["name"], suffix) if part),
+                            )
+                else:
+                    target = self._unique_callable(symbols_by_path, source_path, callee)
+                    if target is None:
+                        target = self._unique_class(symbols_by_path, source_path, callee)
+                        if target is not None:
+                            edge_type = "instantiates"
+                    if target is None:
+                        symbol_bindings = [
+                            item for item in bindings
+                            if item.get("kind") == "symbol" and item.get("local") == callee
+                        ]
+                        if len(symbol_bindings) == 1:
+                            binding = symbol_bindings[0]
+                            module_path = self._resolve_module(binding["module"], module_paths)
+                            target = self._unique_callable(symbols_by_path, module_path, binding["name"])
+                            if target is None:
+                                target = self._unique_class(symbols_by_path, module_path, binding["name"])
+                                if target is not None:
+                                    edge_type = "instantiates"
+
+                if target is None:
+                    unresolved_sites += 1
+                    continue
+                if caller_id not in indexed_symbol_ids:
+                    unresolved_sites += 1
+                    continue
+                add_edge(caller_id, target["id"], edge_type)
+                if edge_type == "instantiates":
+                    instantiation_edges += 1
+        return indexed_sites, unresolved_sites, instantiation_edges
+
     def _assemble(
         self,
         base: Path,
@@ -297,6 +526,7 @@ class PythonCodeGraphIndexer:
         parsed_files = 0
         symbol_count = 0
         file_by_path: dict[str, str] = {}
+        symbols_by_path: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
         for relative in candidates:
             rel = relative.as_posix()
@@ -323,6 +553,9 @@ class PythonCodeGraphIndexer:
             nodes.extend(selected_nodes)
             symbol_count += len(selected_nodes)
             selected_ids = {item["id"] for item in selected_nodes}
+            symbols_by_path[rel] = {}
+            for item in selected_nodes:
+                symbols_by_path[rel].setdefault(item["qualified_name"], []).append(item)
             structural_edges.extend(
                 edge for edge in record["structural_edges"]
                 if edge["target"] in selected_ids
@@ -376,18 +609,32 @@ class PythonCodeGraphIndexer:
             if test_path in file_by_path and len(targets) == 1 and targets[0] != test_path:
                 add_edge(file_by_path[test_path], file_by_path[targets[0]], "tests")
 
+        call_sites, unresolved_call_sites, instantiation_edges = self._resolve_call_edges(
+            files, file_by_path, symbols_by_path, module_paths, add_edge
+        )
+        call_edges = sum(1 for edge in edges if edge["type"] == "calls")
+        call_sites_truncated = (
+            call_sites >= MAX_CALL_SITES
+            or any(record.get("call_sites_truncated", False) for record in files.values())
+        )
         summary = {
             "files_discovered": len(file_by_path),
             "files_parsed": parsed_files,
             "symbols": symbol_count,
             "internal_import_edges": sum(1 for edge in edges if edge["type"] == "imports"),
             "test_edges": sum(1 for edge in edges if edge["type"] == "tests"),
+            "call_edges": call_edges,
+            "instantiation_edges": instantiation_edges,
+            "call_sites_indexed": call_sites,
+            "call_sites_unresolved": unresolved_call_sites,
+            "call_sites_truncated": call_sites_truncated,
             "external_imports_unresolved": external_imports,
             "parse_errors": len(errors),
             "skipped_large_files": skipped_large,
             "truncated": (
                 walk_truncated or symbol_count >= MAX_SYMBOLS
                 or edge_truncated or len(structural_edges) >= MAX_EDGES
+                or call_sites_truncated
             ),
         }
         return nodes[: MAX_FILES + MAX_SYMBOLS], edges[:MAX_EDGES], summary
@@ -404,6 +651,10 @@ class PythonCodeGraphIndexer:
         if self.store is not None:
             prior_meta, prior_files, prior_edges = self.store.load(root_key, root_path)
 
+        cache_format_current = (
+            prior_meta is not None
+            and int(prior_meta.get("schema_version", 0)) >= _GRAPH_RECORD_VERSION
+        )
         current_files: dict[str, dict[str, Any]] = {}
         files_reparsed = 0
         files_reused = 0
@@ -415,7 +666,7 @@ class PythonCodeGraphIndexer:
                 continue
             source_sha256 = hashlib.sha256(raw).hexdigest()
             rel = relative.as_posix()
-            cached = prior_files.get(rel)
+            cached = prior_files.get(rel) if cache_format_current else None
             if cached is not None and cached["source_sha256"] == source_sha256:
                 record = dict(cached)
                 record["size_bytes"] = size_bytes
@@ -432,6 +683,7 @@ class PythonCodeGraphIndexer:
         removed_count = len(set(prior_files) - set(current_files))
         snapshot_changed = (
             prior_meta is None
+            or not cache_format_current
             or prior_meta["source_fingerprint"] != fingerprint
             or files_reparsed > 0
             or removed_count > 0

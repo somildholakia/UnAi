@@ -133,3 +133,40 @@ async def test_cache_refuses_unknown_future_schema_version(tmp_path: Path) -> No
     (tmp_path / "service.py").write_text("def ok():\n    return True\n", encoding="utf-8")
     with pytest.raises(GraphStoreError, match="newer than supported"):
         await indexer.index(str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_v1_cache_migrates_and_reparses_to_add_static_call_records(tmp_path: Path) -> None:
+    source = tmp_path / "service.py"
+    source.write_text(
+        "def helper():\n    return 1\n\n"
+        "def entry():\n    return helper()\n",
+        encoding="utf-8",
+    )
+    database = tmp_path / "graph.sqlite3"
+    indexer = PythonCodeGraphIndexer(cache_path=database)
+    first = await indexer.index(str(tmp_path))
+    assert first["summary"]["call_edges"] == 1
+
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("ALTER TABLE code_graph_files DROP COLUMN call_sites_json")
+        connection.execute("ALTER TABLE code_graph_files DROP COLUMN call_sites_truncated")
+        connection.execute("ALTER TABLE code_graph_files DROP COLUMN import_bindings_json")
+        connection.execute("UPDATE code_graph_repositories SET schema_version = 1")
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+    finally:
+        connection.close()
+
+    migrated = await indexer.index(str(tmp_path))
+
+    assert migrated["summary"]["cache"]["state"] == "stale"
+    assert migrated["summary"]["cache"]["generation"] == 2
+    assert migrated["summary"]["cache"]["files_reparsed"] == 1
+    assert migrated["summary"]["call_edges"] == 1
+    connection = sqlite3.connect(database)
+    try:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    finally:
+        connection.close()

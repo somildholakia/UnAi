@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 class GraphStoreError(RuntimeError):
@@ -24,6 +24,8 @@ class GraphStoreConflict(GraphStoreError):
 
 
 class SQLiteCodeGraphStore:
+    schema_version = _SCHEMA_VERSION
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
@@ -50,56 +52,73 @@ class SQLiteCodeGraphStore:
 
         try:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS code_graph_repositories (
-                    root_key TEXT PRIMARY KEY,
-                    root_path TEXT NOT NULL,
-                    source_fingerprint TEXT NOT NULL,
-                    generation INTEGER NOT NULL CHECK(generation > 0),
-                    refreshed_at TEXT NOT NULL,
-                    schema_version INTEGER NOT NULL
+            if version == 0:
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS code_graph_repositories (
+                        root_key TEXT PRIMARY KEY,
+                        root_path TEXT NOT NULL,
+                        source_fingerprint TEXT NOT NULL,
+                        generation INTEGER NOT NULL CHECK(generation > 0),
+                        refreshed_at TEXT NOT NULL,
+                        schema_version INTEGER NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS code_graph_files (
-                    root_key TEXT NOT NULL REFERENCES code_graph_repositories(root_key)
-                        ON DELETE CASCADE,
-                    path TEXT NOT NULL,
-                    source_sha256 TEXT NOT NULL,
-                    size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
-                    mtime_ns INTEGER NOT NULL,
-                    parse_status TEXT NOT NULL CHECK(
-                        parse_status IN ('parsed', 'syntax_error', 'decode_error')
-                    ),
-                    nodes_json TEXT NOT NULL,
-                    structural_edges_json TEXT NOT NULL,
-                    import_groups_json TEXT NOT NULL,
-                    error_json TEXT,
-                    PRIMARY KEY(root_key, path)
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS code_graph_files (
+                        root_key TEXT NOT NULL REFERENCES code_graph_repositories(root_key)
+                            ON DELETE CASCADE,
+                        path TEXT NOT NULL,
+                        source_sha256 TEXT NOT NULL,
+                        size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+                        mtime_ns INTEGER NOT NULL,
+                        parse_status TEXT NOT NULL CHECK(
+                            parse_status IN ('parsed', 'syntax_error', 'decode_error')
+                        ),
+                        nodes_json TEXT NOT NULL,
+                        structural_edges_json TEXT NOT NULL,
+                        import_groups_json TEXT NOT NULL,
+                        call_sites_json TEXT NOT NULL DEFAULT '[]',
+                        call_sites_truncated INTEGER NOT NULL DEFAULT 0,
+                        import_bindings_json TEXT NOT NULL DEFAULT '[]',
+                        error_json TEXT,
+                        PRIMARY KEY(root_key, path)
+                    )
+                    """
                 )
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS code_graph_edges (
-                    root_key TEXT NOT NULL REFERENCES code_graph_repositories(root_key)
-                        ON DELETE CASCADE,
-                    source_id TEXT NOT NULL,
-                    target_id TEXT NOT NULL,
-                    edge_type TEXT NOT NULL,
-                    PRIMARY KEY(root_key, source_id, target_id, edge_type)
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS code_graph_edges (
+                        root_key TEXT NOT NULL REFERENCES code_graph_repositories(root_key)
+                            ON DELETE CASCADE,
+                        source_id TEXT NOT NULL,
+                        target_id TEXT NOT NULL,
+                        edge_type TEXT NOT NULL,
+                        PRIMARY KEY(root_key, source_id, target_id, edge_type)
+                    )
+                    """
                 )
-                """
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_code_graph_files_root ON code_graph_files(root_key, path)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_code_graph_edges_root ON code_graph_edges(root_key, edge_type)"
-            )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_code_graph_files_root ON code_graph_files(root_key, path)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_code_graph_edges_root ON code_graph_edges(root_key, edge_type)"
+                )
+            elif version == 1:
+                # Existing file graph rows are retained. The indexer sees the
+                # repository's version=1 marker and reparses its files once to
+                # populate these newly introduced static-call fields.
+                connection.execute(
+                    "ALTER TABLE code_graph_files ADD COLUMN call_sites_json TEXT NOT NULL DEFAULT '[]'"
+                )
+                connection.execute(
+                    "ALTER TABLE code_graph_files ADD COLUMN call_sites_truncated INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    "ALTER TABLE code_graph_files ADD COLUMN import_bindings_json TEXT NOT NULL DEFAULT '[]'"
+                )
             connection.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
             connection.commit()
         except Exception:
@@ -127,7 +146,8 @@ class SQLiteCodeGraphStore:
             rows = connection.execute(
                 """
                 SELECT path, source_sha256, size_bytes, mtime_ns, parse_status,
-                       nodes_json, structural_edges_json, import_groups_json, error_json
+                       nodes_json, structural_edges_json, import_groups_json,
+                       call_sites_json, call_sites_truncated, import_bindings_json, error_json
                 FROM code_graph_files WHERE root_key = ? ORDER BY path
                 """,
                 (root_key,),
@@ -143,6 +163,9 @@ class SQLiteCodeGraphStore:
                         "nodes": json.loads(row["nodes_json"]),
                         "structural_edges": json.loads(row["structural_edges_json"]),
                         "import_groups": json.loads(row["import_groups_json"]),
+                        "call_sites": json.loads(row["call_sites_json"]),
+                        "call_sites_truncated": bool(row["call_sites_truncated"]),
+                        "import_bindings": json.loads(row["import_bindings_json"]),
                         "error": json.loads(row["error_json"]) if row["error_json"] else None,
                     }
                 except (TypeError, ValueError, json.JSONDecodeError):
@@ -228,8 +251,9 @@ class SQLiteCodeGraphStore:
                 """
                 INSERT INTO code_graph_files(
                     root_key, path, source_sha256, size_bytes, mtime_ns, parse_status,
-                    nodes_json, structural_edges_json, import_groups_json, error_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    nodes_json, structural_edges_json, import_groups_json,
+                    call_sites_json, call_sites_truncated, import_bindings_json, error_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(root_key, path) DO UPDATE SET
                     source_sha256=excluded.source_sha256,
                     size_bytes=excluded.size_bytes,
@@ -238,6 +262,9 @@ class SQLiteCodeGraphStore:
                     nodes_json=excluded.nodes_json,
                     structural_edges_json=excluded.structural_edges_json,
                     import_groups_json=excluded.import_groups_json,
+                    call_sites_json=excluded.call_sites_json,
+                    call_sites_truncated=excluded.call_sites_truncated,
+                    import_bindings_json=excluded.import_bindings_json,
                     error_json=excluded.error_json
                 """,
                 [
@@ -247,6 +274,9 @@ class SQLiteCodeGraphStore:
                         json.dumps(item["nodes"], ensure_ascii=False, separators=(",", ":")),
                         json.dumps(item["structural_edges"], ensure_ascii=False, separators=(",", ":")),
                         json.dumps(item["import_groups"], ensure_ascii=False, separators=(",", ":")),
+                        json.dumps(item["call_sites"], ensure_ascii=False, separators=(",", ":")),
+                        int(bool(item.get("call_sites_truncated", False))),
+                        json.dumps(item["import_bindings"], ensure_ascii=False, separators=(",", ":")),
                         json.dumps(item["error"], ensure_ascii=False, separators=(",", ":"))
                         if item["error"] is not None else None,
                     )
