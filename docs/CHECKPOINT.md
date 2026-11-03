@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure implemented; CI passed (262 tests)
+**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure implemented; CI passed (277 tests)
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -26,8 +26,8 @@
 **Current integration PR:** https://github.com/somildholakia/UnAi/pull/28 (combined PR against main; includes the publisher trust-bundle work formerly in PR #27)
 **Earlier publisher trust-bundle PR:** https://github.com/somildholakia/UnAi/pull/27 (overlapping predecessor; do not merge separately while PR #28 is the integration PR)
 **Current feature branch:** `feat/m4-instance-methods-m5-specialists`
-**Current feature head:** `0fe7aea602baa2e4aed82fddc71ba75d76f86852`
-**CI:** run #209 — 262 tests passed; compileall passed.
+**Latest code-validation commit:** `37152a46fae2f74c81900d1de8e328473548664a`
+**CI:** run #225 — 277 tests passed in 7.05s; Python compile check passed.
 **Working tree:** GitHub commits only; no local model training has been run.
 
 ### M4 additions in this continuation
