@@ -7,6 +7,7 @@ hidden, symlinked, and oversized files.
 from __future__ import annotations
 
 import ast
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -38,12 +39,14 @@ class _SymbolVisitor(ast.NodeVisitor):
         file_id: str,
         nodes: list[dict[str, Any]],
         edges: list[dict[str, str]],
+        source_sha256: str,
         limit: int = MAX_SYMBOLS,
     ) -> None:
         self.path = path
         self.file_id = file_id
         self.nodes = nodes
         self.edges = edges
+        self.source_sha256 = source_sha256
         self.limit = max(0, limit)
         self.scope: list[str] = []
         self.scope_kinds: list[str] = []
@@ -65,6 +68,7 @@ class _SymbolVisitor(ast.NodeVisitor):
             "start_line": line,
             "end_line": end_line,
             "is_test": _is_test_file(Path(self.path)),
+            "source_sha256": self.source_sha256,
         })
         parent_id = self.file_id if not self.scope else f"symbol:{self.path}::{'.'.join(self.scope)}@{self._scope_lines[-1]}"
         edge_kind = "defines" if not self.scope else "contains"
@@ -155,6 +159,7 @@ class PythonCodeGraphIndexer:
         edges: list[dict[str, str]] = []
         errors: list[dict[str, Any]] = []
         file_by_path: dict[str, str] = {}
+        file_nodes_by_path: dict[str, dict[str, Any]] = {}
         external_imports = 0
         parsed_files = 0
         symbol_count = 0
@@ -164,13 +169,16 @@ class PythonCodeGraphIndexer:
             file_id = f"file:{rel}"
             file_by_path[rel] = file_id
             test_file = _is_test_file(relative)
-            nodes.append({
+            file_node = {
                 "id": file_id,
                 "type": "file",
                 "name": relative.name,
                 "path": rel,
                 "is_test": test_file,
-            })
+                "source_sha256": None,
+            }
+            nodes.append(file_node)
+            file_nodes_by_path[rel] = file_node
 
         def add_import(source_id: str, module: str) -> bool:
             target_path = module_paths.get(module)
@@ -205,6 +213,8 @@ class PythonCodeGraphIndexer:
                 if len(raw_source) > MAX_FILE_BYTES:
                     skipped_large += 1
                     continue
+                source_sha256 = hashlib.sha256(raw_source).hexdigest()
+                file_nodes_by_path[rel]["source_sha256"] = source_sha256
                 source = raw_source.decode("utf-8")
                 tree = ast.parse(source, filename=rel)
                 parsed_files += 1
@@ -220,7 +230,12 @@ class PythonCodeGraphIndexer:
             if symbol_count >= MAX_SYMBOLS:
                 break
             visitor = _SymbolVisitor(
-                rel, file_id, nodes, edges, limit=MAX_SYMBOLS - symbol_count
+                rel,
+                file_id,
+                nodes,
+                edges,
+                source_sha256=source_sha256,
+                limit=MAX_SYMBOLS - symbol_count,
             )
             visitor.visit(tree)
             symbol_count += visitor.symbol_count

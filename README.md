@@ -51,7 +51,7 @@ A mismatching return value is recorded as a counterexample against the supplied 
 
 ## Repository code graph — Python AST prototype
 
-The indexing subsystem now includes a bounded Python AST graph for files, classes, functions, methods, internal imports, and heuristic test-to-source links. Graph entries point to line ranges instead of storing source bodies. It skips generated/hidden directories, symlinks, and oversized files; it reports parse errors and truncation. This first version is Python-only and does not yet persist or incrementally refresh the graph. See docs/CODE_GRAPH.md.
+The indexing subsystem includes a bounded Python AST graph for files, classes, functions, methods, imports, and heuristic test-to-source links. Symbol ranges carry SHA-256 fingerprints of the exact source bytes parsed. After an approved task inspection, `GET /api/tasks/{task_id}/context` returns small excerpts only for symbols discovered by that task; the current file hash must still match the inspection hash or the request fails closed with HTTP 409. Excerpts have strict line/character budgets and never become a general arbitrary-path reader. The graph remains Python-only and rebuilds on demand; SQLite persistence and incremental refresh are still open. See docs/CODE_GRAPH.md.
 
 ## unAI Brain — Obsidian-style memory
 

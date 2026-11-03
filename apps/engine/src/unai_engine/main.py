@@ -19,7 +19,8 @@ from unai_engine.models import (
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
     WorkspaceFileSnapshot, TaskProofResponse, ProbeRequest, ProbeResponse,
-    TaskQualityCheckResponse, EvidenceRecord, GroundedTestApprovalRequest,
+    TaskQualityCheckResponse, TaskCodeContextResponse, CodeContextSlice,
+    EvidenceRecord, GroundedTestApprovalRequest,
     GroundedTestResponse, TaskProofBundleResponse,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
@@ -342,6 +343,144 @@ def task_evidence(task_id: str) -> TaskEvidenceSnapshot:
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Task evidence not found.")
     return snapshot
+
+
+@app.get("/api/tasks/{task_id}/context", response_model=TaskCodeContextResponse)
+def task_code_context(
+    task_id: str,
+    limit: int = Query(default=5, ge=1, le=10),
+    context_lines: int = Query(default=4, ge=0, le=8),
+) -> TaskCodeContextResponse:
+    """Return bounded, hash-pinned excerpts for symbols found by this approved inspection."""
+    snapshot = evidence_ledger.get_snapshot(task_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Task evidence not found.")
+    if snapshot.status != "inspection_complete":
+        raise HTTPException(status_code=409, detail="Task must complete inspection before context retrieval.")
+    if "workspace_read" not in snapshot.contract.permissions:
+        raise HTTPException(status_code=403, detail="This task has not explicitly approved workspace_read.")
+
+    discovery = next(
+        (
+            item for item in reversed(snapshot.evidence)
+            if item.kind == "discovery" and item.source == "symbol-retrieval"
+        ),
+        None,
+    )
+    matches = discovery.metadata.get("matches", []) if discovery else []
+    slices: list[CodeContextSlice] = []
+    total_characters = 0
+    seen: set[tuple[str, str, int, int]] = set()
+    max_slice_lines = 120
+    max_slice_characters = 6_000
+    max_total_characters = 24_000
+
+    for match in matches:
+        if len(slices) >= limit or not isinstance(match, dict):
+            break
+        path = match.get("path")
+        name = match.get("name")
+        kind = match.get("kind")
+        expected_sha = match.get("source_sha256")
+        start_line = match.get("start_line")
+        end_line = match.get("end_line")
+        if (
+            not isinstance(path, str)
+            or not isinstance(name, str)
+            or kind not in {"function", "method", "class"}
+            or not isinstance(expected_sha, str)
+            or len(expected_sha) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in expected_sha)
+            or not isinstance(start_line, int)
+            or isinstance(start_line, bool)
+            or not isinstance(end_line, int)
+            or isinstance(end_line, bool)
+            or start_line < 1
+            or end_line < start_line
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Inspection lacks valid source fingerprints; re-inspect the workspace.",
+            )
+        identity = (path, name, start_line, end_line)
+        if identity in seen:
+            continue
+        seen.add(identity)
+
+        try:
+            source = patch_manager.read_file(task_id, path, settings.workspace_root)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+        except PatchRejected as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except PatchConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        if source.sha256.casefold() != expected_sha.casefold():
+            raise HTTPException(
+                status_code=409,
+                detail=f"Source changed since inspection ({path}); re-inspect before retrieving context.",
+            )
+
+        lines = source.content.splitlines()
+        if end_line > len(lines):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Source line range changed since inspection ({path}); re-inspect before retrieving context.",
+            )
+        excerpt_start = max(1, start_line - context_lines)
+        requested_end = min(len(lines), end_line + context_lines)
+        line_end = min(requested_end, excerpt_start + max_slice_lines - 1)
+        remaining_total = max_total_characters - total_characters
+        character_budget = min(max_slice_characters, remaining_total)
+        numbered: list[str] = []
+        excerpt_end = excerpt_start - 1
+        used_characters = 0
+        truncated = line_end < requested_end
+        for line_number in range(excerpt_start, line_end + 1):
+            line = f"{line_number}: {lines[line_number - 1]}"
+            separator = 1 if numbered else 0
+            available = character_budget - used_characters - separator
+            if available <= 0:
+                truncated = True
+                break
+            if len(line) > available:
+                if not numbered:
+                    numbered.append(line[:available])
+                    used_characters += available
+                    excerpt_end = line_number
+                truncated = True
+                break
+            numbered.append(line)
+            used_characters += separator + len(line)
+            excerpt_end = line_number
+        content = "\n".join(numbered)
+        if not content:
+            break
+        total_characters += len(content)
+        slices.append(
+            CodeContextSlice(
+                path=path,
+                name=name,
+                kind=kind,
+                source_start_line=start_line,
+                source_end_line=end_line,
+                excerpt_start_line=excerpt_start,
+                excerpt_end_line=max(excerpt_start, excerpt_end),
+                sha256=source.sha256,
+                content=content,
+                truncated=truncated,
+            )
+        )
+        if total_characters >= max_total_characters:
+            break
+
+    return TaskCodeContextResponse(
+        task_id=task_id,
+        workspace=snapshot.workspace,
+        slices=slices,
+        total_characters=total_characters,
+    )
 
 
 @app.get("/api/plugins")

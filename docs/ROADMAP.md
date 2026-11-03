@@ -15,7 +15,7 @@
 - [x] Bounded Python AST graph for file/symbol/import/test relationships with source ranges.
 - [x] Parse goals into typed acceptance checks, constraints and approval-aware permissions.
 - [ ] Persist file/symbol/import/test graph with source-range references.
-- [ ] Retrieve bounded, task-specific code slices rather than whole repositories.
+- [x] Retrieve bounded, task-specific code slices only from symbols found during approved inspection, with source-hash freshness checks and strict line/character budgets.
 
 ## M3 — Evidence-producing agent loop
 - [x] Installation-wide bearer-token gate; tokenless access is restricted to loopback peers.

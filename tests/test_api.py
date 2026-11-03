@@ -600,3 +600,69 @@ def test_specialist_chat_endpoint_rejects_unknown_role() -> None:
         json={"message": "Do work."},
     )
     assert response.status_code == 422
+
+
+
+def test_task_context_returns_hash_pinned_bounded_symbol_slices(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total bug and add a regression test",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    response = client.get(f"/api/tasks/{task_id}/context?limit=3&context_lines=1")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["task_id"] == task_id
+    assert body["slices"]
+    first = body["slices"][0]
+    assert first["path"] == "service.py"
+    assert first["name"] == "calculate_total"
+    assert "def calculate_total(items):" in first["content"]
+    assert "return sum(items)" in first["content"]
+    assert len(first["sha256"]) == 64
+    assert body["total_characters"] <= 24_000
+
+
+def test_task_context_requires_approved_workspace_read(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total bug",
+            "workspace": "demo",
+            "permissions": [],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    assert client.get(f"/api/tasks/{task_id}/context").status_code == 409
+
+
+def test_task_context_rejects_source_changed_after_inspection(tmp_path, monkeypatch) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total bug",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    (workspace_root / "demo" / "service.py").write_text(
+        "def calculate_total(items):\n    return len(items)\n",
+        encoding="utf-8",
+    )
+
+    response = client.get(f"/api/tasks/{task_id}/context")
+    assert response.status_code == 409
+    assert "re-inspect" in response.json()["detail"].lower()

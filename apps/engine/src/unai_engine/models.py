@@ -100,6 +100,7 @@ class SymbolReference(BaseModel):
     kind: Literal["function", "method", "class"]
     start_line: int = Field(ge=1)
     end_line: int = Field(ge=1)
+    source_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
     score: int = Field(ge=1)
     matched_terms: list[str] = Field(default_factory=list)
 
@@ -144,6 +145,26 @@ class WorkspaceFileSnapshot(BaseModel):
     size_bytes: int = Field(ge=0)
     encoding: Literal["utf-8"] = "utf-8"
     content: str
+
+
+class CodeContextSlice(BaseModel):
+    path: str
+    name: str
+    kind: Literal["function", "method", "class"]
+    source_start_line: int = Field(ge=1)
+    source_end_line: int = Field(ge=1)
+    excerpt_start_line: int = Field(ge=1)
+    excerpt_end_line: int = Field(ge=1)
+    sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    content: str
+    truncated: bool = False
+
+
+class TaskCodeContextResponse(BaseModel):
+    task_id: str
+    workspace: str
+    slices: list[CodeContextSlice] = Field(default_factory=list)
+    total_characters: int = Field(ge=0)
 
 
 class PatchProposalRequest(BaseModel):
