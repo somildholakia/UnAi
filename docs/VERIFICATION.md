@@ -154,7 +154,7 @@ contains exactly:
   timezone-aware `not_before`/`not_after` plus a boolean `revoked`.
 
 The verifier rejects duplicate JSON members, unsupported fields, invalid keys,
-wildcard/localhost domains, more than 256 publishers, bundles larger than
+wildcard/localhost/IP-literal domains, more than 256 publishers, bundles larger than
 256 KiB, expired/future-issued bundles, validity periods longer than 30 days,
 untrusted root IDs, invalid signatures and sequences below the configured
 minimum. The verified bundle's sequence, root key ID, expiry and canonical
