@@ -16,7 +16,22 @@ def _row(case_id: str, system: str, passed: bool, *, specialist: str = "next_act
         "schema": "unai.benchmark-result.v1",
         "suite_id": "heldout-v1",
         "case_id": case_id,
-        "case_sha256": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
+        "case_contract": {
+            "prompt": f"Task for {case_id}",
+            "acceptance_criteria": ["isolated task acceptance"],
+        },
+        "case_sha256": hashlib.sha256(
+            json.dumps(
+                {
+                    "prompt": f"Task for {case_id}",
+                    "acceptance_criteria": ["isolated task acceptance"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest(),
         "specialist": specialist,
         "system": system,
         "model_id": {
@@ -80,6 +95,7 @@ def test_benchmark_result_schema_is_valid_json_and_requires_case_identity() -> N
     schema_path = Path(__file__).resolve().parents[1] / "training" / "schemas" / "benchmark-result.schema.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     assert schema["properties"]["schema"]["const"] == "unai.benchmark-result.v1"
+    assert "case_contract" in schema["required"]
     assert "case_sha256" in schema["required"]
     assert "provenance" in schema["required"]
     assert schema["properties"]["case_sha256"]["pattern"] == "^[a-fA-F0-9]{64}$"
@@ -139,10 +155,22 @@ def test_exact_mcnemar_requires_sufficient_paired_evidence() -> None:
     assert small["statistical_gate"]["adapter_passed"] is False
 
 
-def test_evaluate_rows_rejects_mismatched_case_content_hashes() -> None:
+def test_evaluate_rows_recomputes_case_hash_from_prompt_and_acceptance_criteria() -> None:
     rows = [_row("case-hash", system, True) for system in ("base", "adapter", "tool_augmented")]
     rows[1]["case_sha256"] = "f" * 64
-    with pytest.raises(ValueError, match="Case content hash mismatch"):
+    with pytest.raises(ValueError, match="does not match the canonical prompt"):
+        evaluate_rows(rows)
+
+    rows = [_row("case-content-change", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[2]["case_contract"]["acceptance_criteria"] = ["a changed criterion"]
+    with pytest.raises(ValueError, match="does not match the canonical prompt"):
+        evaluate_rows(rows)
+
+
+def test_evaluate_rows_rejects_invalid_case_contract_structure() -> None:
+    rows = [_row("bad-case-contract", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[0]["case_contract"]["unexpected"] = "value"
+    with pytest.raises(ValueError, match="case_contract must contain only"):
         evaluate_rows(rows)
 
 
