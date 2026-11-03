@@ -41,7 +41,7 @@ The model cannot choose another workspace or supply its own permission grant. Ke
 
 ## M4 grounded verification — early prototype
 
-AST-generated boundary candidates remain unverified until a caller supplies explicit expected outputs and an oracle reference. The grounded workflow checks the source SHA-256, validates the function signature and probe origin, generates a fixed pytest harness and runs it only in the existing disposable Docker staging copy.
+AST-generated boundary candidates remain unverified until a caller supplies explicit expected outputs and an oracle reference. The grounded workflow checks the source SHA-256, validates the function signature and probe origin, generates a fixed pytest harness and runs it only in the existing disposable Docker staging copy. Supported targets include module functions, static/class methods and ordinary methods on undecorated top-level classes with bounded JSON constructor fixtures; constructor hashes are part of reviewer attestations.
 
 - Generate unverified candidates: \`POST /api/tasks/{task_id}/probes\`.
 - Supply user/specification cases and the exact \`run-grounded-oracle-tests\` confirmation: \`POST /api/tasks/{task_id}/grounded-tests\`.
@@ -66,7 +66,7 @@ The Cloudflare Worker is a deployment scaffold, not a deployed service. It is pu
 
 ## Training and fine-tuning
 
-The training directory contains a provenance/consent/verification-gated data preparation pipeline, LoRA/QLoRA supervised fine-tuning, and a second-stage DPO preference harness. Train on suitable GPU hardware, then evaluate and export an adapter for a compatible local runtime. The phone is an inference target, not a training machine. No training run or adapter is claimed complete.
+The training directory contains M5 specialist infrastructure: consent/license/verification-gated trajectories, deterministic repository-disjoint train/eval splits, separate next-action/planner/verifier LoRA/QLoRA runs, matched base/adapter/tool-augmented held-out evaluation, and a physical-device release gate. Train on suitable GPU hardware; the 6 GB phone is an inference target, not a training machine. No dataset has been supplied, no weights have been trained, and no Android release benchmark is claimed complete.
 
 Read training/README.md before preparing data. Never train on private conversations or repositories without explicit permission and compatible licenses.
 
