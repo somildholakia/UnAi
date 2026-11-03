@@ -1901,6 +1901,7 @@ class GroundedTestVerifier:
                 "key_not_before": not_before.isoformat() if not_before is not None else None,
                 "key_not_after": not_after.isoformat() if not_after is not None else None,
                 "statement_sha256": attestation_statement_sha256(statement),
+                "trust_bundle": trusted_entry.get("_trust_bundle"),
             }
             publisher_signatures[case["case_id"]] = publisher.signature_b64
             # Signatures remain in append-only evidence, not generated pytest input.
