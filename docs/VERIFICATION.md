@@ -128,6 +128,50 @@ Key rotation is operator-managed. Multiple key IDs may share one issuer. Add a r
 
 The expected values and request fields are serialized as JSON data embedded in a fixed generated pytest template. Caller text is never interpolated as Python statements. For async targets the fixed harness imports asyncio and invokes the coroutine with asyncio.run; it does not accept caller-provided event-loop code or commands. The generated test is placed in unai_generated_tests/ inside the disposable filtered copy only; it is not written to the original workspace. The existing fixed command python -m pytest -q is executed through Docker with networking disabled and the existing CPU, memory, PID and timeout limits. There is no host-shell fallback.
 
+### Operator-rooted publisher trust-bundle snapshots
+
+For deployments that manage many publisher keys, the Engine can load one
+offline signed trust-bundle snapshot instead of the direct
+`UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS` registry. Configure an operator-pinned
+Ed25519 root keyring and the signed snapshot:
+
+```dotenv
+UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS={}
+UNAI_ORACLE_PUBLISHER_TRUST_ROOTS={"offline-root-2026":"<base64 raw 32-byte Ed25519 public key>"}
+UNAI_ORACLE_PUBLISHER_TRUST_BUNDLE=<compact JSON envelope>
+UNAI_ORACLE_PUBLISHER_TRUST_MIN_SEQUENCE=42
+```
+
+The envelope contains exactly `payload` and `signature_b64`. The root signs
+the canonical UTF-8 JSON payload (sorted keys, compact separators, no NaN)
+with Ed25519. The payload schema is `unai.publisher-trust-bundle.v1` and
+contains exactly:
+
+- `schema`, `root_key_id`, positive 64-bit `sequence`,
+  timezone-aware `issued_at` and `expires_at`, and a `publishers` object.
+- Each publisher entry contains a stable key ID, raw 32-byte Ed25519 public key
+  in base64, issuer label, exact DNS `allowed_domains`, and optional
+  timezone-aware `not_before`/`not_after` plus a boolean `revoked`.
+
+The verifier rejects duplicate JSON members, unsupported fields, invalid keys,
+wildcard/localhost/IP-literal domains, more than 256 publishers, bundles larger than
+256 KiB, expired/future-issued bundles, validity periods longer than 30 days,
+untrusted root IDs, invalid signatures and sequences below the configured
+minimum. The verified bundle's sequence, root key ID, expiry and canonical
+payload digest are included in publisher-attestation provenance in the
+append-only oracle evidence.
+
+Choose exactly one configuration mode: direct publisher keys or a signed
+bundle. The direct keyring remains supported for backward compatibility.
+Rollback protection is operator-managed: raise
+`UNAI_ORACLE_PUBLISHER_TRUST_MIN_SEQUENCE` to the last accepted sequence when
+advancing the snapshot. The Engine does not persist that floor automatically,
+fetch bundles, discover roots, query a transparency log, validate certificate
+chains or establish an issuer's legal identity. The root key and minimum
+sequence must be provisioned through a trusted operator channel. A valid root
+signature authenticates the exact key snapshot, not the factual correctness
+of publisher metadata, a specification, or a derived test assertion.
+
 ### Property-oracle case
 
 An exact oracle case supplies `expected_output`. A property-oracle case omits `expected_output` and supplies a fixed `oracle_property` object instead. The two forms are mutually exclusive.

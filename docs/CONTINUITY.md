@@ -41,6 +41,21 @@ Read these in order before extending unAI:
 - Do not claim Android memory, speed, power or thermal targets are met until measured on physical hardware.
 - Update docs/CHECKPOINT.md and docs/ROADMAP.md after each meaningful milestone.
 
+## Publisher trust-bundle mode
+
+An optional offline publisher trust snapshot is supported through
+`UNAI_ORACLE_PUBLISHER_TRUST_BUNDLE`, with operator-pinned Ed25519 roots in
+`UNAI_ORACLE_PUBLISHER_TRUST_ROOTS` and a manually maintained
+`UNAI_ORACLE_PUBLISHER_TRUST_MIN_SEQUENCE` rollback floor. Direct
+`UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS` and signed-bundle mode are mutually
+exclusive. Bundle signatures cover canonical JSON; bundles are limited to
+256 KiB, 256 publisher keys and 30 days of validity. Verification provenance
+(sequence, root ID and payload digest) is attached to publisher oracle evidence.
+This is offline signed-snapshot verification, not automatic key discovery,
+a public transparency log, certificate-chain validation or proof of legal
+identity. The rollback floor is only as strong as the operator's configured
+minimum; it is not automatically persisted.
+
 ## Current resume point
 
-M4 now includes grounded exact-output/property-oracle verification, source/specification fingerprint checks, separate Ed25519 reviewer assertions and publisher-signed artifact manifests with operator-configured issuer/hostname trust, publisher key rotation and revocation, async module-level functions, explicitly bound top-level-class static/class methods, bounded cumulative recursive shrinking and structured counterexample traces. It includes opt-in same-process output replay (2–4 calls, fresh JSON argument copies, 24-call request budget) and a separate workspace_filesystem_unchanged property. The latter compares bounded before/after manifests in the disposable Docker workspace, never follows symlinks, records only hashes/counts, and returns unavailable when the scan exceeds 1,024 entries, 2 MiB/file or 16 MiB/request. Neither replay nor filesystem audit results are automatically shrunk. Remaining M4 work includes organizational publisher trust-root discovery, ordinary instance-method support, richer side-effect fixtures beyond the filtered workspace and coverage/mutation verification under deterministic budgets. No hosted Brain deployment, custom model training or physical Android benchmark is complete.
+M4 now includes grounded exact-output/property-oracle verification, source/specification fingerprint checks, separate Ed25519 reviewer assertions and publisher-signed artifact manifests with operator-configured issuer/hostname trust, publisher key rotation and revocation, async module-level functions, explicitly bound top-level-class static/class methods, bounded cumulative recursive shrinking and structured counterexample traces. It includes opt-in same-process output replay (2–4 calls, fresh JSON argument copies, 24-call request budget) and a separate workspace_filesystem_unchanged property. The latter compares bounded before/after manifests in the disposable Docker workspace, never follows symlinks, records only hashes/counts, and returns unavailable when the scan exceeds 1,024 entries, 2 MiB/file or 16 MiB/request. Neither replay nor filesystem audit results are automatically shrunk. Remaining M4 work includes public key-transparency inclusion/consistency proofs or certificate/organization identity discovery (the offline signed bundle is not a public transparency log), ordinary instance-method support, richer side-effect fixtures beyond the filtered workspace and coverage/mutation verification under deterministic budgets. No hosted Brain deployment, custom model training or physical Android benchmark is complete.

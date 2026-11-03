@@ -322,6 +322,35 @@ def test_trusted_publisher_signature_authenticates_exact_specification_artifact(
     assert any("lack a valid signature from an operator-configured trusted reviewer key" in risk for risk in bundle.unresolved_risks)
 
 
+
+def test_signed_trust_bundle_provenance_is_preserved_in_grounded_evidence(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    trust_entry["_trust_bundle"] = {
+        "schema": "unai.publisher-trust-bundle.v1",
+        "sequence": 42,
+        "root_key_id": "offline-root-2026",
+        "payload_sha256": "a" * 64,
+        "publisher_count": 1,
+        "minimum_sequence": 42,
+        "rollback_floor_enforced": True,
+    }
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": trust_entry}
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    provenance = result.oracle_evidence[0].metadata["oracle_publisher_attestation"]["trust_bundle"]
+    assert provenance["schema"] == "unai.publisher-trust-bundle.v1"
+    assert provenance["sequence"] == 42
+    assert provenance["root_key_id"] == "offline-root-2026"
+    assert provenance["rollback_floor_enforced"] is True
+
+
 def test_publisher_attestation_rejects_untrusted_issuer_or_domain_before_execution(tmp_path: Path) -> None:
     task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
     spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"

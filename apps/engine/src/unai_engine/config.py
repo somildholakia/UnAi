@@ -12,6 +12,12 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from unai_engine.verification.publisher_trust_bundle import (
+    PublisherTrustBundleError,
+    load_signed_publisher_trust_bundle,
+    parse_publisher_trust_roots,
+)
+
 load_dotenv()
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -54,7 +60,36 @@ def _oracle_public_keys_from_env() -> dict[str, str]:
 
 
 def _oracle_publisher_keys_from_env() -> dict[str, dict[str, Any]]:
-    """Load publisher keys, issuer identities and exact HTTPS hostname allowlists."""
+    """Load direct publisher keys or a signed, operator-rooted trust snapshot."""
+    bundle_raw = os.getenv("UNAI_ORACLE_PUBLISHER_TRUST_BUNDLE", "").strip()
+    if bundle_raw:
+        direct_raw = os.getenv("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS", "{}").strip() or "{}"
+        try:
+            direct_entries = json.loads(direct_raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS must be valid JSON when a trust bundle is configured.") from exc
+        if direct_entries != {}:
+            raise ValueError(
+                "Configure either UNAI_ORACLE_PUBLISHER_TRUST_BUNDLE or direct UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS, not both."
+            )
+        try:
+            roots = parse_publisher_trust_roots(
+                os.getenv("UNAI_ORACLE_PUBLISHER_TRUST_ROOTS", "{}")
+            )
+            minimum_raw = os.getenv("UNAI_ORACLE_PUBLISHER_TRUST_MIN_SEQUENCE", "0")
+            if not minimum_raw.isdecimal():
+                raise PublisherTrustBundleError(
+                    "UNAI_ORACLE_PUBLISHER_TRUST_MIN_SEQUENCE must be a non-negative integer."
+                )
+            publishers, _provenance = load_signed_publisher_trust_bundle(
+                bundle_raw,
+                roots,
+                minimum_sequence=int(minimum_raw),
+            )
+            return publishers
+        except PublisherTrustBundleError as exc:
+            raise ValueError(str(exc)) from exc
+
     raw = os.getenv("UNAI_ORACLE_TRUSTED_PUBLISHER_KEYS", "{}")
     try:
         parsed = json.loads(raw)
