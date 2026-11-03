@@ -59,20 +59,20 @@ def _parse_json_object(raw: str, *, description: str, max_bytes: int | None = No
 
 
 def parse_publisher_trust_roots(raw: str) -> dict[str, str]:
-    """Parse the operator-pinned transparency-root keyring."""
+    """Parse the operator-pinned trust-bundle signing-root keyring."""
     roots = _parse_json_object(raw, description="UNAI_ORACLE_PUBLISHER_TRUST_ROOTS", max_bytes=32 * 1024)
     validated: dict[str, str] = {}
     for key_id, public_key_b64 in roots.items():
         if not isinstance(key_id, str) or not _KEY_ID_RE.fullmatch(key_id):
-            raise PublisherTrustBundleError("Transparency-root entries require safe key IDs.")
+            raise PublisherTrustBundleError("Trust-bundle signing-root entries require safe key IDs.")
         if not isinstance(public_key_b64, str):
-            raise PublisherTrustBundleError(f"Transparency-root key {key_id!r} must be base64 text.")
+            raise PublisherTrustBundleError(f"Trust-bundle signing key {key_id!r} must be base64 text.")
         try:
             public_key = base64.b64decode(public_key_b64, validate=True)
         except (ValueError, binascii.Error) as exc:
-            raise PublisherTrustBundleError(f"Transparency-root key {key_id!r} is not valid base64.") from exc
+            raise PublisherTrustBundleError(f"Trust-bundle signing key {key_id!r} is not valid base64.") from exc
         if len(public_key) != 32:
-            raise PublisherTrustBundleError(f"Transparency-root key {key_id!r} must decode to 32 bytes.")
+            raise PublisherTrustBundleError(f"Trust-bundle signing key {key_id!r} must decode to 32 bytes.")
         validated[key_id] = public_key_b64
     if not validated:
         raise PublisherTrustBundleError("At least one operator-pinned transparency root is required.")
@@ -188,7 +188,7 @@ def load_signed_publisher_trust_bundle(
     if not isinstance(minimum_sequence, int) or isinstance(minimum_sequence, bool) or minimum_sequence < 0:
         raise PublisherTrustBundleError("Publisher trust minimum sequence must be a non-negative integer.")
     if not isinstance(trusted_roots, dict) or not trusted_roots:
-        raise PublisherTrustBundleError("No operator-pinned transparency roots are configured.")
+        raise PublisherTrustBundleError("No operator-pinned trust-bundle signing roots are configured.")
 
     envelope = _parse_json_object(raw_bundle, description="UNAI_ORACLE_PUBLISHER_TRUST_BUNDLE", max_bytes=_MAX_BUNDLE_BYTES)
     if set(envelope) != {"payload", "signature_b64"}:
