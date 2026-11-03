@@ -89,6 +89,9 @@ def decide(
         validated_rates[system] = rate
     base_rate = validated_rates["base"]
     adapter_rate = validated_rates["adapter"]
+    base_successes = systems["base"]["verified_successes"]
+    adapter_successes = systems["adapter"]["verified_successes"]
+    tool_successes = systems["tool_augmented"]["verified_successes"]
     regressions = paired.get("adapter_regressions_vs_base")
     improvements = paired.get("adapter_improvements_over_base")
     unchanged = paired.get("adapter_unchanged_vs_base")
@@ -116,6 +119,13 @@ def decide(
         abs_tol=1e-12,
     ):
         raise ValueError("Evaluation report paired success-rate delta is inconsistent.")
+    if adapter_successes - base_successes != improvements - regressions:
+        raise ValueError("Adapter paired outcomes do not reconcile with system success counts.")
+    if tool_successes - base_successes != tool_improvements - tool_regressions:
+        raise ValueError("Tool-augmented paired outcomes do not reconcile with system success counts.")
+    expected_descriptive_gain = adapter_rate > base_rate and regressions == 0
+    if paired.get("adapter_quality_improved_without_regressions") is not expected_descriptive_gain:
+        raise ValueError("Evaluation report descriptive adapter gain flag is inconsistent.")
     statistical = evaluation.get("statistical_gate")
     if not isinstance(statistical, dict):
         raise ValueError("Evaluation report is missing the paired statistical release gate.")
@@ -138,15 +148,22 @@ def decide(
         reported = _finite_number(statistical.get(field), field)
         if not math.isclose(reported, expected, rel_tol=0, abs_tol=1e-12):
             raise ValueError(f"Evaluation report {field} does not match paired outcome counts.")
-    quality_passed = (
+    expected_adapter_statistical_pass = (
         matched_cases >= minimum_heldout_cases
-        and matched_cases >= 30
-        and alpha <= 0.05
         and adapter_rate > base_rate
         and regressions == 0
         and adapter_p_value <= alpha
-        and statistical.get("adapter_passed") is True
     )
+    expected_tool_statistical_pass = (
+        matched_cases >= minimum_heldout_cases
+        and tool_improvements > tool_regressions
+        and tool_p_value <= alpha
+    )
+    if statistical.get("adapter_passed") is not expected_adapter_statistical_pass:
+        raise ValueError("Evaluation report adapter statistical-pass flag is inconsistent.")
+    if statistical.get("tool_augmented_passed") is not expected_tool_statistical_pass:
+        raise ValueError("Evaluation report tool statistical-pass flag is inconsistent.")
+    quality_passed = expected_adapter_statistical_pass and matched_cases >= 30
     if not quality_passed:
         reasons.append(
             "The adapter did not meet the minimum held-out sample, verified gain, zero-regression and exact paired-significance requirements."
