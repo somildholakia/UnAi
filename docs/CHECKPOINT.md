@@ -434,8 +434,8 @@ These are conservative source-level AST relationships, not runtime traces or a c
 
 ## Local-first Android install path — initial testable package
 
-**Install implementation commit:** `0ad600ca5a34573a7d156620a9ad265ff9f0b355` (script-shell expansion fix).  
-**Feature implementation commit:** `f56e3e216a4e0d201b0588d06ca82cd36a1cf9c5`.  
+**Validated install/code + docs checkpoint:** `d2a388a3944eb81eb37a86f4e942303b08e2c0e1`.  
+**CI:** [run #41677105754](https://github.com/somildholakia/UnAi/actions/runs/41677105754) — 311 tests passed in 6.96s; Python compileall, Termux `bash -n`, and Vite production build passed.  
 **Branch:** `feat/m4-instance-methods-m5-specialists`.
 
 ### Installability changes

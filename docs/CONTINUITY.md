@@ -186,3 +186,13 @@ Tests cover local/imported calls, module aliases, class instantiation, `self` me
 - CI must pass before recording the final code/docs SHAs. Do not call this physically Android-tested until actual device results are recorded.
 - Local inference means no provider usage quotas or token billing; hardware resources still impose limits. The current model is not trained by unAI.
 - PR #28 remains the active integration PR; do not merge it or alter `main` without explicit user approval.
+
+
+## Local install CI result — verified on 2026-11-03
+
+- Branch code/docs head: `d2a388a3944eb81eb37a86f4e942303b08e2c0e1`.
+- GitHub Actions run #41677105754 passed both jobs: 311 Python tests (6.96s), compileall, Termux script syntax validation, npm dependency install and Vite production build.
+- Web output built successfully: `dist/index.html`, CSS and JS bundle. This is a build check, not a browser/device execution.
+- Termux shell syntax passed, but no Termux runtime or physical Android install was executed by CI.
+- PR #28 remains open/unmerged. `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
+- On-device next step: follow `docs/LOCAL_INSTALL.md`, then record first boot success/failure and physical device resource measurements. Do not claim Android support acceptance until that run exists.
