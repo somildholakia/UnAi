@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure implemented; CI passed (289 tests)
+**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure hardened with corpus manifest verification and source lineage; CI passed (295 tests)
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -304,3 +304,29 @@ The code validated by CI #247 is `3494bb1ffffe8af063d3469340f118ff60f2d46d`. Cro
 - `d6ac7380dd79919348ae6f4d3844212a929f41cb` — this checkpoint file.
 - `9b3ae7e8add28b675fdf8c161fa63f892969456d` — continuity handoff (followed by a clarification-only continuity update).
 These commits change documentation only; CI #247 validates the unchanged code head above. Fetch the branch before resuming to get the exact newest documentation commit.
+
+
+## 2026-11-03 M5 corpus integrity continuation
+
+**Validated code HEAD:** `c0600017504df5f5ac541bfd4b7a1d539834d04a`  
+**GitHub Actions:** [run #252](https://github.com/somildholakia/UnAi/actions/runs/41660871637) — 295 tests passed in 7.28s; Python compile check passed.  
+**Prior M5 integrity commit:** `a8b538a31bc9bea00fff506d1cc0e684fc639567` — [run #251](https://github.com/somildholakia/UnAi/actions/runs/41660522248), 294 tests passed in 6.84s; compile check passed.
+
+### Training-boundary manifest verification
+
+- The specialist trainer now requires the adjacent `corpus_manifest.json` before importing/loading model weights.
+- It verifies specialist identity, exact train/eval filenames, split file SHA-256 values, example counts, repository-group counts and disjoint train/eval groups.
+- Each prepared row is validated against bounded message/role constraints, explicit consent/license/verification metadata, a SHA-256 group ID, provenance/group consistency and a recomputed canonical record ID.
+- Added regression tests for stale/tampered files, manifests, split metadata, malformed records and missing manifests. Updated `training/README.md`.
+
+### Corpus-preparation lineage and preflight
+
+- The corpus manifest now records the raw source JSONL SHA-256 and byte count without copying raw input records into the manifest.
+- Preparation validates and serializes all three specialist splits before writing any output. If a later specialist lacks enough independent repository/project groups, existing split artifacts and manifest remain unchanged.
+- Added tests for source-file lineage and preservation of prior outputs on split-validation failure.
+
+### Honest M5 status
+
+These changes harden the training data boundary; they do not represent a training run. No consented/licensed real corpus has been supplied, no specialist adapters have been trained, no held-out model comparison has been run, and no physical Android memory/latency/throughput/thermal measurements have been collected. M5 remains infrastructure-complete but not trained or released.
+
+PR #28 remains open and unmerged. Main remains unchanged. Do not merge PR #28 or overlapping PR #27 without explicit user instruction.
