@@ -5,14 +5,16 @@ from datetime import datetime, timezone
 
 from fastapi.responses import JSONResponse
 from uuid import uuid4
+from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from unai_engine.agent.orchestrator import AgentOrchestrator
+from unai_engine.agent.orchestrator import AgentOrchestrator, SpecialistUnavailable
 from unai_engine.config import settings
 from unai_engine.models import (
     BrainNoteCreate, ChatRequest, ChatResponse, HealthResponse,
+    SpecialistChatRequest, SpecialistChatResponse,
     TaskCompileRequest, TaskContract, TaskInspectRequest,
     TaskInspectionResponse, TaskEvidenceSnapshot, TaskRunApprovalRequest, TaskTestRunResponse,
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
@@ -47,7 +49,15 @@ provider = OpenAICompatibleProvider(
 )
 plugins = build_registry()
 brain = MarkdownVault(settings.brain_vault_root, settings.brain_index_path)
-agent = AgentOrchestrator(provider, context_search=brain.search)
+agent = AgentOrchestrator(
+    provider,
+    context_search=brain.search,
+    specialist_models={
+        "next_action": settings.specialist_next_action_model,
+        "planner": settings.specialist_planner_model,
+        "verifier": settings.specialist_verifier_model,
+    },
+)
 evidence_ledger = EvidenceLedger(settings.evidence_db_path)
 task_inspector = TaskInspector(plugins.indexing["python-code-graph"], evidence_ledger)
 task_test_runner = IsolatedPythonTestRunner(
@@ -352,6 +362,31 @@ async def chat(request: ChatRequest) -> ChatResponse:
     except ProviderError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return ChatResponse(message=answer, model=provider.model)
+
+
+@app.post(
+    "/api/specialists/{specialist}/chat",
+    response_model=SpecialistChatResponse,
+)
+async def specialist_chat(
+    specialist: Literal["next_action", "planner", "verifier"],
+    request: SpecialistChatRequest,
+) -> SpecialistChatResponse:
+    """Call only the configured specialist model; missing adapters never fall back."""
+    history = [{"role": item.role, "content": item.content} for item in request.history]
+    try:
+        answer, selected_model = await agent.specialist_chat(
+            specialist, request.message, history
+        )
+    except SpecialistUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return SpecialistChatResponse(
+        specialist=specialist,
+        message=answer,
+        model=selected_model,
+    )
 
 
 @app.get("/api/brain/status")
