@@ -15,6 +15,7 @@
 - [x] Bounded Python AST graph for file/symbol/import/test relationships with source ranges.
 - [x] Parse goals into typed acceptance checks, constraints and approval-aware permissions.
 - [x] Persist file/symbol/import/test graph with source-range references in an incremental SQLite cache; refresh atomically and reparse only changed source fingerprints.
+- [x] Add bounded conservative static `calls` and class `instantiates` edges for uniquely resolved local/direct-import targets; keep ambiguous, dynamic and shadowed targets unresolved and report call-site truncation.
 - [x] Retrieve bounded, task-specific code slices only from symbols found during approved inspection, with source-hash freshness checks and strict line/character budgets.
 
 ## M3 — Evidence-producing agent loop

@@ -60,8 +60,8 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi  
 **Active branch:** `feat/m4-instance-methods-m5-specialists`  
-**Latest code commit:** `c68e300ff7b7c754608dffbc611b729daee44de3` — incremental SQLite Python repository graph persistence.  
-**Latest code CI:** [run #260](https://github.com/somildholakia/UnAi/actions/runs/41671966813) — 305 tests passed in 7.96s; Python compileall passed.  
+**Latest code commit:** `f083452af8bd16ed8cbfec70fb1157e8b76f7084` — conservative static call and class-instantiation graph edges with schema migration.  
+**Latest code CI:** [run #264](https://github.com/somildholakia/UnAi/actions/runs/41674645703) — 311 tests passed in 7.50s; Python compileall passed.  
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.  
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.  
 
@@ -73,7 +73,7 @@ minimum; it is not automatically persisted.
 - The endpoint uses the existing `PatchManager.read_file` permission and path-safety boundary, then compares the current digest with the inspection digest. Changed files fail closed with HTTP 409 and require a fresh inspection.
 - Limits: at most 10 symbols, 120 source lines and 6,000 characters per excerpt, with a 24,000-character aggregate response budget.
 - Regression tests cover graph hash propagation, context retrieval, incomplete inspection and stale-source rejection. GitHub Actions run #256 passed 300 tests and Python compilation.
-- The M2 bounded task-specific retrieval roadmap item is checked off. Incremental SQLite persistence and atomic refresh are also now implemented (details below). Richer dependency/call graphs remain open.
+- The M2 bounded task-specific retrieval roadmap item is checked off. Incremental SQLite persistence and atomic refresh are implemented. M2.1 adds conservative bounded static call and class-instantiation relationships (details below); richer dynamic/dependency inference remains open.
 
 ### Current implementation status
 
@@ -142,8 +142,36 @@ Regression tests cover cold/warm cache behavior, changed/new/deleted source file
 ### Known boundaries / next work
 
 - Each refresh still walks and hashes the bounded set of candidate Python files; it avoids re-parsing unchanged files, not the full scan/hash cost.
-- The graph remains Python-only, has no call graph, and test-to-source links remain heuristic.
-- M2 persistent graph storage is now checked off in the roadmap; further M2 work should focus on measured improvements or explicitly scoped dependency/call-graph relationships.
+- The graph remains Python-only. Its `calls`/`instantiates` edges are conservative static AST relationships, not a complete runtime call graph; test-to-source links remain heuristic.
+- M2 persistent graph storage and the first conservative static call/instantiation relationship milestone are checked off in the roadmap; further graph expansion should remain bounded and explicit about unresolved/dynamic relationships.
 - M5 remains training infrastructure only: no real approved corpus, trained specialist weights, held-out model comparison or physical Android measurement has been supplied or run.
 - M6 physical-device/deployment validation remains open.
 - Continue on this feature branch. Keep `main` unchanged, and never merge PR #28 or the overlapping PR #27 absent explicit permission.
+
+
+## M2.1 static call and class-instantiation graph — latest validated continuation
+
+**Code commit:** `f083452af8bd16ed8cbfec70fb1157e8b76f7084`  
+**CI:** [GitHub Actions run #264](https://github.com/somildholakia/UnAi/actions/runs/41674645703) — 311 tests passed in 7.50s; Python compileall passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** open and unmerged; do not merge without explicit permission.
+
+### Behavior
+
+- Indexes at most 100 dotted-name call sites per file and 12,000 across one repository refresh.
+- Resolves unambiguous local functions, `self`/`cls` methods, class-qualified methods, directly imported callable aliases and explicitly imported module aliases into `calls` edges.
+- Resolves direct invocation of local/imported classes into `instantiates` edges.
+- Tracks lexical function parameters/assignments/local imports as shadowing; only module-scope imports are candidates for cross-module alias resolution. Ambiguous duplicates and dynamic/computed receiver dispatch stay unresolved.
+- Persists call-site and import-binding records in SQLite schema v2. A v1 cache is migrated and source files are reparsed once to populate the new records.
+- Exposes `call_edges`, `instantiation_edges`, `call_sites_indexed`, `call_sites_unresolved` and `call_sites_truncated` in the graph summary.
+
+### Verification
+
+Tests cover local/imported calls, module aliases, class instantiation, `self` methods, ambiguous names, dynamic dispatch, recursive calls, lexical shadowing, per-file call-site budgets and v1 cache migration. CI #264 passed all 311 tests and Python compilation.
+
+### Boundaries / next work
+
+- This is static source-level navigation, not a complete call graph or runtime trace. Dynamic dispatch, arbitrary instance attributes, reflection, monkey-patching, inheritance-based resolution and execution order are not inferred.
+- The graph remains Python-only. Broader dependency relationships should be added only with explicit resolution rules and regression evidence.
+- M5 still has no supplied approved corpus, trained adapters, held-out comparison or Android measurements. M6 physical device/deployment validation remains open.
+- Keep `main` unchanged and do not merge PR #28 or overlapping PR #27 absent explicit permission.

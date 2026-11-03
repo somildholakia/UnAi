@@ -2,13 +2,14 @@
 
 The PythonCodeGraphIndexer is a bounded Python AST indexer with optional incremental SQLite persistence. The Engine enables the cache by default at `UNAI_CODE_GRAPH_DB_PATH` (`.data/code-graph.sqlite3`); direct indexer users can omit `cache_path` to keep the cache disabled.
 
-It creates file nodes and class/function/method symbol nodes with start and end line references. Edges represent file-to-symbol definitions, class-to-member containment, resolved internal imports, and heuristic test-file-to-source-file relationships. Each parsed file and symbol carries the SHA-256 digest of the exact UTF-8 source bytes used for AST parsing. Source bodies are not persisted in the graph.
+It creates file nodes and class/function/method symbol nodes with start and end line references. Edges represent file-to-symbol definitions, class-to-member containment, resolved internal imports, heuristic test-file-to-source-file relationships, conservative static `calls` relationships, and class `instantiates` relationships. Each parsed file and symbol carries the SHA-256 digest of the exact UTF-8 source bytes used for AST parsing. Source bodies are not persisted in the graph.
 
 Safety and resource controls:
 
 - Ignores generated folders, hidden directories, and symlinked files.
 - Skips Python files larger than 300 KB.
 - Caps discovery at 1,500 files, symbols at 12,000, and edges at 24,000.
+- Collects at most 100 dotted-name call sites per file and 12,000 per repository refresh.
 - Captures parse errors per file and continues indexing other files.
 - Reports whether the result was truncated.
 
@@ -27,4 +28,19 @@ Context budgets are deliberately small: at most 10 symbols, 120 source lines and
 - A refresh is committed with `BEGIN IMMEDIATE` in one SQLite transaction. File rows, repository metadata and the derived edge set switch together; rollback preserves the prior complete generation after a failed write. An optimistic generation check detects concurrent refreshes and the indexer retries once.
 - SQLite uses WAL, foreign keys, a busy timeout and full synchronous writes. The schema is versioned via `PRAGMA user_version`; unknown newer schema versions fail closed rather than being rewritten. Keep the database in local application data and back it up using normal SQLite-aware procedures.
 
-The graph remains Python-only. Its conservative static call relationships are not a complete runtime call graph, and heuristic test-to-source mappings are not guaranteed. It is a navigation/retrieval aid, not a complete semantic model.
+## Conservative static calls and class construction
+
+The indexer records dotted-name call sites inside function and method bodies, then resolves only targets that can be identified unambiguously from the parsed graph and module-scope imports:
+
+- A bare function call may resolve to one uniquely named top-level function in the same module or one directly imported function alias.
+- `self.method()` and `cls.method()` may resolve to one method on the enclosing class.
+- `ClassName.method()` may resolve to a method on a uniquely identified local class; an imported class alias may resolve to one method in its source module.
+- Calling a uniquely identified local or directly imported class creates an `instantiates` edge; function and method invocations create `calls` edges.
+- Module aliases such as `import service as svc` may resolve `svc.function()` to an indexed callable in that module.
+- Local parameters, assignments and local imports shadow module-level imported aliases. Ambiguous duplicate names, arbitrary instance attributes, computed callees, reflection, dynamic dispatch and monkey-patching are not guessed. Imports inside function scopes are not treated as module-level aliases.
+
+The graph summary reports `call_edges`, `instantiation_edges`, `call_sites_indexed`, `call_sites_unresolved` and `call_sites_truncated`. Unresolved counts can include built-ins and third-party/dynamic calls; they do not mean a call is invalid. Reaching a call-site or edge budget marks the graph as truncated.
+
+These are source-level syntactic relationships, not observed runtime calls or a complete call graph. The indexer does not infer dynamic dispatch, inheritance-based dispatch, reflection, monkey-patching or execution order. Static call metadata is persisted with the per-file AST records. SQLite schema version 2 adds call-site and import-binding columns; an existing version-1 cache is migrated and all eligible files are reparsed once to backfill them. Source bodies remain uncached.
+
+The graph remains Python-only. Heuristic test-to-source mappings are not guaranteed. It is a navigation/retrieval aid, not a complete semantic model.

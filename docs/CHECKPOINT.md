@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M2 incremental SQLite repository graph persistence delivered; atomic refresh, SHA-256 source freshness and regression coverage verified by CI (305 tests)
+**Checkpoint:** M2 incremental SQLite graph persistence and conservative static call/instantiation edges delivered; schema migration and regression coverage verified by CI (311 tests)
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -361,12 +361,12 @@ The change does not alter M5's external prerequisites: no approved real corpus, 
 - Added regression tests for SHA propagation, successful context retrieval, the missing workspace-read approval path and stale-source rejection.
 - Updated README, code-graph documentation and the M2 roadmap checklist.
 
-This delivers the previously open M2 task-specific retrieval item. The graph is still Python-only, rebuilt on demand, and does not yet persist incrementally in SQLite or infer call graphs. No model weights or mobile performance claims are implied by this work.
+This delivers the M2 task-specific retrieval item. At that code checkpoint, the graph was still Python-only and rebuilt on demand; the later M2 SQLite and M2.1 static-call checkpoints below supersede that implementation status. No model weights or mobile performance claims are implied by this work.
 
 
 ## Handoff verification
 
-- Latest code commit: `c68e300ff7b7c754608dffbc611b729daee44de3`; GitHub Actions #260 passed (305 tests, compileall).
+- Latest validated code commit: `f083452af8bd16ed8cbfec70fb1157e8b76f7084`; GitHub Actions #264 passed (311 tests, compileall).
 - Previous handoff documentation revision: `e752cecb10cc2c3eb0d44c5938f6fc316880a80d`; documentation CI #257 passed. This checkpoint has since received another documentation-only refresh; fetch the live branch head before continuing.
 - Main remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
 - PR #28 remains open and unmerged. No merge was performed.
@@ -393,10 +393,40 @@ This delivers the previously open M2 task-specific retrieval item. The graph is 
 
 ### M2 status and limits
 
-The roadmap item for persistent file/symbol/import/test graph storage is now complete for the bounded Python AST graph. Every refresh still reads and hashes the bounded eligible source files; the optimization avoids re-parsing unchanged files, not filesystem traversal or hashing. The graph is not a call graph, its test-to-source links remain heuristic, and it is not a complete semantic model. No model training, mobile benchmarks or production-readiness claims follow from this work.
+The roadmap item for persistent file/symbol/import/test graph storage is now complete for the bounded Python AST graph. Every refresh still reads and hashes the bounded eligible source files; the optimization avoids re-parsing unchanged files, not filesystem traversal or hashing. The graph includes the conservative static `calls`/`instantiates` edges added in M2.1 below; it is not a complete runtime call graph. Test-to-source links remain heuristic, and the graph is not a complete semantic model. No model training, mobile benchmarks or production-readiness claims follow from this work.
 
 ### Safe continuation
 
 - Continue on `feat/m4-instance-methods-m5-specialists`; preserve `main`.
 - PR #28 remains the integration PR and must not be merged without explicit permission. PR #27 overlaps and must not be merged separately.
 - M5 still requires a real consented/licensed corpus, actual specialist training, held-out comparison and physical Android measurements. None is represented as complete by this checkpoint.
+
+
+## 2026-11-03 — M2.1 conservative static call graph
+
+**Code commit:** `f083452af8bd16ed8cbfec70fb1157e8b76f7084`  
+**GitHub Actions:** [run #264](https://github.com/somildholakia/UnAi/actions/runs/41674645703) — **311 tests passed in 7.50s**; `python -m compileall -q apps/engine/src training` passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**Integration PR:** [#28](https://github.com/somildholakia/UnAi/pull/28), open and unmerged.
+
+### Delivered
+
+- Added bounded AST call-site collection inside function/method bodies: up to 100 call sites per file and 12,000 per repository refresh.
+- Added conservative `calls` edges for uniquely resolved same-module functions, `self`/`cls` methods, local class-qualified methods, directly imported function aliases and explicitly imported module aliases.
+- Added `instantiates` edges for uniquely identified local or directly imported classes invoked as constructors.
+- Added lexical shadowing checks for function arguments, local assignments, nested definitions and local imports. Imported-call resolution only uses module-scope imports. Ambiguous duplicate definitions, arbitrary receiver attributes, computed calls and dynamic dispatch remain unresolved.
+- Added per-file persisted call-site data and module import bindings. SQLite schema version 2 adds the required columns; version-1 graph caches are migrated and each eligible file is reparsed once to backfill static call data. Unknown future schema versions still fail closed.
+- Added graph summary counters for call edges, instantiation edges, indexed/unresolved call sites and call-site truncation.
+- Added tests for same-module calls, `self` methods, imported function/module/class aliases, class instantiation, ambiguous and dynamic calls, recursive functions, shadowed aliases, call-site budgets and version-1 cache migration.
+
+### Semantics and limits
+
+These are conservative source-level AST relationships, not runtime traces or a complete call graph. Dynamic dispatch, reflection, monkey-patching, arbitrary instance attributes, inheritance-based resolution and call order are not inferred. Unresolved call-site counts include ordinary built-ins and external calls; unresolved does not mean invalid. The graph remains Python-only, and heuristic test-to-source links are still not guaranteed.
+
+### Verification and safe continuation
+
+- GitHub Actions run #264 validated the exact code commit above: 311 tests passed and Python compilation passed.
+- Two earlier CI runs exposed test expectation mistakes (call-site count and an unresolved built-in constructor); both were corrected before the green run. No known test failure remains at this checkpoint.
+- Continue on `feat/m4-instance-methods-m5-specialists`; preserve `main`.
+- PR #28 remains open and must not be merged without explicit permission. PR #27 overlaps and must not be merged separately.
+- M5 still requires a real consented/licensed corpus, actual specialist training, held-out comparison and physical Android measurements; none is claimed complete.
