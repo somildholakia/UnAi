@@ -5,6 +5,7 @@ import hashlib
 import pytest
 
 from training.evaluate_results import evaluate_rows
+from training.metrics import exact_mcnemar_pvalue
 from training.release_gate import decide
 
 
@@ -231,6 +232,37 @@ def test_release_gate_requires_quality_gain_and_physical_device_pass() -> None:
     assert decision["heldout_quality_gate"]["passed"] is True
     assert decision["mobile_gate"]["passed"] is True
     assert decision["adapter_artifacts_sha256"] == "a" * 64
+
+
+def test_release_gate_reconciles_paired_counts_with_success_rates() -> None:
+    rows = []
+    for index in range(30):
+        base_pass = index >= 10
+        for system in ("base", "adapter", "tool_augmented"):
+            passed = True if system != "base" and index < 10 else base_pass
+            rows.append(_row(f"paired-count-{index}", system, passed))
+    evaluation = evaluate_rows(rows)
+    paired = evaluation["paired_comparison"]
+    paired["adapter_improvements_over_base"] = 9
+    paired["adapter_unchanged_vs_base"] = 21
+    evaluation["statistical_gate"]["adapter_mcnemar_exact_p_value"] = exact_mcnemar_pvalue(9, 0)
+
+    with pytest.raises(ValueError, match="do not reconcile with system success counts"):
+        decide(_manifest(), evaluation, _mobile(_manifest()))
+
+
+def test_release_gate_rejects_tampered_statistical_pass_flag() -> None:
+    rows = []
+    for index in range(30):
+        base_pass = index >= 10
+        for system in ("base", "adapter", "tool_augmented"):
+            passed = True if system != "base" and index < 10 else base_pass
+            rows.append(_row(f"stat-flag-{index}", system, passed))
+    evaluation = evaluate_rows(rows)
+    evaluation["statistical_gate"]["adapter_passed"] = False
+
+    with pytest.raises(ValueError, match="adapter statistical-pass flag is inconsistent"):
+        decide(_manifest(), evaluation, _mobile(_manifest()))
 
 
 def test_release_gate_blocks_missing_or_over_budget_mobile_measurements() -> None:
