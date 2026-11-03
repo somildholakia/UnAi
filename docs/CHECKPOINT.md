@@ -453,3 +453,11 @@ These are conservative source-level AST relationships, not runtime traces or a c
 - Local inference removes hosted API quotas and per-token billing, but is limited by RAM, storage, battery, thermal throttling and speed.
 - The 1.5B Q4_K_M starter model is a smoke-test model, not proof of large-model capability or quality parity.
 - A successful CI build does not prove the scripts have been executed on a physical Android device. M6 still requires on-device installation, offline test, PSS/RSS, TTFT, throughput and thermal measurements.
+
+
+## Install download-resume correction — validated
+
+- **Code commit:** `7e93f8b5f8f0079b103c0504f458451e664e5e64`.
+- **CI:** [run #41677589811](https://github.com/somildholakia/UnAi/actions/runs/41677589811) — 311 tests passed in 8.28s; Python compileall, Termux script syntax and web production build passed.
+- The Termux installer now detects an incomplete model file and resumes the Hugging Face range download on rerun; it requires at least 1,000,000,000 bytes before accepting the file as complete.
+- This remains CI-validated only. A physical Termux build/inference session has not yet been run.

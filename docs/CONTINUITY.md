@@ -196,3 +196,10 @@ Tests cover local/imported calls, module aliases, class instantiation, `self` me
 - Termux shell syntax passed, but no Termux runtime or physical Android install was executed by CI.
 - PR #28 remains open/unmerged. `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
 - On-device next step: follow `docs/LOCAL_INSTALL.md`, then record first boot success/failure and physical device resource measurements. Do not claim Android support acceptance until that run exists.
+
+
+## Latest installer correction
+
+- Code commit `7e93f8b5f8f0079b103c0504f458451e664e5e64` corrects partial GGUF download recovery: the installer resumes an existing incomplete file and validates a 1 GB minimum before proceeding.
+- CI #41677589811 passed: 311 Python tests in 8.28s, compileall, shell syntax and web production build.
+- The current user test path remains `docs/LOCAL_INSTALL.md`; physical-device execution and metrics are still pending.
