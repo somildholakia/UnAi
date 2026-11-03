@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -29,13 +30,47 @@ def _number(value: Any, name: str, *, minimum: float = 0) -> float:
     return result
 
 
+def _case_contract_sha256(value: Any, line_number: int) -> str:
+    if not isinstance(value, dict) or set(value) != {"prompt", "acceptance_criteria"}:
+        raise ValueError(
+            f"Line {line_number}: case_contract must contain only prompt and acceptance_criteria."
+        )
+    prompt = value.get("prompt")
+    criteria = value.get("acceptance_criteria")
+    if (
+        not isinstance(prompt, str)
+        or not prompt.strip()
+        or len(prompt) > 50_000
+        or not isinstance(criteria, list)
+        or not 1 <= len(criteria) <= 100
+        or not all(
+            isinstance(item, str) and item.strip() and len(item) <= 2_000
+            for item in criteria
+        )
+    ):
+        raise ValueError(
+            f"Line {line_number}: case_contract requires a non-empty prompt and 1-100 non-empty acceptance criteria."
+        )
+    try:
+        canonical = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"Line {line_number}: case_contract is not canonical JSON.") from exc
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
     if not isinstance(row, dict):
         raise ValueError(f"Line {line_number}: benchmark result must be an object.")
     if row.get("schema") != "unai.benchmark-result.v1":
         raise ValueError(f"Line {line_number}: benchmark result schema must be unai.benchmark-result.v1.")
     allowed_fields = {
-        "schema", "suite_id", "case_id", "case_sha256", "specialist", "system",
+        "schema", "suite_id", "case_id", "case_contract", "case_sha256", "specialist", "system",
         "model_id", "base_model", "latency_ms", "tokens", "verification",
         "provenance", "tool_trace",
     }
@@ -44,6 +79,7 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
         raise ValueError(f"Line {line_number}: unexpected benchmark fields: {', '.join(sorted(unexpected_fields))}.")
     suite_id = row.get("suite_id")
     case_id = row.get("case_id")
+    case_contract = row.get("case_contract")
     case_sha256 = row.get("case_sha256")
     specialist = row.get("specialist")
     system = row.get("system")
@@ -59,6 +95,11 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
         or system not in SYSTEMS
     ):
         raise ValueError(f"Line {line_number}: invalid suite/case/specialist/system/model identity.")
+    computed_case_sha256 = _case_contract_sha256(case_contract, line_number)
+    if not hashlib.compare_digest(case_sha256.lower(), computed_case_sha256):
+        raise ValueError(
+            f"Line {line_number}: case_sha256 does not match the canonical prompt and acceptance criteria."
+        )
     if not isinstance(verification, dict):
         raise ValueError(f"Line {line_number}: verification object is required.")
     if set(verification) - {"status", "checks", "evidence_id", "verifier"}:
