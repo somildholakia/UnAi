@@ -60,7 +60,7 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi  
 **Active branch:** `feat/m4-instance-methods-m5-specialists`  
-**Exact branch HEAD:** `3494bb1ffffe8af063d3469340f118ff60f2d46d`  
+**Latest validated code HEAD:** `3494bb1ffffe8af063d3469340f118ff60f2d46d` (subsequent commits are documentation-only handoff updates).  
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open and mergeable; not merged.  
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.  
 **Latest CI:** [run #247](https://github.com/somildholakia/UnAi/actions/runs/41659235207) — current HEAD validated; 290 tests passed in 5.72s and Python compileall passed.
@@ -97,7 +97,8 @@ PR #28 is the combined integration PR against main and contains the publisher tr
 1. Start by fetching the active branch, PR #28 and current workflow status; confirm HEAD still matches this checkpoint.
 2. Read `docs/CHECKPOINT.md`, `docs/ROADMAP.md` and this file before changing code.
 3. Continue from `3494bb1ffffe8af063d3469340f118ff60f2d46d`; preserve main.
-4. For actual model training, first obtain an explicitly user-approved consented/licensed dataset and select a feasible base model/training environment. Never use private chats or private repositories as training data without explicit consent.
-5. For mobile release, collect real instrumented Android measurements; schema example numbers are not measured results.
-6. After each meaningful milestone, update this checkpoint and continuity file with exact commit and CI evidence.
+4. The latest documentation-only commits at this handoff are `d6ac7380dd79919348ae6f4d3844212a929f41cb` (checkpoint) and `9b3ae7e8add28b675fdf8c161fa63f892969456d` (continuity). The branch head advances with these documentation commits; CI #247 validates the unchanged code at `3494bb1ffffe8af063d3469340f118ff60f2d46d`.
+5. For actual model training, first obtain an explicitly user-approved consented/licensed dataset and select a feasible base model/training environment. Never use private chats or private repositories as training data without explicit consent.
+6. For mobile release, collect real instrumented Android measurements; schema example numbers are not measured results.
+7. After each meaningful milestone, update this checkpoint and continuity file with exact commit and CI evidence.
 
