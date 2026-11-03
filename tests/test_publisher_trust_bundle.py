@@ -217,7 +217,7 @@ def test_signed_publisher_trust_bundle_rejects_duplicate_json_members_and_oversi
         load_signed_publisher_trust_bundle(" " * (256 * 1024 + 1), roots, now=datetime.now(timezone.utc))
 
 
-def test_transparency_root_keyring_requires_valid_raw_ed25519_keys() -> None:
+def test_trust_bundle_signing_root_keyring_requires_valid_raw_ed25519_keys() -> None:
     valid = {"root-2026": _b64(b"x" * 32)}
     assert parse_publisher_trust_roots(json.dumps(valid)) == valid
 
