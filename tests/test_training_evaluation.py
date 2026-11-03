@@ -367,3 +367,24 @@ def test_release_gate_blocks_adapter_without_strict_verified_improvement() -> No
 
     assert decision["releasable"] is False
     assert decision["heldout_quality_gate"]["passed"] is False
+
+
+
+def test_release_gate_reports_negative_adapter_delta_as_blocked_not_exception() -> None:
+    rows = []
+    for index in range(30):
+        base_pass = True
+        adapter_pass = index != 0
+        for system in ("base", "adapter", "tool_augmented"):
+            passed = base_pass if system in ("base", "tool_augmented") else adapter_pass
+            rows.append(_row(f"negative-delta-{index}", system, passed))
+    evaluation = evaluate_rows(rows)
+    manifest = _manifest()
+
+    assert evaluation["paired_comparison"]["adapter_success_rate_delta"] < 0
+    decision = decide(manifest, evaluation, _mobile(manifest))
+
+    assert decision["releasable"] is False
+    assert decision["heldout_quality_gate"]["passed"] is False
+    assert decision["heldout_quality_gate"]["adapter_verified_success_rate"] < decision["heldout_quality_gate"]["base_verified_success_rate"]
+    assert decision["mobile_gate"]["passed"] is True
