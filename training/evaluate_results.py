@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import statistics
 from pathlib import Path
 from typing import Any
@@ -13,8 +14,6 @@ try:
     from .metrics import exact_mcnemar_pvalue
 except ImportError:  # Support direct execution: python training/evaluate_results.py
     from metrics import exact_mcnemar_pvalue
-
-import re
 
 SPECIALISTS = ("next_action", "planner", "verifier")
 
@@ -157,14 +156,24 @@ def evaluate_rows(
     specialists = {key[2] for key in matrix}
     if len(specialists) != 1:
         raise ValueError("One benchmark report must evaluate exactly one specialist adapter.")
+    model_ids: dict[str, str] = {}
+    expected_base_model: str | None = None
     for key, systems in matrix.items():
         base_model = systems["base"]["base_model"]
         case_hash = systems["base"]["case_sha256"]
+        if expected_base_model is None:
+            expected_base_model = base_model
+        elif base_model != expected_base_model:
+            raise ValueError("A single evaluation report must use one immutable base model.")
         for system in SYSTEMS:
             if systems[system]["base_model"] != base_model:
                 raise ValueError(f"Base model mismatch within matched case {key}.")
             if systems[system]["case_sha256"] != case_hash:
                 raise ValueError(f"Case content hash mismatch within matched case {key}.")
+            current_model_id = systems[system]["model_id"]
+            if system in model_ids and model_ids[system] != current_model_id:
+                raise ValueError(f"Model identity changed between held-out cases for system {system}.")
+            model_ids[system] = current_model_id
         if systems["adapter"]["model_id"] == systems["base"]["model_id"]:
             raise ValueError(f"Adapter row does not identify a distinct adapter-backed system for {key}.")
 
