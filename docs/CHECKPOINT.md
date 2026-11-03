@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure hardened with corpus manifest verification, source lineage and exact-snapshot hashing; CI passed (297 tests)
+**Checkpoint:** M2 task-specific code-context retrieval added with source-hash freshness checks; CI passed (300 tests)
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -343,3 +343,22 @@ PR #28 remains open and unmerged. Main remains unchanged. Do not merge PR #28 or
 - Updated the training guide to explain that corpus digests are tied to the exact data snapshot used for training.
 
 The change does not alter M5's external prerequisites: no approved real corpus, trained weights, held-out model comparison or physical Android performance measurements exist yet.
+
+
+
+## M2 task-specific context retrieval
+
+**Code commit:** `7950c8a65ef4151530b599053079e94b8fdd0a32`  
+**GitHub Actions:** [run #256](https://github.com/somildholakia/UnAi/actions/runs/41668817672) — 300 tests passed in 7.10s; `python -m compileall -q apps/engine/src training` passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**Integration PR:** [#28](https://github.com/somildholakia/UnAi/pull/28), still open and unmerged.
+
+- The bounded Python AST graph now attaches SHA-256 fingerprints of the exact source bytes parsed to each file/symbol node.
+- Task inspection carries those fingerprints into its persisted symbol-retrieval evidence.
+- Added `GET /api/tasks/{task_id}/context`. It does not accept arbitrary paths or symbols; it returns only symbols discovered during that task's approved inspection.
+- Every excerpt is re-read through the existing permissioned, traversal/symlink/sensitive-file guarded file reader. The current source digest must match the original inspection digest; otherwise the endpoint returns HTTP 409 and asks for re-inspection.
+- Excerpts are line-numbered and bounded to 10 symbols, 120 source lines and 6,000 characters per slice, with a 24,000-character aggregate budget.
+- Added regression tests for SHA propagation, successful context retrieval, the missing workspace-read approval path and stale-source rejection.
+- Updated README, code-graph documentation and the M2 roadmap checklist.
+
+This delivers the previously open M2 task-specific retrieval item. The graph is still Python-only, rebuilt on demand, and does not yet persist incrementally in SQLite or infer call graphs. No model weights or mobile performance claims are implied by this work.

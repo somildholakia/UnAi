@@ -60,47 +60,49 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi  
 **Active branch:** `feat/m4-instance-methods-m5-specialists`  
-**Latest validated code HEAD:** `2173651b1fd84da4104088a6240f749bc7edab2f` — trainer binds manifest hashes to the exact byte snapshots parsed for training.  
-**Latest code CI:** [run #254](https://github.com/somildholakia/UnAi/actions/runs/41661499858) — 297 tests passed in 7.70s; Python compileall passed.  
-**Prior code CI:** [run #252](https://github.com/somildholakia/UnAi/actions/runs/41660871637) — 295 tests passed in 7.28s; compileall passed. [Run #251](https://github.com/somildholakia/UnAi/actions/runs/41660522248) — 294 tests passed in 6.84s; compileall passed.  
-**Documentation CI:** [run #253](https://github.com/somildholakia/UnAi/actions/runs/41661192712) — 295 tests passed in 7.24s; compileall passed.  
+**Latest code commit:** `7950c8a65ef4151530b599053079e94b8fdd0a32` — hash-pinned task-specific code context retrieval.  
+**Latest code CI:** [run #256](https://github.com/somildholakia/UnAi/actions/runs/41668817672) — 300 tests passed in 7.10s; Python compileall passed.  
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.  
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.  
 
-### Latest code changes
+### Latest M2 increment
 
-- `a8b538a31bc9bea00fff506d1cc0e684fc639567` — trainer validates the prepared corpus manifest, split file hashes/names/counts/groups, canonical record IDs, consent/license/verification metadata and bounded message shapes before loading model weights.
-- `c0600017504df5f5ac541bfd4b7a1d539834d04a` — corpus preparation records raw input SHA-256/byte count and validates all three specialist splits before writing split artifacts. Existing outputs remain unchanged when split preflight validation fails.
-- `2173651b1fd84da4104088a6240f749bc7edab2f` — trainer hashes and parses the same byte snapshots, removing a separate-read TOCTOU gap.
+- Python AST file and symbol nodes now carry a SHA-256 computed from the exact byte snapshot decoded and parsed by the indexer.
+- Task inspection copies that source fingerprint into its persisted `symbol-retrieval` evidence.
+- `GET /api/tasks/{task_id}/context` returns line-numbered, bounded excerpts only for symbols selected by an approved inspection. No caller-supplied file path or symbol name is accepted.
+- The endpoint uses the existing `PatchManager.read_file` permission and path-safety boundary, then compares the current digest with the inspection digest. Changed files fail closed with HTTP 409 and require a fresh inspection.
+- Limits: at most 10 symbols, 120 source lines and 6,000 characters per excerpt, with a 24,000-character aggregate response budget.
+- Regression tests cover graph hash propagation, context retrieval, incomplete inspection and stale-source rejection. GitHub Actions run #256 passed 300 tests and Python compilation.
+- The M2 bounded task-specific retrieval roadmap item is now checked off. Python graph persistence/incremental refresh and richer dependency/call graphs remain open.
 
-### Implemented
+### Current implementation status
 
-- M4: grounded verification for module functions, static/class methods and bounded ordinary instance methods; constructor fixture hashes are bound to evidence.
-- Publisher trust: issuer-bound signatures, rotation/revocation and offline root-signed trust bundles with an explicit operator-managed rollback floor.
-- M5 corpus preparation: consent/license/verification gating, sanitization, deduplication, hashed repository groups, deterministic repository-disjoint splits and raw source-file lineage.
-- M5 training boundary: adjacent manifest verification, exact split filename/hash/count checks, canonical record-ID recomputation, strict provenance/message validation and same-snapshot hash/parse before model loading.
-- M5 training infrastructure: separate next_action, planner and verifier LoRA/QLoRA jobs, assistant-only loss masking and reproducibility manifests.
-- M5 evaluation/promotion infrastructure: matched held-out results, frozen case contracts, recomputed hashes, paired outcomes and exact two-sided McNemar significance; mobile release gate requires real device measurements.
-- Runtime: server-configured specialist routes fail closed with HTTP 503 when an adapter mapping is missing; no silent base-model fallback.
+- M0/M1: local-first modular engine, Brain and training preparation foundations implemented.
+- M2: deterministic task compiler and Python AST graph implemented; task-scoped, hash-pinned context slices delivered. Persistent/incremental graph storage and task-specific graph slicing beyond matched symbols remain open.
+- M3: evidence-producing task inspection, separately approved patch/test workflow, Docker-isolated test runner and read-only MCP bridge implemented as a prototype.
+- M4: grounded verification supports the bounded synchronous/async function, static/class methods and ordinary instance methods described in the roadmap; publisher trust-bundle verification is also implemented.
+- M5 infrastructure: consent/license/verification-gated corpus preparation, separate specialist training jobs, matched evaluation and fail-closed runtime routing implemented.
 
 ### Not completed — do not overclaim
 
-- No consented/licensed real training corpus has been supplied.
-- No specialist weights have been trained; training code is implemented but not executed.
+- No consented/licensed real trajectory corpus has been supplied.
+- No specialist weights have been trained or released.
 - No real held-out model comparison has been run.
 - No physical Android RSS/TTFT/throughput/thermal benchmark has been collected.
-- M5 remains infrastructure-complete, not trained/released; M6 device/deployment validation remains open.
+- M5 is infrastructure-complete, not trained/released; M6 device/deployment validation remains open.
+- Cloudflare Brain deployment is still scaffolding unless its live resources, auth and URL are independently verified.
+- The mobile RAM and latency limits remain targets, not measurements.
 
 ### PR relationship and merge safety
 
-PR #28 is the combined integration PR against main and contains the publisher trust-bundle work formerly tracked in PR #27 plus M4/M5 changes. PR #27 remains open but overlaps; do not merge it separately while PR #28 is the integration candidate. Do not merge PR #28 unless the user explicitly asks. Keep further work on this feature branch and preserve main.
+PR #28 is the combined integration PR against main and contains the publisher trust-bundle work formerly tracked in PR #27 plus M4/M5 changes. PR #27 overlaps; do not merge it separately while PR #28 is the integration candidate. Do not merge PR #28 unless the user explicitly asks. Keep development on `feat/m4-instance-methods-m5-specialists`; preserve `main`.
 
-### Resume instructions for a new chat
+### Resume instructions for the next chat
 
-1. Fetch the active branch, PR #28 and current workflow status; confirm the latest branch head and latest code CI.
-2. Read `docs/CHECKPOINT.md`, `docs/ROADMAP.md` and this file before changing code.
-3. The latest code validated by CI #254 is `2173651b1fd84da4104088a6240f749bc7edab2f`. A documentation-only checkpoint commit may sit on top of this code revision.
-4. For actual model training, first obtain an explicitly user-approved consented/licensed corpus and select a feasible base model/training environment. Never use private chats or private repositories as training data without explicit consent.
-5. For mobile release, collect real instrumented Android measurements; schema example numbers are not measured results.
-6. After each meaningful milestone, update this checkpoint and continuity file with exact commit and CI evidence.
-
+1. Fetch the active branch and PR #28; verify the branch head, main SHA and latest Actions result.
+2. Read `docs/CHECKPOINT.md`, `docs/ROADMAP.md` and this file before editing.
+3. Latest validated code is `7950c8a65ef4151530b599053079e94b8fdd0a32`; a documentation-only handoff commit may sit above it.
+4. Next M2 engineering candidate: design incremental SQLite persistence for the Python graph with atomic refresh, source fingerprints, bounded schema migrations and stale-cache detection. Do not mark complete until it is covered by tests.
+5. For actual M5 model training, first obtain an explicitly user-approved consented/licensed corpus and select a feasible base model/training environment. Never use private chats or private repositories without explicit permission and compatible licenses.
+6. For mobile release, collect real instrumented Android measurements. Example/schema numbers are not measured results.
+7. After each meaningful milestone, update checkpoint and continuity docs with exact commit and CI evidence.
