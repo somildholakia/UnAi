@@ -119,6 +119,20 @@ def test_evaluate_rows_rejects_bad_evidence_and_base_model_mismatch() -> None:
         evaluate_rows(rows)
 
 
+
+def test_evaluate_rows_rejects_unavailable_runs_and_missing_source_provenance() -> None:
+    rows = [_row("case-1", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[1]["verification"]["status"] = "unavailable"
+    with pytest.raises(ValueError, match="unavailable execution"):
+        evaluate_rows(rows)
+
+    rows = [_row("case-1", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[0]["provenance"].pop("source")
+    with pytest.raises(ValueError, match="source provenance"):
+        evaluate_rows(rows)
+
+
+
 def test_evaluate_rows_reports_adapter_regression_instead_of_hiding_it() -> None:
     rows = [
         _row("case-1", "base", True),
