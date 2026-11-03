@@ -362,3 +362,12 @@ The change does not alter M5's external prerequisites: no approved real corpus, 
 - Updated README, code-graph documentation and the M2 roadmap checklist.
 
 This delivers the previously open M2 task-specific retrieval item. The graph is still Python-only, rebuilt on demand, and does not yet persist incrementally in SQLite or infer call graphs. No model weights or mobile performance claims are implied by this work.
+
+
+## Handoff verification
+
+- Latest code commit: `7950c8a65ef4151530b599053079e94b8fdd0a32`; GitHub Actions #256 passed (300 tests, compileall).
+- Latest branch HEAD at handoff: `e752cecb10cc2c3eb0d44c5938f6fc316880a80d`; documentation CI #257 passed.
+- Main remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
+- PR #28 remains open and unmerged. No merge was performed.
+- For a new chat, fetch the branch and CI again, then read this file, `docs/CONTINUITY.md`, and `docs/ROADMAP.md` before continuing.
