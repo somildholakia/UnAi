@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import pytest
 
 from training.evaluate_results import evaluate_rows
@@ -11,6 +12,7 @@ def _row(case_id: str, system: str, passed: bool, *, specialist: str = "next_act
     row = {
         "suite_id": "heldout-v1",
         "case_id": case_id,
+        "case_sha256": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
         "specialist": specialist,
         "system": system,
         "model_id": {
@@ -91,6 +93,54 @@ def test_evaluate_rows_compares_three_systems_on_matched_heldout_cases() -> None
     assert report["paired_comparison"]["adapter_quality_improved_without_regressions"] is True
 
 
+def test_exact_mcnemar_requires_sufficient_paired_evidence() -> None:
+    rows = []
+    for index in range(30):
+        base_pass = index >= 10
+        for system in ("base", "adapter", "tool_augmented"):
+            passed = True if system != "base" and index < 10 else base_pass
+            rows.append(_row(f"stat-case-{index}", system, passed))
+    report = evaluate_rows(rows)
+    gate = report["statistical_gate"]
+    assert gate["adapter_passed"] is True
+    assert gate["adapter_mcnemar_exact_p_value"] == pytest.approx(2 / 1024)
+
+    small = evaluate_rows([
+        _row("tiny-1", "base", False),
+        _row("tiny-1", "adapter", True),
+        _row("tiny-1", "tool_augmented", True),
+    ])
+    assert small["paired_comparison"]["adapter_quality_improved_without_regressions"] is True
+    assert small["statistical_gate"]["adapter_passed"] is False
+
+
+def test_evaluate_rows_rejects_mismatched_case_content_hashes() -> None:
+    rows = [_row("case-hash", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[1]["case_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="Case content hash mismatch"):
+        evaluate_rows(rows)
+
+
+def test_evaluate_rows_rejects_failed_status_with_all_checks_passing() -> None:
+    rows = [_row("case-status", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[0]["verification"]["status"] = "failed"
+    with pytest.raises(ValueError, match="contradicts all-passing"):
+        evaluate_rows(rows)
+
+
+def test_release_gate_recomputes_exact_p_value_instead_of_trusting_reported_boolean() -> None:
+    rows = []
+    for index in range(30):
+        base_pass = index >= 10
+        for system in ("base", "adapter", "tool_augmented"):
+            passed = True if system != "base" and index < 10 else base_pass
+            rows.append(_row(f"tamper-case-{index}", system, passed))
+    evaluation = evaluate_rows(rows)
+    evaluation["statistical_gate"]["adapter_mcnemar_exact_p_value"] = 0.0
+    with pytest.raises(ValueError, match="does not match paired outcome counts"):
+        decide(_manifest(), evaluation, _mobile(_manifest()))
+
+
 def test_evaluate_rows_rejects_missing_systems_duplicate_rows_and_unverified_tool_traces() -> None:
     incomplete = [_row("case-1", system, True) for system in ("base", "adapter")]
     with pytest.raises(ValueError, match="base, adapter and tool_augmented"):
@@ -145,17 +195,17 @@ def test_evaluate_rows_reports_adapter_regression_instead_of_hiding_it() -> None
 
 
 def test_release_gate_requires_quality_gain_and_physical_device_pass() -> None:
-    rows = [
-        _row("case-1", "base", False),
-        _row("case-1", "adapter", True),
-        _row("case-1", "tool_augmented", True),
-        _row("case-2", "base", True),
-        _row("case-2", "adapter", True),
-        _row("case-2", "tool_augmented", True),
-    ]
+    rows = []
+    for index in range(30):
+        base_pass = index >= 10
+        for system in ("base", "adapter", "tool_augmented"):
+            passed = True if system != "base" and index < 10 else base_pass
+            rows.append(_row(f"case-{index}", system, passed))
     evaluation = evaluate_rows(rows)
     manifest = _manifest()
 
+    assert evaluation["statistical_gate"]["minimum_heldout_cases"] == 30
+    assert evaluation["statistical_gate"]["adapter_mcnemar_exact_p_value"] < 0.05
     decision = decide(manifest, evaluation, _mobile(manifest), manifest_sha256="b" * 64)
 
     assert decision["releasable"] is True
