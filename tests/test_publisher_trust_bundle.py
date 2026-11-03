@@ -88,9 +88,11 @@ def test_signed_publisher_trust_bundle_verifies_and_returns_provenance() -> None
 def test_signed_publisher_trust_bundle_rejects_unpinned_root() -> None:
     now = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
     bundle, _roots, _payload = _make_bundle(now=now)
+    other_root = Ed25519PrivateKey.generate()
+    roots = {"different-root": _public_key_b64(other_root)}
 
     with pytest.raises(PublisherTrustBundleError, match="not operator-pinned"):
-        load_signed_publisher_trust_bundle(bundle, {}, now=now)
+        load_signed_publisher_trust_bundle(bundle, roots, now=now)
 
 
 def test_signed_publisher_trust_bundle_rejects_bad_signature_and_payload_tampering() -> None:
@@ -206,12 +208,13 @@ def test_signed_publisher_trust_bundle_rejects_wildcards_and_invalid_keys() -> N
 
 
 def test_signed_publisher_trust_bundle_rejects_duplicate_json_members_and_oversize() -> None:
+    roots = {"root-2026": _b64(b"x" * 32)}
     duplicate = '{"payload": {}, "payload": {}, "signature_b64": "x"}'
     with pytest.raises(PublisherTrustBundleError, match="Duplicate JSON member"):
-        load_signed_publisher_trust_bundle(duplicate, {}, now=datetime.now(timezone.utc))
+        load_signed_publisher_trust_bundle(duplicate, roots, now=datetime.now(timezone.utc))
 
     with pytest.raises(PublisherTrustBundleError, match="exceeds the 262144-byte limit"):
-        load_signed_publisher_trust_bundle(" " * (256 * 1024 + 1), {}, now=datetime.now(timezone.utc))
+        load_signed_publisher_trust_bundle(" " * (256 * 1024 + 1), roots, now=datetime.now(timezone.utc))
 
 
 def test_transparency_root_keyring_requires_valid_raw_ed25519_keys() -> None:
