@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
+from pathlib import Path
 import pytest
 
 from training.evaluate_results import evaluate_rows
@@ -72,6 +74,27 @@ def _manifest() -> dict:
         "base_model": "acme/small-code-model",
         "adapter_artifacts_sha256": "a" * 64,
     }
+
+
+def test_benchmark_result_schema_is_valid_json_and_requires_case_identity() -> None:
+    schema_path = Path(__file__).resolve().parents[1] / "training" / "schemas" / "benchmark-result.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert schema["properties"]["schema"]["const"] == "unai.benchmark-result.v1"
+    assert "case_sha256" in schema["required"]
+    assert "provenance" in schema["required"]
+    assert schema["properties"]["case_sha256"]["pattern"] == "^[a-fA-F0-9]{64}$"
+
+
+def test_evaluate_rows_rejects_fields_outside_benchmark_result_schema() -> None:
+    rows = [_row("schema-extra", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[0]["unreviewed_metadata"] = {"free_form": True}
+    with pytest.raises(ValueError, match="unexpected benchmark fields"):
+        evaluate_rows(rows)
+
+    rows = [_row("schema-nested-extra", system, True) for system in ("base", "adapter", "tool_augmented")]
+    rows[0]["verification"]["raw_log"] = "raw data"
+    with pytest.raises(ValueError, match="verification contains unexpected fields"):
+        evaluate_rows(rows)
 
 
 def test_evaluate_rows_compares_three_systems_on_matched_heldout_cases() -> None:
