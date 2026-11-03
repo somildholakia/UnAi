@@ -46,8 +46,12 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
     checks = verification.get("checks")
     evidence_id = verification.get("evidence_id")
     verifier = verification.get("verifier")
+    if status == "unavailable":
+        raise ValueError(
+            f"Line {line_number}: unavailable execution cannot be counted as a verified held-out outcome."
+        )
     if (
-        status not in {"passed", "failed", "unavailable"}
+        status not in {"passed", "failed"}
         or not isinstance(checks, list)
         or not checks
         or not isinstance(evidence_id, str)
@@ -67,8 +71,13 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
     derived_pass = status == "passed" and all(check["passed"] for check in checks)
     if status == "passed" and not all(check["passed"] for check in checks):
         raise ValueError(f"Line {line_number}: passed status contradicts a failed verification check.")
-    if not isinstance(provenance, dict) or provenance.get("consented") is not True:
-        raise ValueError(f"Line {line_number}: explicit consent provenance is required.")
+    if (
+        not isinstance(provenance, dict)
+        or provenance.get("consented") is not True
+        or not isinstance(provenance.get("source"), str)
+        or not provenance["source"].strip()
+    ):
+        raise ValueError(f"Line {line_number}: explicit consent and source provenance are required.")
     if not isinstance(provenance.get("license"), str) or not provenance["license"].strip():
         raise ValueError(f"Line {line_number}: license provenance is required.")
 
@@ -78,10 +87,12 @@ def _validated_result(row: Any, line_number: int) -> dict[str, Any]:
             not isinstance(tool_trace, dict)
             or not isinstance(tool_trace.get("tools"), list)
             or not tool_trace["tools"]
+            or not all(isinstance(tool, str) and tool.strip() for tool in tool_trace["tools"])
             or not isinstance(tool_trace.get("evidence_ids"), list)
             or not tool_trace["evidence_ids"]
+            or not all(isinstance(item, str) and item.strip() for item in tool_trace["evidence_ids"])
         ):
-            raise ValueError(f"Line {line_number}: tool_augmented rows require tool names and evidence IDs.")
+            raise ValueError(f"Line {line_number}: tool_augmented rows require named tools and evidence IDs.")
     elif tool_trace is not None:
         raise ValueError(f"Line {line_number}: base/adapter rows must not include tool_trace.")
 
