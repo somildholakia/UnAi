@@ -38,6 +38,14 @@
 - Constructor fixture SHA-256 is included in append-only oracle evidence and optional reviewer-attestation statements. Existing module/static/class-method signatures remain compatible.
 - Added sync/async instance-method, unsafe-constructor, signature and fixture-attestation tests. CI has not yet run on this continuation branch.
 
+### M5 runtime integration in this continuation
+
+- Added optional server-side model IDs for `next_action`, `planner` and `verifier` in Engine settings and `.env.example`.
+- Added a typed specialist chat API and per-specialist prompt profiles. The OpenAI-compatible provider accepts an internal model override selected only from server configuration.
+- Missing specialist mappings return HTTP 503; there is no silent base-model fallback. The endpoint remains behind the existing Engine token/loopback middleware.
+- Added tests for configured routing, missing-adapter behavior, invalid role rejection and provider model-override payloads.
+- Runtime routing is ready for served adapters, but no specialist weights are available yet.
+
 ### M5 evaluation hardening in this continuation
 
 - Added SHA-256 task/acceptance-content fingerprints to each matched base/adapter/tool result; all three systems must run the same exact case bytes.
