@@ -75,7 +75,7 @@ def parse_publisher_trust_roots(raw: str) -> dict[str, str]:
             raise PublisherTrustBundleError(f"Trust-bundle signing key {key_id!r} must decode to 32 bytes.")
         validated[key_id] = public_key_b64
     if not validated:
-        raise PublisherTrustBundleError("At least one operator-pinned transparency root is required.")
+        raise PublisherTrustBundleError("At least one operator-pinned trust-bundle signing root is required.")
     return validated
 
 
