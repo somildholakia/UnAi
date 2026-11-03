@@ -270,3 +270,29 @@ To run the local task MCP server, configure UNAI_ENGINE_API_URL, UNAI_ENGINE_API
     unai-task-mcp
 
 Leave UNAI_MCP_ALLOW_WORKSPACE_READ=false unless the process owner explicitly intends to grant read access to the one configured workspace. Keep API tokens out of browser bundles and prompts.
+
+
+## 2026-11-03 — M5 release-gate hardening / handoff
+
+**Canonical resume point for the next chat**
+
+- Repository: https://github.com/somildholakia/UnAi
+- Active branch: `feat/m4-instance-methods-m5-specialists`
+- Latest branch/PR head: `3494bb1ffffe8af063d3469340f118ff60f2d46d`
+- Integration PR: https://github.com/somildholakia/UnAi/pull/28 (open, mergeable; do not merge unless explicitly requested).
+- Main remains unchanged at `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
+- Latest CI run #247: https://github.com/somildholakia/UnAi/actions/runs/41659235207 — **290 tests passed in 5.72s**, Python compileall passed. This run validates the current branch head exactly.
+
+### Latest changes in this continuation
+
+- `4a66efde06b56f0c085c2f314f0fd20f497b83f3`: fixed M5 release-gate numeric validation so a negative adapter success-rate delta is accepted as a valid measured value and results in a blocked quality gate, rather than raising a validation exception.
+- `3494bb1ffffe8af063d3469340f118ff60f2d46d`: added a regression test proving a worse-than-base adapter is reported as non-releasable, not as a tool error.
+- CI #247 completed successfully with 290 passing tests and compileall.
+
+### State / safe next actions
+
+M4 instance-method fixture support and M5 corpus-preparation, LoRA/QLoRA training code, matched held-out evaluation, statistical quality gate, physical-device release gate, and fail-closed specialist routing are implemented. No user-approved consented/licensed training corpus has been supplied, no specialist adapter weights have been trained, and no physical Android measurements have been collected. Do not claim those execution milestones are complete.
+
+PR #28 is the combined integration PR and includes the publisher trust-bundle work previously tracked by PR #27. PR #27 remains open but overlaps; do not merge it separately while #28 is the integration candidate. Do not merge PR #28 unless the user explicitly asks.
+
+**Next chat instruction:** continue from branch `feat/m4-instance-methods-m5-specialists`, exact HEAD `3494bb1ffffe8af063d3469340f118ff60f2d46d`. First inspect PR #28, branch and latest CI; read this section and `docs/CONTINUITY.md` / `docs/ROADMAP.md`. Preserve main. Continue with M5 real-data/training readiness and remaining M4 security/verification work without fabricating datasets, training runs or device metrics.
