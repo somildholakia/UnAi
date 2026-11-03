@@ -556,16 +556,17 @@ def test_engine_api_preflight_allows_authorization_header(monkeypatch) -> None:
     assert response.status_code == 200
     assert "authorization" in response.headers.get("access-control-allow-headers", "").lower()
 
-def test_specialist_chat_endpoint_uses_configured_model_and_returns_role() -> None:
+def test_specialist_chat_endpoint_uses_configured_model_and_returns_role(monkeypatch) -> None:
     class FakeProvider:
         async def complete(self, messages, *, model_override=None):
             assert model_override == "local-next-action-lora"
             assert "next-action specialist" in messages[0]["content"]
             return "Inspect the source file first."
 
-    main_module.agent = AgentOrchestrator(
-        FakeProvider(),
-        specialist_models={"next_action": "local-next-action-lora"},
+    monkeypatch.setattr(
+        main_module,
+        "agent",
+        AgentOrchestrator(FakeProvider(), specialist_models={"next_action": "local-next-action-lora"}),
     )
     response = TestClient(app).post(
         "/api/specialists/next_action/chat",
@@ -578,12 +579,12 @@ def test_specialist_chat_endpoint_uses_configured_model_and_returns_role() -> No
     assert response.json()["message"] == "Inspect the source file first."
 
 
-def test_specialist_chat_endpoint_returns_unavailable_without_base_model_fallback() -> None:
+def test_specialist_chat_endpoint_returns_unavailable_without_base_model_fallback(monkeypatch) -> None:
     class FakeProvider:
         async def complete(self, messages, *, model_override=None):
             raise AssertionError("Unconfigured specialists must not invoke the provider.")
 
-    main_module.agent = AgentOrchestrator(FakeProvider())
+    monkeypatch.setattr(main_module, "agent", AgentOrchestrator(FakeProvider()))
     response = TestClient(app).post(
         "/api/specialists/verifier/chat",
         json={"message": "Verify this patch."},
