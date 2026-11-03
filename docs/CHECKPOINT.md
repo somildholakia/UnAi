@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M2 task-specific code-context retrieval added with source-hash freshness checks; CI passed (300 tests)
+**Checkpoint:** M2 incremental SQLite repository graph persistence delivered; atomic refresh, SHA-256 source freshness and regression coverage verified by CI (305 tests)
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -366,8 +366,37 @@ This delivers the previously open M2 task-specific retrieval item. The graph is 
 
 ## Handoff verification
 
-- Latest code commit: `7950c8a65ef4151530b599053079e94b8fdd0a32`; GitHub Actions #256 passed (300 tests, compileall).
+- Latest code commit: `c68e300ff7b7c754608dffbc611b729daee44de3`; GitHub Actions #260 passed (305 tests, compileall).
 - Previous handoff documentation revision: `e752cecb10cc2c3eb0d44c5938f6fc316880a80d`; documentation CI #257 passed. This checkpoint has since received another documentation-only refresh; fetch the live branch head before continuing.
 - Main remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
 - PR #28 remains open and unmerged. No merge was performed.
 - For a new chat, fetch the branch and CI again, then read this file, `docs/CONTINUITY.md`, and `docs/ROADMAP.md` before continuing.
+
+
+## 2026-11-03 — M2 incremental SQLite repository graph persistence
+
+**Code commit:** `c68e300ff7b7c754608dffbc611b729daee44de3`  
+**GitHub Actions:** [run #260](https://github.com/somildholakia/UnAi/actions/runs/41671966813) — **305 tests passed in 7.96s**; `python -m compileall -q apps/engine/src training` passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**Integration PR:** [#28](https://github.com/somildholakia/UnAi/pull/28), open and unmerged.
+
+### Delivered
+
+- Added `SQLiteCodeGraphStore` with versioned schema for workspace metadata, per-file graph records and derived edges. WAL, foreign keys, busy timeout and full synchronous writes are enabled.
+- Enabled the cache in the Engine with `UNAI_CODE_GRAPH_DB_PATH` (default `.data/code-graph.sqlite3`); direct indexer use remains possible without persistence.
+- Each eligible Python file is read as one bounded byte snapshot. Before/after stat and inode checks reject changes during the read. SHA-256 is calculated from those exact bytes on every refresh, so same-size edits with restored timestamps are still detected.
+- Unchanged file hashes reuse stored AST symbol ranges, parse diagnostics and import inputs. Changed/new files are reparsed; deleted file rows disappear from the new snapshot. Global imports and heuristic test relationships are rebuilt from the current candidate set.
+- Added a deterministic repository fingerprint over sorted relative paths and source digests. Graph responses now report cache state, generation, hashed/reparsed/reused/removed counts.
+- All repository metadata, file rows and derived edges publish together inside one `BEGIN IMMEDIATE` transaction. A failure rolls back to the preceding complete graph; an optimistic generation check detects concurrent refreshes, with one retry at the indexer boundary.
+- Unknown future SQLite schema versions fail closed. The database contains graph metadata and source fingerprints, not source bodies.
+- Added tests for cold/warm cache behavior, incremental changed/new/deleted files, same-size/same-mtime source edits, atomic rollback and unknown schema versions.
+
+### M2 status and limits
+
+The roadmap item for persistent file/symbol/import/test graph storage is now complete for the bounded Python AST graph. Every refresh still reads and hashes the bounded eligible source files; the optimization avoids re-parsing unchanged files, not filesystem traversal or hashing. The graph is not a call graph, its test-to-source links remain heuristic, and it is not a complete semantic model. No model training, mobile benchmarks or production-readiness claims follow from this work.
+
+### Safe continuation
+
+- Continue on `feat/m4-instance-methods-m5-specialists`; preserve `main`.
+- PR #28 remains the integration PR and must not be merged without explicit permission. PR #27 overlaps and must not be merged separately.
+- M5 still requires a real consented/licensed corpus, actual specialist training, held-out comparison and physical Android measurements. None is represented as complete by this checkpoint.

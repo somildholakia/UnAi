@@ -60,8 +60,8 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi  
 **Active branch:** `feat/m4-instance-methods-m5-specialists`  
-**Latest code commit:** `7950c8a65ef4151530b599053079e94b8fdd0a32` — hash-pinned task-specific code context retrieval.  
-**Latest code CI:** [run #256](https://github.com/somildholakia/UnAi/actions/runs/41668817672) — 300 tests passed in 7.10s; Python compileall passed.  
+**Latest code commit:** `c68e300ff7b7c754608dffbc611b729daee44de3` — incremental SQLite Python repository graph persistence.  
+**Latest code CI:** [run #260](https://github.com/somildholakia/UnAi/actions/runs/41671966813) — 305 tests passed in 7.96s; Python compileall passed.  
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.  
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.  
 
@@ -73,12 +73,12 @@ minimum; it is not automatically persisted.
 - The endpoint uses the existing `PatchManager.read_file` permission and path-safety boundary, then compares the current digest with the inspection digest. Changed files fail closed with HTTP 409 and require a fresh inspection.
 - Limits: at most 10 symbols, 120 source lines and 6,000 characters per excerpt, with a 24,000-character aggregate response budget.
 - Regression tests cover graph hash propagation, context retrieval, incomplete inspection and stale-source rejection. GitHub Actions run #256 passed 300 tests and Python compilation.
-- The M2 bounded task-specific retrieval roadmap item is now checked off. Python graph persistence/incremental refresh and richer dependency/call graphs remain open.
+- The M2 bounded task-specific retrieval roadmap item is checked off. Incremental SQLite persistence and atomic refresh are also now implemented (details below). Richer dependency/call graphs remain open.
 
 ### Current implementation status
 
 - M0/M1: local-first modular engine, Brain and training preparation foundations implemented.
-- M2: deterministic task compiler and Python AST graph implemented; task-scoped, hash-pinned context slices delivered. Persistent/incremental graph storage and task-specific graph slicing beyond matched symbols remain open.
+- M2: deterministic task compiler and bounded Python AST graph implemented; task-scoped, hash-pinned context slices and incremental SQLite persistence delivered. Rich call/dependency graphs and non-Python indexing remain open.
 - M3: evidence-producing task inspection, separately approved patch/test workflow, Docker-isolated test runner and read-only MCP bridge implemented as a prototype.
 - M4: grounded verification supports the bounded synchronous/async function, static/class methods and ordinary instance methods described in the roadmap; publisher trust-bundle verification is also implemented.
 - M5 infrastructure: consent/license/verification-gated corpus preparation, separate specialist training jobs, matched evaluation and fail-closed runtime routing implemented.
@@ -116,3 +116,34 @@ PR #28 is the combined integration PR against main and contains the publisher tr
 - **Handoff documentation CI:** run #257, success.
 - **Main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
 - **PR #28:** open, mergeable, not merged. Do not merge without explicit instruction.
+
+
+## M2 incremental SQLite persistence — latest validated continuation
+
+**Code commit:** `c68e300ff7b7c754608dffbc611b729daee44de3`  
+**CI:** [GitHub Actions run #260](https://github.com/somildholakia/UnAi/actions/runs/41671966813) — 305 tests passed in 7.96s; Python compileall passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** open and unmerged; do not merge without explicit permission.
+
+### Behavior added
+
+- Engine graph indexing is backed by `UNAI_CODE_GRAPH_DB_PATH` (default `.data/code-graph.sqlite3`). The PythonCodeGraphIndexer can still run without a cache when constructed directly without `cache_path`.
+- The indexer hashes every eligible source snapshot every time it refreshes. It uses the digest of exact bytes, not mtime/size metadata, to decide whether parsed AST data can be reused.
+- Changed/new files are reparsed; unchanged files reuse their persisted AST record; deleted files are removed. Repository-wide import and heuristic test edges are regenerated from the current file set.
+- A deterministic source fingerprint covers sorted relative file paths and SHA-256 hashes. The graph summary reports cache state, generation and per-refresh hashed/reparsed/reused/removed counts.
+- SQLite stores file and symbol metadata, source fingerprints and relationships only. It does not store source bodies.
+- A complete snapshot is written in a single `BEGIN IMMEDIATE` transaction, including repository metadata, file records and derived edges. Rollback keeps the previous snapshot intact. Optimistic generation checking guards concurrent refreshes, with one retry.
+- Schema version uses `PRAGMA user_version`; a database created by a newer schema version is rejected rather than modified.
+
+### Verification
+
+Regression tests cover cold/warm cache behavior, changed/new/deleted source files, edits that preserve byte size and mtime, rollback after an injected write failure, and rejection of a future schema version. CI #260 passed all 305 tests and the Python compile step.
+
+### Known boundaries / next work
+
+- Each refresh still walks and hashes the bounded set of candidate Python files; it avoids re-parsing unchanged files, not the full scan/hash cost.
+- The graph remains Python-only, has no call graph, and test-to-source links remain heuristic.
+- M2 persistent graph storage is now checked off in the roadmap; further M2 work should focus on measured improvements or explicitly scoped dependency/call-graph relationships.
+- M5 remains training infrastructure only: no real approved corpus, trained specialist weights, held-out model comparison or physical Android measurement has been supplied or run.
+- M6 physical-device/deployment validation remains open.
+- Continue on this feature branch. Keep `main` unchanged, and never merge PR #28 or the overlapping PR #27 absent explicit permission.
