@@ -170,6 +170,24 @@ def test_evaluate_rows_rejects_bad_evidence_and_base_model_mismatch() -> None:
 
 
 
+def test_evaluate_rows_rejects_model_identity_changes_between_cases() -> None:
+    rows = []
+    for case_id in ("case-a", "case-b"):
+        for system in ("base", "adapter", "tool_augmented"):
+            rows.append(_row(case_id, system, True))
+    rows[-2]["model_id"] = "different-adapter-build"
+    with pytest.raises(ValueError, match="Model identity changed"):
+        evaluate_rows(rows)
+
+
+def test_evaluate_rows_rejects_weaker_than_release_minimum_thresholds() -> None:
+    rows = [_row("case-threshold", system, True) for system in ("base", "adapter", "tool_augmented")]
+    with pytest.raises(ValueError, match="at least 30"):
+        evaluate_rows(rows, minimum_heldout_cases=10)
+    with pytest.raises(ValueError, match="no higher than 0.05"):
+        evaluate_rows(rows, significance_alpha=0.1)
+
+
 def test_evaluate_rows_rejects_unavailable_runs_and_missing_source_provenance() -> None:
     rows = [_row("case-1", system, True) for system in ("base", "adapter", "tool_augmented")]
     rows[1]["verification"]["status"] = "unavailable"
