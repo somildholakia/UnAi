@@ -101,8 +101,8 @@ PR #28 is the combined integration PR against main and contains the publisher tr
 
 1. Fetch the active branch and PR #28; verify the branch head, main SHA and latest Actions result.
 2. Read `docs/CHECKPOINT.md`, `docs/ROADMAP.md` and this file before editing.
-3. Latest code commit is `7950c8a65ef4151530b599053079e94b8fdd0a32` (validated by Actions #256: 300 tests and compileall passed). Latest branch HEAD, including this handoff, is `e752cecb10cc2c3eb0d44c5938f6fc316880a80d`; documentation CI #257 passed. Confirm the live branch head and latest workflow before editing.
-4. Next M2 engineering candidate: design incremental SQLite persistence for the Python graph with atomic refresh, source fingerprints, bounded schema migrations and stale-cache detection. Do not mark complete until it is covered by tests.
+3. Latest validated code commit is `f083452af8bd16ed8cbfec70fb1157e8b76f7084` (Actions #264: 311 tests and compileall passed). Fetch the live branch head and latest workflow before editing; a docs-only checkpoint may follow the code commit.
+4. Next engineering candidate: design M3 per-user/scoped Engine credentials, revocation, rate limiting and tenant isolation with a documented threat model and explicit security regression tests. Keep public deployment disabled until reviewed.
 5. For actual M5 model training, first obtain an explicitly user-approved consented/licensed corpus and select a feasible base model/training environment. Never use private chats or private repositories without explicit permission and compatible licenses.
 6. For mobile release, collect real instrumented Android measurements. Example/schema numbers are not measured results.
 7. After each meaningful milestone, update checkpoint and continuity docs with exact commit and CI evidence.
@@ -111,8 +111,8 @@ PR #28 is the combined integration PR against main and contains the publisher tr
 ### Exact handoff revision
 
 - **Previous handoff documentation revision:** `e752cecb10cc2c3eb0d44c5938f6fc316880a80d` (CI #257 passed); this file has since received another docs-only refresh, so fetch the live branch head at session start.
-- **Latest code commit:** `7950c8a65ef4151530b599053079e94b8fdd0a32`
-- **Code CI:** run #256, 300 tests passed; compileall passed.
+- **Latest validated code commit:** `f083452af8bd16ed8cbfec70fb1157e8b76f7084`
+- **Code CI:** run #264, 311 tests passed; compileall passed.
 - **Handoff documentation CI:** run #257, success.
 - **Main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
 - **PR #28:** open, mergeable, not merged. Do not merge without explicit instruction.

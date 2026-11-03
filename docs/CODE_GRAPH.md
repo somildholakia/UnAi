@@ -27,4 +27,4 @@ Context budgets are deliberately small: at most 10 symbols, 120 source lines and
 - A refresh is committed with `BEGIN IMMEDIATE` in one SQLite transaction. File rows, repository metadata and the derived edge set switch together; rollback preserves the prior complete generation after a failed write. An optimistic generation check detects concurrent refreshes and the indexer retries once.
 - SQLite uses WAL, foreign keys, a busy timeout and full synchronous writes. The schema is versioned via `PRAGMA user_version`; unknown newer schema versions fail closed rather than being rewritten. Keep the database in local application data and back it up using normal SQLite-aware procedures.
 
-The graph remains Python-only and does not infer call graphs or guarantee test-to-source mappings. It is a navigation/retrieval aid, not a complete semantic model.
+The graph remains Python-only. Its conservative static call relationships are not a complete runtime call graph, and heuristic test-to-source mappings are not guaranteed. It is a navigation/retrieval aid, not a complete semantic model.
