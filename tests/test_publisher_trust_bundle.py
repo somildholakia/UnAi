@@ -160,6 +160,22 @@ def test_signed_publisher_trust_bundle_requires_positive_64_bit_sequence(sequenc
         load_signed_publisher_trust_bundle(envelope, roots, now=now)
 
 
+def test_signed_publisher_trust_bundle_rejects_ip_literal_domains() -> None:
+    now = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
+    bundle, roots, _ = _make_bundle(
+        now=now,
+        publishers={
+            "acme-specs-2026": {
+                "public_key_b64": _b64(b"x" * 32),
+                "issuer": "Acme Specifications",
+                "allowed_domains": ["192.0.2.10"],
+            }
+        },
+    )
+    with pytest.raises(PublisherTrustBundleError, match="not an IP literal"):
+        load_signed_publisher_trust_bundle(bundle, roots, now=now)
+
+
 def test_signed_publisher_trust_bundle_rejects_wildcards_and_invalid_keys() -> None:
     now = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)
     wildcard_bundle, roots, _ = _make_bundle(
