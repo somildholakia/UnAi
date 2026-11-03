@@ -34,6 +34,20 @@ class ChatResponse(BaseModel):
     mode: Literal["local-model"] = "local-model"
 
 
+SpecialistRole = Literal["next_action", "planner", "verifier"]
+
+
+class SpecialistChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=50_000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=40)
+
+
+class SpecialistChatResponse(BaseModel):
+    specialist: SpecialistRole
+    message: str
+    model: str
+
+
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     provider_configured: bool
