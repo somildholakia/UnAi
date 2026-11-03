@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure implemented; CI passed (288 tests)
+**Checkpoint:** M4 instance-method support and M5 specialist-training infrastructure implemented; CI passed (289 tests)
 **Date:** 2026-11-03
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -26,8 +26,8 @@
 **Current integration PR:** https://github.com/somildholakia/UnAi/pull/28 (combined PR against main; includes the publisher trust-bundle work formerly in PR #27)
 **Earlier publisher trust-bundle PR:** https://github.com/somildholakia/UnAi/pull/27 (overlapping predecessor; do not merge separately while PR #28 is the integration PR)
 **Current feature branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest tested code commit:** `c9fd14aa894d759d146a63ea7277fce6af607953`
-**CI:** run #239 — 288 tests passed in 6.79s; Python compile check passed.
+**Latest validated code commit:** `674726cbcc2b554bf564186f5fe49a7abb323bf4`
+**CI:** run #243 — 289 tests passed in 6.10s; Python compile check passed.
 **Working tree:** GitHub commits only; no local model training has been run.
 
 ### M4 additions in this continuation
@@ -45,6 +45,13 @@
 - Missing specialist mappings return HTTP 503; there is no silent base-model fallback. The endpoint remains behind the existing Engine token/loopback middleware.
 - Added tests for configured routing, missing-adapter behavior, invalid role rejection and provider model-override payloads.
 - Runtime routing is ready for served adapters, but no specialist weights are available yet.
+
+### M5 benchmark-contract integrity in this continuation
+
+- Added the exact `case_contract` object to every held-out result record: canonical prompt plus explicit acceptance criteria.
+- The evaluator recomputes SHA-256 from canonical JSON at input validation and rejects a supplied digest that does not match its own prompt/criteria. A matched trio must still agree on the same case digest.
+- Updated the strict JSON Schema and the benchmark guide with the new field; tests cover content edits with stale hashes and malformed contract structure.
+- CI run #243 passed all 289 tests and Python compilation. A later documentation-only cleanup removes a redundant digest example.
 
 ### M5 evaluation hardening in this continuation
 
