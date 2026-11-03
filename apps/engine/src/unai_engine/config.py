@@ -200,8 +200,8 @@ def _oracle_publisher_keys_from_env() -> dict[str, dict[str, Any]]:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    model_base_url: str = os.getenv("UNAI_MODEL_BASE_URL", "http://127.0.0.1:11434/v1").rstrip("/")
-    model_name: str = os.getenv("UNAI_MODEL_NAME", "qwen3-coder:latest")
+    model_base_url: str = os.getenv("UNAI_MODEL_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
+    model_name: str = os.getenv("UNAI_MODEL_NAME", "unai-local-coder")
     model_api_key: str = os.getenv("UNAI_MODEL_API_KEY", "")
     model_timeout_seconds: float = float(os.getenv("UNAI_MODEL_TIMEOUT_SECONDS", "180"))
     specialist_next_action_model: str = field(default_factory=lambda: _specialist_model_from_env("UNAI_SPECIALIST_NEXT_ACTION_MODEL"))
