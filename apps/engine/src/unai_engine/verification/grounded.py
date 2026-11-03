@@ -326,14 +326,10 @@ def _decorator_name(decorator: ast.expr) -> str | None:
     return decorator.id if isinstance(decorator, ast.Name) else None
 
 
-def _target_function(
-    source: str, symbol_name: str
-) -> ast.FunctionDef | ast.AsyncFunctionDef:
+def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
+    """Resolve only deterministic module functions and narrowly supported class methods."""
     parts = symbol_name.split(".")
-    if (
-        len(parts) not in {1, 2}
-        or any(not part.isidentifier() for part in parts)
-    ):
+    if len(parts) not in {1, 2} or any(not part.isidentifier() for part in parts):
         raise GroundedVerificationError(
             "Use a module-level function name or one ClassName.method name."
         )
@@ -363,6 +359,9 @@ def _target_function(
             raise GroundedVerificationError(
                 "Decorated functions are not supported at module level."
             )
+        invocation_kind = "module_function"
+        owner_name = None
+        constructor = None
     else:
         owner_name, method_name = parts
         classes = [
@@ -377,8 +376,9 @@ def _target_function(
             raise GroundedVerificationError(
                 f"Class name is ambiguous: {owner_name}.", 409
             )
+        owner = classes[0]
         methods = [
-            node for node in classes[0].body
+            node for node in owner.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == method_name
         ]
@@ -392,17 +392,76 @@ def _target_function(
             )
         function = methods[0]
         decorators = [_decorator_name(item) for item in function.decorator_list]
-        if decorators not in ([ "staticmethod" ], [ "classmethod" ]):
+        if decorators == ["staticmethod"]:
+            invocation_kind = "staticmethod"
+            constructor = None
+        elif decorators == ["classmethod"]:
+            invocation_kind = "classmethod"
+            constructor = None
+        elif not decorators:
+            invocation_kind = "instance_method"
+            if owner.decorator_list or owner.bases or owner.keywords:
+                raise GroundedVerificationError(
+                    "Instance-method targets require an undecorated top-level class without bases or metaclass keywords."
+                )
+            if any(
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__new__"
+                for node in owner.body
+            ):
+                raise GroundedVerificationError(
+                    "Instance-method fixtures do not support custom __new__ constructors."
+                )
+            constructors = [
+                node for node in owner.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__init__"
+            ]
+            if len(constructors) > 1:
+                raise GroundedVerificationError(
+                    "Instance-method fixture class has an ambiguous __init__ constructor."
+                )
+            constructor = constructors[0] if constructors else None
+            if constructor is not None:
+                if (
+                    isinstance(constructor, ast.AsyncFunctionDef)
+                    or constructor.decorator_list
+                    or not constructor.args.args
+                    or constructor.args.args[0].arg != "self"
+                ):
+                    raise GroundedVerificationError(
+                        "Instance fixture __init__ must be a synchronous, undecorated method with self as its first parameter."
+                    )
+                if constructor.args.posonlyargs or constructor.args.vararg or constructor.args.kwarg:
+                    raise GroundedVerificationError(
+                        "Instance fixture __init__ cannot use positional-only, *args or **kwargs parameters."
+                    )
+            if not function.args.args or function.args.args[0].arg != "self":
+                raise GroundedVerificationError(
+                    "An ordinary instance method must declare self as its first parameter."
+                )
+        else:
             raise GroundedVerificationError(
-                "Only explicitly decorated @staticmethod and @classmethod targets are supported; "
-                "ordinary instance methods and other decorators are rejected."
+                "Only explicitly decorated @staticmethod/@classmethod methods or safe undecorated instance methods are supported."
             )
 
     if function.args.posonlyargs or function.args.vararg or function.args.kwarg:
         raise GroundedVerificationError(
             "Positional-only, *args and **kwargs signatures are not supported."
         )
-    return function
+    return {
+        "function": function,
+        "invocation_kind": invocation_kind,
+        "owner_name": owner_name,
+        "constructor": constructor,
+    }
+
+
+def _target_function(
+    source: str, symbol_name: str
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """Compatibility wrapper returning only the selected function AST."""
+    return _target_descriptor(source, symbol_name)["function"]
 
 
 def _signature(
@@ -414,7 +473,7 @@ def _signature(
     if drop_first_parameter:
         if not positional:
             raise GroundedVerificationError(
-                "A classmethod must declare its bound class parameter."
+                "A bound method or constructor must declare its bound first parameter."
             )
         positional = positional[1:]
     defaults_start = len(positional) - len(function.args.defaults)
@@ -456,16 +515,20 @@ def _candidate_index(
 def _validate_cases(
     snapshot: TaskEvidenceSnapshot,
     request: GroundedTestApprovalRequest,
-    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    target: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    is_classmethod = (
-        "." in request.symbol_name
-        and len(function.decorator_list) == 1
-        and _decorator_name(function.decorator_list[0]) == "classmethod"
-    )
-    allowed, required = _signature(
-        function, drop_first_parameter=is_classmethod
-    )
+    function = target["function"]
+    invocation_kind = target["invocation_kind"]
+    is_bound_method = invocation_kind in {"classmethod", "instance_method"}
+    allowed, required = _signature(function, drop_first_parameter=is_bound_method)
+    constructor_allowed: set[str] = set()
+    constructor_required: set[str] = set()
+    if invocation_kind == "instance_method":
+        constructor = target.get("constructor")
+        if constructor is not None:
+            constructor_allowed, constructor_required = _signature(
+                constructor, drop_first_parameter=True
+            )
     candidates = _candidate_index(
         snapshot, request.file_path, request.symbol_name, request.source_sha256
     )
@@ -557,6 +620,25 @@ def _validate_cases(
                 raise GroundedVerificationError(
                     f"Property oracle case {case.case_id} can set replay_count only for output_stable_across_replays."
                 )
+        if invocation_kind == "instance_method":
+            instance_arguments = dict(case.instance_arguments or {})
+            unknown_instance = set(instance_arguments) - constructor_allowed
+            missing_instance = constructor_required - set(instance_arguments)
+            if unknown_instance:
+                raise GroundedVerificationError(
+                    f"Oracle case {case.case_id} contains unknown constructor parameters: {', '.join(sorted(unknown_instance))}."
+                )
+            if missing_instance:
+                raise GroundedVerificationError(
+                    f"Oracle case {case.case_id} is missing required constructor parameters: {', '.join(sorted(missing_instance))}."
+                )
+        else:
+            if case.instance_arguments is not None:
+                raise GroundedVerificationError(
+                    f"Oracle case {case.case_id} may supply instance_arguments only for an ordinary instance-method target."
+                )
+            instance_arguments = {}
+
         arguments = dict(case.arguments)
         unknown = set(arguments) - allowed
         missing = required - set(arguments)
@@ -586,6 +668,9 @@ def _validate_cases(
                 )
 
         arguments_json = _json_text(arguments, f"Arguments for case {case.case_id}")
+        instance_arguments_json = _json_text(
+            instance_arguments, f"Instance constructor arguments for case {case.case_id}"
+        )
         expected_json = (
             _json_text(case.expected_output, f"Expected output for case {case.case_id}")
             if case.oracle_property is None
@@ -599,11 +684,12 @@ def _validate_cases(
         arguments_bytes = len(arguments_json.encode("utf-8"))
         expected_bytes = len(expected_json.encode("utf-8"))
         property_bytes = len(property_json.encode("utf-8"))
-        if max(arguments_bytes, expected_bytes, property_bytes) > 10_000:
+        instance_argument_bytes = len(instance_arguments_json.encode("utf-8"))
+        if max(arguments_bytes, expected_bytes, property_bytes, instance_argument_bytes) > 10_000:
             raise GroundedVerificationError(
                 f"Oracle case {case.case_id} exceeds the 10 KB per-value limit."
             )
-        total_payload_bytes += arguments_bytes + expected_bytes + property_bytes
+        total_payload_bytes += arguments_bytes + expected_bytes + property_bytes + instance_argument_bytes
         if total_payload_bytes > 200_000:
             raise GroundedVerificationError(
                 "Grounded oracle payload exceeds the 200 KB aggregate limit."
@@ -612,6 +698,12 @@ def _validate_cases(
             {
                 "case_id": case.case_id,
                 "arguments": arguments,
+                "instance_arguments": instance_arguments if invocation_kind == "instance_method" else None,
+                "instance_arguments_sha256": (
+                    _digest(instance_arguments, "Instance constructor arguments")
+                    if invocation_kind == "instance_method"
+                    else None
+                ),
                 **(
                     {"expected_output": case.expected_output}
                     if case.oracle_property is None
@@ -656,6 +748,7 @@ def _generated_pytest(
     target_sha256: str,
     *,
     is_async: bool = False,
+    invocation_kind: str = "module_function",
     replay_trace_path: str | None = None,
 ) -> str:
     payload = _json_text(cases, "Oracle cases")
@@ -674,11 +767,11 @@ def _generated_pytest(
         ):
             raise GroundedVerificationError("Replay trace path must be a generated workspace JSON file.")
         replay_trace_literal = repr(replay_trace_path)
-    invocation = (
-        "asyncio.run(_FUNCTION(**case['arguments']))"
-        if is_async
-        else "_FUNCTION(**case['arguments'])"
-    )
+    if invocation_kind == "instance_method":
+        direct_call = "_FUNCTION(_CLASS(**case['instance_arguments']), **case['arguments'])"
+    else:
+        direct_call = "_FUNCTION(**case['arguments'])"
+    invocation = f"asyncio.run({direct_call})" if is_async else direct_call
     # Embed a JSON string as a Python string literal; never interpolate caller text
     # as executable Python source.
     payload_literal = repr(payload)
@@ -686,14 +779,22 @@ def _generated_pytest(
     symbol_literal = repr(symbol_name)
     if "." in symbol_name:
         owner_name, method_name = symbol_name.split(".", 1)
-        target_resolution = (
-            f"_OWNER = {owner_name!r}\n"
-            f"_METHOD = {method_name!r}\n"
-            "_CLASS = getattr(_MODULE, _OWNER, None)\n"
-            "_FUNCTION = getattr(_CLASS, _METHOD, None)\n"
-        )
+        if invocation_kind == "instance_method":
+            target_resolution = (
+                f"_OWNER = {owner_name!r}\\n"
+                f"_METHOD = {method_name!r}\\n"
+                "_CLASS = getattr(_MODULE, _OWNER, None)\\n"
+                "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None\\n"
+            )
+        else:
+            target_resolution = (
+                f"_OWNER = {owner_name!r}\\n"
+                f"_METHOD = {method_name!r}\\n"
+                "_CLASS = getattr(_MODULE, _OWNER, None)\\n"
+                "_FUNCTION = getattr(_CLASS, _METHOD, None)\\n"
+            )
     else:
-        target_resolution = "_FUNCTION = getattr(_MODULE, _SYMBOL, None)\n"
+        target_resolution = "_FUNCTION = getattr(_MODULE, _SYMBOL, None)\\n"
     return f'''"""Generated by unAI from explicit, supplied oracle cases. Do not edit."""
 from __future__ import annotations
 
@@ -1543,6 +1644,7 @@ class GroundedTestVerifier:
                     candidate_cases,
                     source_sha256,
                     is_async=is_async,
+                    invocation_kind=target_invocation_kind,
                 )
 
                 # Each round must use the same implementation and specification
@@ -1799,8 +1901,10 @@ class GroundedTestVerifier:
                 "The source changed since the oracle request was prepared. Read the file and probes again.",
                 409,
             )
-        function = _target_function(source_snapshot.content, request.symbol_name)
-        normalized = _validate_cases(snapshot, request, function)
+        target = _target_descriptor(source_snapshot.content, request.symbol_name)
+        function = target["function"]
+        target_invocation_kind = target["invocation_kind"]
+        normalized = _validate_cases(snapshot, request, target)
 
         # A supplied workspace document hash pins the exact bytes used as the
         # specification reference. It does not authenticate the document author.
@@ -1938,6 +2042,7 @@ class GroundedTestVerifier:
                 arguments_sha256=case["arguments_sha256"],
                 expected_output_sha256=case["expected_sha256"],
                 oracle_property_sha256=case["oracle_property_sha256"],
+                instance_arguments_sha256=case.get("instance_arguments_sha256"),
             )
             message = canonical_attestation_message(statement)
             if not verify_ed25519_attestation(
@@ -1983,6 +2088,7 @@ class GroundedTestVerifier:
                     "symbol_name": request.symbol_name,
                     "source_sha256": source_snapshot.sha256,
                     "arguments_sha256": case["arguments_sha256"],
+                    "instance_arguments_sha256": case.get("instance_arguments_sha256"),
                     "expected_sha256": case["expected_sha256"],
                     "oracle_property_sha256": case["oracle_property_sha256"],
                     "oracle_property": case["oracle_property"],
@@ -2016,14 +2122,6 @@ class GroundedTestVerifier:
             oracle_events.append(event)
 
         is_async = isinstance(function, ast.AsyncFunctionDef)
-        target_invocation_kind = "module_function"
-        if "." in request.symbol_name:
-            target_invocation_kind = (
-                "classmethod"
-                if len(function.decorator_list) == 1
-                and _decorator_name(function.decorator_list[0]) == "classmethod"
-                else "staticmethod"
-            )
         generated_path = f"unai_generated_tests/test_oracle_{uuid4().hex}.py"
         trace_case_ids = [
             case["case_id"]
@@ -2049,6 +2147,7 @@ class GroundedTestVerifier:
             normalized,
             source_snapshot.sha256,
             is_async=is_async,
+            invocation_kind=target_invocation_kind,
             replay_trace_path=replay_trace_relative_path,
         )
         run_metadata = {
