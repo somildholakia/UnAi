@@ -177,8 +177,8 @@ async def test_incomplete_discovery_does_not_publish_or_evict_cached_files(
 ) -> None:
     alpha = tmp_path / "alpha.py"
     beta = tmp_path / "beta.py"
-    alpha.write_text("def alpha():\\n    return 1\\n", encoding="utf-8")
-    beta.write_text("def beta():\\n    return 2\\n", encoding="utf-8")
+    alpha.write_text("def alpha():\n    return 1\n", encoding="utf-8")
+    beta.write_text("def beta():\n    return 2\n", encoding="utf-8")
     indexer = PythonCodeGraphIndexer(cache_path=tmp_path / "graph.sqlite3")
 
     complete = await indexer.index(str(tmp_path))
@@ -192,7 +192,7 @@ async def test_incomplete_discovery_does_not_publish_or_evict_cached_files(
     # Simulate the bounded walker reaching its file cap before it can observe
     # beta.py or a newly-created gamma.py.
     (tmp_path / "gamma.py").write_text(
-        "def gamma():\\n    return 3\\n", encoding="utf-8"
+        "def gamma():\n    return 3\n", encoding="utf-8"
     )
     monkeypatch.setattr(
         indexer,
@@ -233,7 +233,7 @@ async def test_first_incomplete_discovery_does_not_create_partial_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "visible.py").write_text(
-        "def visible():\\n    return 1\\n", encoding="utf-8"
+        "def visible():\n    return 1\n", encoding="utf-8"
     )
     indexer = PythonCodeGraphIndexer(cache_path=tmp_path / "graph.sqlite3")
     monkeypatch.setattr(
