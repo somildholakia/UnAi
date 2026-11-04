@@ -16,6 +16,7 @@ from unai_engine.verification.transparency import (
     sign_tree_head_message,
     verify_consistency_proof,
     verify_inclusion_proof,
+    verify_publisher_manifest_inclusion,
     verify_signed_tree_head,
 )
 
@@ -99,6 +100,31 @@ def test_consistency_proofs_verify_growth_and_reject_tampering() -> None:
     assert verify_consistency_proof(
         old_size=3, new_size=3, old_root_hash=_root(third).hex(),
         new_root_hash=_root(third).hex(), proof=[],
+    )
+
+
+def test_publisher_manifest_is_bound_to_signed_log_inclusion() -> None:
+    private, trusted = _keypair()
+    manifest = {
+        "schema": "unai.spec-publisher-manifest.v1",
+        "issuer": "example-specs",
+        "artifact_uri": "https://specs.example.test/api.md",
+        "artifact_revision": "rev-7",
+        "artifact_sha256": hashlib.sha256(b"spec bytes").hexdigest(),
+    }
+    leaf = __import__(
+        "unai_engine.verification.transparency", fromlist=["publisher_manifest_leaf"]
+    ).publisher_manifest_leaf(manifest)
+    leaves = [b"prior-entry", leaf, b"later-entry"]
+    head = _head(private, size=3, root=_root(leaves), timestamp=101)
+    assert verify_publisher_manifest_inclusion(
+        statement=manifest, head=head, leaf_index=1,
+        inclusion_proof=_inclusion_path(leaves, 1), trusted_log_keys=trusted,
+    )
+    changed = {**manifest, "artifact_sha256": "00" * 32}
+    assert not verify_publisher_manifest_inclusion(
+        statement=changed, head=head, leaf_index=1,
+        inclusion_proof=_inclusion_path(leaves, 1), trusted_log_keys=trusted,
     )
 
 
