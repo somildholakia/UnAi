@@ -92,9 +92,10 @@ git clone --branch feat/m4-instance-methods-m5-specialists --single-branch https
 cd UnAi
 bash scripts/termux-install.sh
 bash scripts/termux-start.sh
+bash scripts/termux-doctor.sh --smoke-chat
 ```
 
-Open `http://127.0.0.1:5173` on the same device. The first install compiles `llama.cpp` and downloads approximately 1.12 GB of Qwen2.5-Coder 1.5B Q4_K_M weights. Keep the initial 2K context; mobile memory and thermal performance must still be measured. See [the local install guide](docs/LOCAL_INSTALL.md).
+The doctor checks all three local services and can send a short inference request directly to the local model. Open `http://127.0.0.1:5173` on the same device. The first install compiles `llama.cpp` and downloads approximately 1.12 GB of Qwen2.5-Coder 1.5B Q4_K_M weights. Keep the initial 2K context; mobile memory and thermal performance must still be measured. See [the local install guide](docs/LOCAL_INSTALL.md).
 
 For desktop setup, point the Engine at any local OpenAI-compatible model server using `UNAI_MODEL_BASE_URL` and `UNAI_MODEL_NAME`. The default preset expects a llama.cpp server at `127.0.0.1:8080`. Ollama can also be used by changing those two settings to its local OpenAI-compatible endpoint and a model that is already installed.
 
