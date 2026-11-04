@@ -20,7 +20,12 @@
 
 ## M3 — Evidence-producing agent loop
 - [x] Installation-wide bearer-token gate; tokenless access is restricted to loopback peers.
-- [ ] Per-user/scoped API credentials, revocation, rate limiting and tenant isolation.
+- [x] Per-user/scoped API credentials with one-time token disclosure, hashed storage, expiry and immediate revocation.
+- [x] Enforce per-token and source-IP rate limits and explicit API scopes across chat, task/evidence, patch/test, workspace and Brain routes.
+- [x] Isolate each tenant's workspace, Brain vault/index, task/evidence ledger and repository graph cache; reject cross-tenant task/note access.
+- [x] Require authentication for all hosted Brain API routes; tenant-filter D1 notes, links, tags, search and graph data; validate migration and rate-limit setup in CI.
+- [x] Require HTTPS plus server-side tokens for remote MCP bridges; run local MCP bridges over stdio.
+
 - [x] Read-only inspection workflow with explicit workspace-read approval and append-only evidence snapshots.
 - [x] Separately confirmed fixed pytest runner in Docker, using a filtered temporary copy and appended execution evidence.
 - [x] Task-scoped source snapshots and SHA-256-bound, one-file patch proposals with a separate apply confirmation.
@@ -78,7 +83,9 @@
 ## M6 — Mobile and deployment validation
 - [ ] Benchmark on physical Android hardware.
 - [ ] Record peak PSS/RSS, load time, TTFT, tokens/sec, power and sustained thermals.
-- [ ] Deploy optional hosted Brain services with authentication, quotas and tenant isolation.
+- [x] Implement authenticated, tenant-scoped hosted Brain Worker routes, expiring/revocable hashed tokens, per-token/IP request limits and a D1 tenant migration (CI-validated; not deployed).
+- [ ] Provision and deploy the optional hosted Brain service; configure D1, administrator secrets, scoped browser/MCP tokens, production CORS origin, backups and operational quotas.
+
 - [ ] Keep local/offline inference functional without hosted model credits.
 
 

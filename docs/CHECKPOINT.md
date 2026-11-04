@@ -615,3 +615,34 @@ Design scoped identities, token issuance/rotation/revocation, rate limits and st
 ### Start the next chat here
 
 Read `docs/CONTINUITY.md`, `docs/CHECKPOINT.md`, `docs/ROADMAP.md`, then fetch the live branch/PR/CI state. Continue directly with the security/data-boundary audit and software implementation. Keep all work on `feat/m4-instance-methods-m5-specialists`; do not merge PR #28 or modify `main`. Mobile setup is last, only after software development is complete.
+
+
+## 2026-11-04 security and tenant-isolation milestone — CI validated
+
+**Repository:** https://github.com/somildholakia/UnAi  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**Validated code checkpoint:** `7371253c22c4cde6f2c64108c56f4086e5d4e62e`  
+**Engine/Web Actions:** [run #322](https://github.com/somildholakia/UnAi/actions/runs/41828328808) — **356 Python tests passed in 13.98s**; Engine compilation, Termux shell syntax and Web production build passed.  
+**Brain Worker Actions:** [run #5](https://github.com/somildholakia/UnAi/actions/runs/41828328703) — TypeScript/Worker checks and the SQLite D1 migration smoke test passed.  
+**PR #28:** open, unmerged, mergeable. Base `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`. No main-branch write or PR merge was performed.
+
+### Delivered
+
+- Installation-admin and loopback-local identities remain restricted to the reserved `default` data area. Scoped API tokens are generated once, stored as SHA-256 hashes, bound to one tenant and explicit scopes, expire within 365 days, and can be revoked immediately.
+- Engine requests are rate-limited per token and per source IP. Routes now enforce chat, task, workspace, execution and Brain scopes independently of task-level approvals/confirmations.
+- Non-default tenants receive distinct workspace roots, Brain Markdown vault/index, SQLite evidence/task/patch ledger and Python code-graph cache. Symlink-resolved tenant roots are checked to remain under their configured roots.
+- Adversarial tests show that a second tenant cannot read another tenant's Brain note or task/evidence and sees only its own repository graph; missing scopes and token-management attempts are denied.
+- The hosted Brain Worker now fails closed for all API routes, supports admin-issued scoped credentials with expiry/revocation, stores only token hashes, rate-limits by token/IP, and tenant-filters notes, tags, links, search, graph and backlinks. D1 migration `0002_tenant_tokens.sql` preserves pre-existing records in the reserved `default` tenant.
+- Worker CI applies migrations to a temporary SQLite database and verifies that legacy records remain in `default` and that token/rate-limit tables and tenant columns exist.
+- Local MCP servers launch over stdio. Remote Engine/Brain bridges require HTTPS and explicit server-side bearer tokens. Invalid/corrupt token scope records fail closed. Configured hosted Worker secrets shorter than 32 characters are rejected.
+
+### Important trust boundaries
+
+- Application-level tenant isolation and token lifecycle are implemented and CI-tested. The hosted Worker has **not** been deployed; no D1 account, remote migration, production secrets, CORS origin, backup policy or live endpoint has been configured.
+- This is not a public multi-tenant release certification or penetration test. Host networking/TLS, D1 account administration, secret rotation, disk encryption, operational quotas, backup/retention, dependency review and Docker sandbox hardening still require deployment review.
+- Tokens deliberately share data when issued for the same tenant ID. Assign a unique tenant ID to each independently isolated person/workspace.
+- CI is Linux/fake-service evidence. No physical Android setup, offline inference, memory, latency, throughput, battery, thermal or lifecycle measurement has been performed.
+
+### Next software priority
+
+Continue with the remaining M4 verification/trust backlog, beginning with the pending public-key transparency inclusion/consistency proofs (or an explicitly scoped organizational identity-discovery design). Do not call the current offline signed trust snapshots a public transparency log or legal identity proof. Continue M5 only with an explicitly consented/licensed multi-repository corpus and suitable training compute; no specialist adapter weights have been trained. Keep M6 phone setup and physical Android benchmarks as the final integration stage after software development is complete.

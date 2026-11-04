@@ -405,3 +405,32 @@ This section supersedes older "recommended next action" passages in earlier hand
 ### Copy/paste opening instruction for the next chat
 
 "Continue UnAi from GitHub. First read docs/CONTINUITY.md, docs/CHECKPOINT.md and docs/ROADMAP.md, then verify live branch HEAD, PR #28 and latest CI. Current branch: feat/m4-instance-methods-m5-specialists. Continue the next software milestone: complete security/data-boundary audit and implementation with adversarial cross-tenant tests. Do not ask me to set up or test on my phone until all software development is complete. Keep main unchanged and do not merge PR #28. Update GitHub and both handoff documents at every validated checkpoint."
+
+
+## Authoritative continuation handoff — 2026-11-04 security milestone complete
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Branch:** `feat/m4-instance-methods-m5-specialists`
+- **Validated code checkpoint:** `7371253c22c4cde6f2c64108c56f4086e5d4e62e`
+- **Engine/Web CI:** [run #322](https://github.com/somildholakia/UnAi/actions/runs/41828328808) — success; 356 tests passed in 13.98s, compileall, Termux shell syntax and Web production build passed.
+- **Brain Worker CI:** [run #5](https://github.com/somildholakia/UnAi/actions/runs/41828328703) — success; Worker typecheck and SQLite migration smoke test passed.
+- **PR #28:** open and unmerged; base `main` SHA remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`. Do not merge or change `main`.
+
+### Security milestone delivered
+
+Scoped hashed credentials, explicit API scopes, expiry/revocation, fixed-window per-token/IP rate limits, tenant-separated workspace/Brain/evidence/code-graph state, cross-tenant regression tests, fail-closed hosted Brain API and tenant-keyed D1 migration are implemented. MCP local servers use stdio; remote bridges require HTTPS and server-side tokens. Details and token setup are in `docs/SECURITY.md`, `docs/BRAIN.md`, `README.md` and `SECURITY.md`.
+
+### What is not complete
+
+The Cloudflare Worker remains a deployment scaffold; no D1 instance has been provisioned or migrated remotely and no secrets/production CORS are configured. This is not a public-release certification or penetration test. Host-level controls, secret operations, backups, quotas and sandbox hardening remain deployment reviews. Specialist models have not been trained because no approved corpus or GPU run has been supplied. Android has not been installed or validated.
+
+### Next software milestone
+
+Continue the M4 trust/verification backlog: public key-transparency inclusion and consistency proofs (or an explicitly scoped organizational identity-discovery model), with append-only state, proof verification, tamper tests and reproducible CI. Existing signed offline trust snapshots are not a public transparency log and do not prove legal identity. Then address remaining bounded M4 verification limitations from the roadmap. M5 model training remains gated on an approved consented/licensed corpus and suitable GPU compute.
+
+### Mandatory sequencing and guardrails
+
+1. Fetch the current branch, PR #28, `main` and latest Actions before each write.
+2. Keep all development on `feat/m4-instance-methods-m5-specialists`; never alter `main` or merge PR #28 without explicit permission.
+3. Continue code, tests, CI and handoff updates before any phone setup.
+4. Do not ask the user to install or test UnAi on the phone until all software milestones are complete. Physical install, offline chat, Android process lifecycle and measured PSS/RSS, TTFT, tokens/sec, power and thermals remain the final integration stage.
