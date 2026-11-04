@@ -41,7 +41,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q apps/engine/src training
       - name: Validate Termux shell scripts
-        run: bash -n scripts/termux-install.sh scripts/termux-start.sh scripts/termux-doctor.sh scripts/termux-supervise.sh scripts/termux-service.sh scripts/termux-control.sh
+        run: bash -n scripts/termux-install.sh scripts/termux-start.sh scripts/termux-doctor.sh scripts/termux-supervise.sh scripts/termux-service.sh scripts/termux-control.sh scripts/termux-service.sh scripts/termux-control.sh
 
   web:
     runs-on: ubuntu-latest
