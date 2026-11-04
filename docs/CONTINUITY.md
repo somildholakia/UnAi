@@ -469,3 +469,14 @@ Integrate publisher-manifest inclusion and monotonic checkpoint verification int
 The user explicitly requires all software development to finish before phone setup. **Do not ask the user to install, run or test UnAi on Android yet.** Physical Termux install, offline inference, Android lifecycle/recovery and PSS/RSS, TTFT, tokens/sec, power and thermal measurements are final integration work only after software milestones are complete.
 
 Keep all work on `feat/m4-instance-methods-m5-specialists`. Keep `main` unchanged. Never merge PR #28 without explicit permission. Update CHECKPOINT and CONTINUITY after each meaningful validated milestone.
+
+### Follow-up validation correction — transparency tests are in the active CI suite
+
+The transparency tests were moved from `apps/engine/tests` to the repository's actual CI discovery directory, `tests/test_transparency.py` (the workflow runs `pytest -q tests` from the repository root). The inactive duplicate was deleted.
+
+- **Latest validated code commit:** `0131ae54ec9f8bdd19635585d0d18c2c281dcf2a`
+- **Engine/Web Actions:** [run #335](https://github.com/somildholakia/UnAi/actions/runs/41830680030) — success; **363 tests passed in 13.37s**, compileall, Termux shell syntax and Web production build passed. The 363 tests include the transparency suite.
+- **Brain Worker Actions:** [run #18](https://github.com/somildholakia/UnAi/actions/runs/41830680795) — success.
+- **Checkpoint doc revision:** `bae7507bfcd31372f958f3c7a952434c3e80fe8c`; this continuity update is the next documentation-only commit.
+
+Continue with the next software task: wire transparency proofs and persistent monotonic checkpoints into publisher-oracle verification/evidence. Keep the operator-pinned log-key boundary and reviewer-vs-publisher signature distinction. The mobile setup prohibition remains in force until software development is complete.
