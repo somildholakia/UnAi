@@ -31,6 +31,30 @@ When a service health check fails, `bash scripts/termux-doctor.sh` prints the la
 
 This supervisor can restart a service process while the Termux/tmux session is still alive. It cannot restart the entire Termux app after Android force-stops or kills all Termux processes; in that case, reopen Termux and run `bash scripts/termux-start.sh` again. Android process-lifecycle recovery still needs physical-device testing.
 
+## Check status and recover a failed service
+
+Use the control command to inspect the three endpoints and their tmux panes:
+
+```bash
+bash scripts/termux-control.sh status
+```
+
+Recover only dead or missing service panes:
+
+```bash
+bash scripts/termux-control.sh recover
+```
+
+To target one service, use `model`, `engine` or `web`, for example:
+
+```bash
+bash scripts/termux-control.sh recover engine
+```
+
+Recovery is deliberately conservative. A responding endpoint is left untouched even when its original tmux pane is dead, because another process may still own that listener. An unhealthy endpoint with a live tmux pane is also left alone because its existing supervisor may be in its retry/backoff cycle. Only a dead pane or missing service window is respawned. After respawning, the command waits up to 30 seconds by default for that endpoint; set `UNAI_RECOVERY_TIMEOUT_SECONDS` to change the wait.
+
+When the entire tmux session is missing, the command starts the full stack only if all three service endpoints are unreachable. If any endpoint still responds without a tmux session, it refuses to launch the whole stack to avoid creating duplicate listeners. Inspect the existing processes before taking further action.
+
 The first build can take time and the first model download needs roughly 1.2 GB of free storage. Start with the 2K context and CPU-only settings; increase context or threads only after observing memory and thermal behavior. Android may terminate a process under memory pressure.
 
 Startup waits for all three loopback services (model, Engine and Web UI), for up to 90 seconds each by default. Change this with `UNAI_STARTUP_TIMEOUT_SECONDS`. A failed wait prints recent output from the corresponding tmux window; startup still opens tmux so you can inspect the failing process.
