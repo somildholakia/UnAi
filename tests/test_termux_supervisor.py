@@ -149,4 +149,4 @@ def test_supervisor_rejects_invalid_restart_configuration(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 2
-    assert "Invalid restart configuration" in result.stderr
+    assert "Invalid restart configuration" in result.stdout
