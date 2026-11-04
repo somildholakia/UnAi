@@ -13,6 +13,7 @@ from unai_engine.verification.transparency import (
     TransparencyCheckpointStore,
     leaf_hash,
     node_hash,
+    publisher_manifest_leaf,
     sign_tree_head_message,
     verify_consistency_proof,
     verify_inclusion_proof,
@@ -112,9 +113,7 @@ def test_publisher_manifest_is_bound_to_signed_log_inclusion() -> None:
         "artifact_revision": "rev-7",
         "artifact_sha256": hashlib.sha256(b"spec bytes").hexdigest(),
     }
-    leaf = __import__(
-        "unai_engine.verification.transparency", fromlist=["publisher_manifest_leaf"]
-    ).publisher_manifest_leaf(manifest)
+    leaf = publisher_manifest_leaf(manifest)
     leaves = [b"prior-entry", leaf, b"later-entry"]
     head = _head(private, size=3, root=_root(leaves), timestamp=101)
     assert verify_publisher_manifest_inclusion(
