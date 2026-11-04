@@ -485,3 +485,22 @@ These are conservative source-level AST relationships, not runtime traces or a c
 
 No model training, specialist weights, physical Android benchmarks or production-readiness claims are added by this milestone.
 
+## 2026-11-04 Termux diagnostics checkpoint
+
+**Validated code commit:** `aff60b72a9dcb1a909bd918677505a0251c6964a`  
+**GitHub Actions:** [run #283](https://github.com/somildholakia/UnAi/actions/runs/41821364149) — **318 tests passed in 8.39s**; Python compileall, all Termux shell syntax checks and the web production build passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** open and unmerged; `main` remains unchanged.
+
+### Changes
+
+- Added `scripts/termux-doctor.sh` to verify the Termux environment, required commands, executable `llama-server`, minimum model-file size, Engine virtual environment, Web dependencies and model/Engine/Web health endpoints.
+- Added optional `--smoke-chat`, which sends a short request directly to the configured local OpenAI-compatible model endpoint and requires a non-empty assistant completion. It does not call a hosted provider.
+- Updated `scripts/termux-start.sh` to wait for the model, Engine API and Web UI individually, print recent tmux output for any service that times out, and run diagnostics before attaching to an existing session.
+- Added automated mock-install tests for healthy endpoints, valid inference, empty completions, unreachable Engine API and partial model downloads.
+- Updated the install guide and README quick start. CI now syntax-checks the doctor script as well.
+
+### Verification and boundary
+
+The new tests use mocked services and a sparse fixture model file; CI does not download the 1.12 GB GGUF, run llama.cpp, or execute the install on Android. This makes the diagnostic workflow testable but is not a physical-device smoke test. On-device offline inference and RSS/PSS, TTFT, throughput and thermal measurements remain pending.
+
