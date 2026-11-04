@@ -27,6 +27,8 @@ def termux_install(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
         REPOSITORY / "scripts" / "termux-supervise.sh",
         scripts / "termux-supervise.sh",
     )
+    for helper in ("termux-service.sh", "termux-control.sh"):
+        shutil.copy2(REPOSITORY / "scripts" / helper, scripts / helper)
 
     engine_bin = root / "apps" / "engine" / ".venv" / "bin"
     web_bin = root / "apps" / "web" / "node_modules" / ".bin"
