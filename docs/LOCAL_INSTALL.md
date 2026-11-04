@@ -29,6 +29,8 @@ Service logs are written outside the repository to `$HOME/.local/state/unai/{mod
 
 When a service health check fails, `bash scripts/termux-doctor.sh` prints the last lines of that service's supervisor log. The tmux panes also remain after a process exits so that its terminal output can be inspected.
 
+The supervisor now forwards `TERM`, `INT` and `HUP` to its active direct child before exiting. Automated tests verify signal forwarding and the exact model, Engine and Web command arguments and working directories. This is direct-child shutdown handling; it does not guarantee cleanup of every descendant spawned by a wrapper, and it does not restart the entire Termux application.
+
 This supervisor can restart a service process while the Termux/tmux session is still alive. It cannot restart the entire Termux app after Android force-stops or kills all Termux processes; in that case, reopen Termux and run `bash scripts/termux-start.sh` again. Android process-lifecycle recovery still needs physical-device testing.
 
 ## Check status and recover a failed service

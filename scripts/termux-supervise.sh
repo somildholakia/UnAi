@@ -60,6 +60,23 @@ if ! command -v tee >/dev/null 2>&1; then
 fi
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+CHILD_PID=""
+stop_child() {
+  local signal="$1"
+  local exit_code="$2"
+  trap - TERM INT HUP
+  echo "[$SERVICE] received $signal; forwarding shutdown to child process."
+  if [[ -n "$CHILD_PID" ]]; then
+    kill -s "$signal" "$CHILD_PID" 2>/dev/null || true
+    wait "$CHILD_PID" 2>/dev/null || true
+    CHILD_PID=""
+  fi
+  exit "$exit_code"
+}
+trap 'stop_child TERM 143' TERM
+trap 'stop_child INT 130' INT
+trap 'stop_child HUP 129' HUP
+
 echo "[$SERVICE] supervisor started; maximum automatic restarts: $MAX_RESTARTS"
 echo "[$SERVICE] persistent log: $LOG_FILE"
 
@@ -67,8 +84,11 @@ RESTARTS=0
 DELAY="$BASE_DELAY"
 while true; do
   echo "[$SERVICE] starting process (restart count: $RESTARTS)"
-  "$@"
+  "$@" &
+  CHILD_PID=$!
+  wait "$CHILD_PID"
   EXIT_CODE=$?
+  CHILD_PID=""
 
   if (( EXIT_CODE == 0 )); then
     echo "[$SERVICE] process exited cleanly; supervisor stopping."

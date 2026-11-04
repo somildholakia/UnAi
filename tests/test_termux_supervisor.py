@@ -150,3 +150,58 @@ def test_supervisor_rejects_invalid_restart_configuration(tmp_path: Path) -> Non
 
     assert result.returncode == 2
     assert "Invalid restart configuration" in result.stdout
+
+
+
+def test_supervisor_forwards_shutdown_signal_to_active_child(tmp_path: Path) -> None:
+    import signal
+    import time
+
+    child_marker = tmp_path / "child-stopped"
+    started_marker = tmp_path / "child-started"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "UNAI_LOG_DIR": str(tmp_path / "logs"),
+            "UNAI_MAX_RESTARTS": "5",
+            "UNAI_RESTART_DELAY_SECONDS": "1",
+            "UNAI_MAX_RESTART_DELAY_SECONDS": "1",
+            "UNAI_LOG_MAX_BYTES": "1048576",
+        }
+    )
+    command = [
+        "bash",
+        "-c",
+        (
+            "trap 'printf stopped > \"$1\"; exit 0' TERM; "
+            "printf started > \"$1.started\"; "
+            "while :; do sleep 0.05; done"
+        ),
+        "_",
+        str(child_marker),
+    ]
+    process = subprocess.Popen(
+        ["bash", str(SUPERVISOR), "fixture", "--", *command],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    try:
+        deadline = time.monotonic() + 5
+        while not started_marker.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert started_marker.exists(), "supervised child did not start"
+        process.send_signal(signal.SIGTERM)
+        output, _ = process.communicate(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+
+    assert process.returncode == 143, output
+    assert child_marker.read_text(encoding="utf-8") == "stopped"
+    assert "received TERM; forwarding shutdown to child process" in output
+    assert "restart limit reached" not in output
