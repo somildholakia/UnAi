@@ -525,3 +525,23 @@ The new tests use mocked services and a sparse fixture model file; CI does not d
 
 CI uses controlled fixture commands and mocked service endpoints. It does not run llama.cpp, install on a physical Android device, or measure mobile resource usage. The supervisor can recover a child service while the Termux/tmux session remains alive; it cannot revive Termux after Android terminates all of its processes. Physical Android process-lifecycle and low-memory recovery remain open.
 
+## 2026-11-04 Termux status and safe recovery checkpoint
+
+**Validated code/test commit:** `d731c0a0b16d00e5fced5bb0d4551c5d4d5126ec`  
+**GitHub Actions:** [run #307](https://github.com/somildholakia/UnAi/actions/runs/41822981471) — **331 tests passed in 13.12s**; Python compileall, syntax validation for all six Termux scripts and Web production build passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** open and unmerged; `main` unchanged.
+
+### Changes
+
+- Added `scripts/termux-service.sh` as the single source of model/Engine/Web launch commands. Both initial startup and recovery use this helper, avoiding drift in model flags, paths or service commands.
+- Added `scripts/termux-control.sh status` to report endpoint health alongside whether each named tmux pane is alive, dead or missing.
+- Added `scripts/termux-control.sh recover [model|engine|web|all]`. It checks health before taking action, leaves healthy listeners untouched even if their pane is dead, leaves a live supervisor alone while it retries, and respawns only a dead pane or missing service window.
+- If the entire tmux session is missing, recovery starts the full stack only when all three endpoints are unreachable. It refuses full-stack launch if any endpoint still responds, avoiding duplicate listeners from unmanaged/orphaned processes.
+- Updated the doctor to check for the shared service launcher and control command. Updated README, install guide and roadmap.
+- Added mocked tests for healthy status, no-op recovery of a healthy listener, dead-pane respawn, no duplicate restart of a live supervisor, missing-window creation, and refusal/safe startup when the tmux session is absent.
+
+### Validation boundaries
+
+CI validates the scripts with mocked tmux/HTTP endpoints and synthetic panes; it does not run a real Termux session or llama.cpp server. The command prevents common duplicate-start cases but does not discover arbitrary processes that bind a different address/port. Android whole-app termination, real process ownership and low-memory recovery remain unverified.
+
