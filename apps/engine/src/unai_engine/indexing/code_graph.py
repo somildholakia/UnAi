@@ -754,12 +754,20 @@ class PythonCodeGraphIndexer:
         nodes, built_edges, summary = self._assemble(
             base, candidates, current_files, skipped_large, walk_truncated
         )
+        # A capped directory walk is not a complete repository snapshot. Do
+        # not publish it: paths beyond MAX_FILES have not been observed and
+        # must not be mistaken for deleted files in the previous generation.
+        scan_complete = not walk_truncated
         cache_state = "disabled" if self.store is None else (
             "miss" if prior_meta is None else ("stale" if snapshot_changed else "fresh")
         )
-        generation = 0
+        generation = int(prior_meta["generation"]) if prior_meta is not None else 0
+        snapshot_persisted = False
         if self.store is not None:
-            if snapshot_changed:
+            if not scan_complete:
+                cache_state = "incomplete"
+                edges = built_edges
+            elif snapshot_changed:
                 generation = self.store.save_snapshot(
                     root_key=root_key,
                     root_path=root_path,
@@ -769,24 +777,28 @@ class PythonCodeGraphIndexer:
                     edges=built_edges,
                     refreshed_at=datetime.now(timezone.utc).isoformat(),
                 )
-                cache_edges = built_edges
+                edges = built_edges
+                snapshot_persisted = True
             else:
                 generation = int(prior_meta["generation"])
-                cache_edges = prior_edges
-            edges = cache_edges
+                edges = prior_edges
+                snapshot_persisted = True
             summary["strategy"] = "bounded-python-ast-sqlite-incremental-no-source-body-cache"
         else:
             edges = built_edges
             summary["strategy"] = "bounded-python-ast-no-source-body-cache"
 
         summary["source_fingerprint"] = fingerprint
+        summary["scan_complete"] = scan_complete
         summary["cache"] = {
             "state": cache_state,
             "generation": generation,
+            "snapshot_persisted": snapshot_persisted,
             "files_hashed": len(current_files),
             "files_reparsed": files_reparsed,
             "files_reused": files_reused,
-            "files_removed": removed_count,
+            # Deletions can only be confirmed after a complete discovery pass.
+            "files_removed": removed_count if scan_complete else 0,
         }
         return {
             "root": root_path,
