@@ -2303,10 +2303,22 @@ class GroundedTestVerifier:
         replay_trace_relative_path = (
             generated_path[:-3] + ".replay.json" if trace_case_ids else None
         )
+        # Transparency and reviewer signatures are durable evidence, never test input.
+        execution_cases = [
+            {
+                key: value
+                for key, value in case.items()
+                if key not in {
+                    "oracle_attestation_provenance",
+                    "oracle_publisher_attestation_provenance",
+                }
+            }
+            for case in normalized
+        ]
         generated_content = _generated_pytest(
             request.file_path,
             request.symbol_name,
-            normalized,
+            execution_cases,
             source_snapshot.sha256,
             is_async=is_async,
             invocation_kind=target_invocation_kind,
