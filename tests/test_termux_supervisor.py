@@ -175,11 +175,12 @@ def test_supervisor_forwards_shutdown_signal_to_active_child(tmp_path: Path) -> 
         "-c",
         (
             "trap 'printf stopped > \"$1\"; exit 0' TERM; "
-            "printf started > \"$1.started\"; "
+            "printf started > \"$2\"; "
             "while :; do sleep 0.05; done"
         ),
         "_",
         str(child_marker),
+        str(started_marker),
     ]
     process = subprocess.Popen(
         ["bash", str(SUPERVISOR), "fixture", "--", *command],
@@ -198,8 +199,12 @@ def test_supervisor_forwards_shutdown_signal_to_active_child(tmp_path: Path) -> 
         output, _ = process.communicate(timeout=5)
     finally:
         if process.poll() is None:
-            process.kill()
-            process.communicate(timeout=5)
+            process.send_signal(signal.SIGTERM)
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=5)
 
     assert process.returncode == 143, output
     assert child_marker.read_text(encoding="utf-8") == "stopped"
