@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -16,6 +17,55 @@ TaskPermission = Literal[
     "install_dependencies",
     "destructive_changes",
 ]
+
+
+
+ApiScope = Literal[
+    "chat:use",
+    "tasks:read",
+    "tasks:write",
+    "workspace:read",
+    "workspace:write",
+    "workspace:execute",
+    "brain:read",
+    "brain:write",
+]
+
+
+class ApiTokenCreateRequest(BaseModel):
+    tenant_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    scopes: list[ApiScope] = Field(min_length=1, max_length=8)
+    expires_in_days: int = Field(default=30, ge=1, le=365)
+
+    @field_validator("tenant_id")
+    @classmethod
+    def validate_tenant_id(cls, value: str) -> str:
+        if value == "default" or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", value) is None:
+            raise ValueError("tenant_id must be a non-reserved lowercase identifier.")
+        return value
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_unique_scopes(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Token scopes must not contain duplicates.")
+        return value
+
+
+class ApiTokenCreateResponse(BaseModel):
+    token_id: str
+    tenant_id: str
+    label: str
+    token: str
+    scopes: list[ApiScope]
+    created_at: str
+    expires_at: str
+
+
+class ApiTokenRevokeResponse(BaseModel):
+    token_id: str
+    revoked: bool
 
 
 class ChatMessage(BaseModel):
