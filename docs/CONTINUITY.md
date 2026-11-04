@@ -324,3 +324,52 @@ Then simulate a single-service crash only in a controlled test (for example, sto
 
 Before any further code changes, re-fetch the live branch, PR #28 and CI state. Keep `main` unchanged and do not merge PR #28 without explicit permission. M5 training still requires an explicitly approved, consented/licensed corpus and a suitable training environment; no specialist weights have been trained.
 
+
+
+## 2026-11-04 continuation handoff — Termux shutdown semantics and service contract tests
+
+**Repository:** https://github.com/somildholakia/UnAi  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**Validated code commit:** `cd522d27cb00ee01168cc4b0f46e6c337884f4ab`  
+**GitHub Actions:** [run #314](https://github.com/somildholakia/UnAi/actions/runs/41824210661) — 339 tests passed in 12.84s; Engine compilation, all six Termux shell syntax checks and Web production build passed.  
+**PR #28:** open and unmerged; base `main` SHA remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
+
+### Delivered
+
+- The Termux supervisor tracks its active direct child and forwards TERM, INT and HUP. It waits for that child and exits with a signal-specific status, rather than interpreting an intentional shutdown as a crash to retry.
+- Regression coverage confirms TERM reaches the direct child and that its shutdown handler completes.
+- New shared-launcher tests cover model, Engine and Web arguments, service working directories, missing runtime/dependencies, and invalid service names.
+- The Actions workflow shell-checks each of the six Termux scripts once. The earlier duplicate entries were removed.
+- `docs/LOCAL_INSTALL.md` and `docs/ROADMAP.md` describe the implemented behavior and its limits.
+
+### User sequencing constraint
+
+The user explicitly requested that development be completed before setting up the app on their phone. Therefore:
+- Continue implementing and validating the remaining software milestones on this GitHub branch.
+- Do not ask the user to run the Termux installer, start services or perform device smoke tests yet.
+- Physical Android setup, offline inference and measured memory/latency/thermal validation are the final integration stage, after software development is otherwise complete.
+
+### Next engineering priority: tenant security
+
+The roadmap still has per-user/scoped API credentials, revocation, rate limiting and tenant isolation open. Start with an end-to-end data-boundary review of:
+- workspace path resolution and task ownership;
+- evidence ledger records and patch/test/proof endpoints;
+- Brain vault content and SQLite index;
+- repository graph cache and any user-controlled roots;
+- MCP bridges and server-side tokens.
+
+A key ID or request scope by itself is not tenant isolation. All read and write paths must enforce ownership, and storage namespaces must not share tenant-private state. Preserve loopback-only local mode and fail closed for non-loopback access until a full design is tested. Do not enable public hosting as part of this work.
+
+### External inputs that remain genuinely blocked
+
+- M5 specialist training still has no approved consented/licensed trajectory corpus or suitable training environment; do not fabricate a corpus, train on private user material, or claim trained adapter weights.
+- M5 release still requires an actual held-out comparison and matching physical-device measurements.
+- M6 Android process lifecycle, performance and thermal behavior cannot be claimed before the final real-device test stage.
+
+### Resume sequence
+
+1. Fetch the current branch head, PR #28, base SHA and latest Actions run before any write.
+2. Read this handoff, `docs/CHECKPOINT.md` and `docs/ROADMAP.md`.
+3. Continue with a complete tenant-isolation/security design and tests; avoid partial authentication changes that overstate isolation.
+4. Keep `main` unchanged and do not merge PR #28 without explicit instruction.
+5. Only after the software milestones are complete, return to the Termux installation and physical Android validation stage.

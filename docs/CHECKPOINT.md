@@ -545,3 +545,28 @@ CI uses controlled fixture commands and mocked service endpoints. It does not ru
 
 CI validates the scripts with mocked tmux/HTTP endpoints and synthetic panes; it does not run a real Termux session or llama.cpp server. The command prevents common duplicate-start cases but does not discover arbitrary processes that bind a different address/port. Android whole-app termination, real process ownership and low-memory recovery remain unverified.
 
+
+
+## 2026-11-04 continuation checkpoint — service shutdown and launch contracts
+
+**Validated code commit:** `cd522d27cb00ee01168cc4b0f46e6c337884f4ab`  
+**GitHub Actions:** [run #314](https://github.com/somildholakia/UnAi/actions/runs/41824210661) — **339 tests passed in 12.84s**; Python compileall, Termux shell syntax checks and Web production build passed.  
+**Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open and unmerged. Keep `main` unchanged.
+
+### Changes
+
+- `scripts/termux-supervise.sh` now tracks the active direct child and forwards `TERM`, `INT` and `HUP` before exiting with the corresponding signal status.
+- A clean, signal-driven shutdown does not enter the automatic crash-retry loop.
+- Added a supervisor regression test proving that TERM reaches the active child and the child can complete its shutdown handler.
+- Added service-launcher tests for the exact llama.cpp/model command, Engine venv/uvicorn command, Web/Vite command, working directories, missing dependencies and unknown service names.
+- Removed duplicate `termux-service.sh` and `termux-control.sh` entries from the workflow shell syntax command.
+
+### Validation boundaries
+
+- CI tests run against Linux fixtures and fake launch dependencies; they do not execute llama.cpp, the Engine or Vite on Android.
+- The supervisor forwards signals to its direct child. This is not a guarantee that every descendant started by a wrapper process is terminated.
+- No physical Android setup, offline inference, RSS/PSS, TTFT, throughput, battery or thermal measurements have been performed.
+
+### Next development priority
+
+Continue software engineering before mobile installation. The next major security milestone is a complete design for per-user/scoped credentials, revocation, rate limiting and tenant-isolated storage. Do not add an authentication facade and call it tenant isolation: the workspace, evidence ledger, Brain vault/index and repository graph cache must be reviewed together. Mobile installation and physical-device validation remain the final integration stage, after the remaining software work is complete.
