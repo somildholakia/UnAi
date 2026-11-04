@@ -480,3 +480,15 @@ The transparency tests were moved from `apps/engine/tests` to the repository's a
 - **Checkpoint doc revision:** `bae7507bfcd31372f958f3c7a952434c3e80fe8c`; this continuity update is the next documentation-only commit.
 
 Continue with the next software task: wire transparency proofs and persistent monotonic checkpoints into publisher-oracle verification/evidence. Keep the operator-pinned log-key boundary and reviewer-vs-publisher signature distinction. The mobile setup prohibition remains in force until software development is complete.
+
+
+## 2026-11-04 continuation handoff — publisher transparency integration complete
+
+- **Latest validated code commit:** `1fd8df11144672471318e3db9df9e8fe0b28b92c`.
+- **Engine/Web CI:** [run #344](https://github.com/somildholakia/UnAi/actions/runs/41833570092) — success; 367 tests passed in 14.91s, compileall, Termux shell syntax and Web production build passed.
+- **Brain Worker CI:** [run #27](https://github.com/somildholakia/UnAi/actions/runs/41833570066) — success.
+- **Publisher-transparency integration:** complete and CI-tested. Grounded publisher-oracle acceptance verifies exact manifest inclusion under trusted signed tree heads, accepts only monotonic consistent per-log checkpoints, verifies independent witness signatures/quorum, and stores transparency provenance in append-only oracle evidence. Proof/signature payloads are excluded from generated pytest input.
+- Regression coverage includes tampered inclusion rejection before execution, cross-log key substitution, checkpoint rollback and checkpoint-store integrity.
+- docs/ROADMAP.md now marks the publisher-transparency integration item complete. docs/CHECKPOINT.md records the exact implementation and boundaries.
+- PR #28 remains open/unmerged. Keep main at `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`; do not merge without explicit user approval.
+- Continue with remaining bounded M4 verification items and M5 infrastructure/evaluation work. Actual M5 adapter training requires a user-approved consented/licensed multi-repository corpus and suitable GPU compute; no weights are trained. Mobile installation and Android measurement remain deferred until all software development is complete.
