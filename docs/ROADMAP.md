@@ -88,5 +88,6 @@
 - [x] Add a single tmux-based local launcher with model/Engine/UI windows bound to loopback.
 - [x] Add CI checks for Python, web production build and shell syntax.
 - [x] Add a Termux doctor for prerequisite/model-file checks, model/Engine/Web health probes and an optional direct local-inference smoke test; make startup wait for and diagnose all three services.
+- [x] Add bounded non-zero-exit supervision for model/Engine/Web processes, exponential retry backoff, persistent rotated logs, tmux pane retention and doctor log tails; Android whole-app process recovery remains unverified.
 - [ ] Verify install and offline chat on a physical Android device; record RSS/PSS, TTFT, throughput and thermal behavior.
 - [ ] Validate memory, process lifecycle and recovery after Android background/low-memory kills.
