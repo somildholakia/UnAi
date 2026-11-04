@@ -288,3 +288,39 @@ This is a process supervisor inside the existing Termux/tmux session. It recover
 5. Do not train or claim specialist weights without an explicitly approved consented/licensed corpus and a suitable training environment.
 6. Update this handoff and `docs/CHECKPOINT.md` after each validated engineering milestone.
 
+## 2026-11-04 continuation handoff — safe Termux status/recovery
+
+**Repository:** https://github.com/somildholakia/UnAi  
+**Active branch:** `feat/m4-instance-methods-m5-specialists`  
+**Latest validated code/test commit:** `d731c0a0b16d00e5fced5bb0d4551c5d4d5126ec`  
+**GitHub Actions:** [run #307](https://github.com/somildholakia/UnAi/actions/runs/41822981471) — 331 tests passed in 13.12s; Python compileall, all Termux shell syntax checks and Web production build passed.  
+**PR #28:** open, unmerged; `main` remains unchanged.
+
+### Added files and behavior
+
+- `scripts/termux-service.sh` centralizes the model, Engine and Web launch command definitions and wraps each in `termux-supervise.sh`.
+- `scripts/termux-control.sh status` reports service endpoint health and tmux pane state.
+- `scripts/termux-control.sh recover [model|engine|web|all]` leaves healthy endpoints untouched, avoids restarting a live supervisor pane, respawns dead panes and creates missing windows only when the service endpoint is unhealthy.
+- When no tmux session exists, recovery starts the full stack only if all three endpoints are unreachable. If one remains healthy, it refuses to start duplicate listeners.
+- `termux-doctor.sh` verifies the service launcher/control helper are present.
+- The workflow syntax-checks the installer, starter, doctor, supervisor, shared service launcher and control script.
+
+### Validation and limitations
+
+CI uses mocked HTTP endpoints and tmux commands. It proves safe branch behavior in those fixtures but not actual port ownership or process behavior on Android. Whole-Termux process death still requires reopening Termux manually. No physical Android performance or reliability benchmarks are claimed.
+
+### Recommended next action
+
+Run the latest branch on the physical Termux device:
+
+```bash
+git pull origin feat/m4-instance-methods-m5-specialists
+bash scripts/termux-start.sh
+bash scripts/termux-control.sh status
+bash scripts/termux-doctor.sh --smoke-chat
+```
+
+Then simulate a single-service crash only in a controlled test (for example, stop the model process through its tmux pane), confirm the supervisor retry behavior, and verify that `bash scripts/termux-control.sh recover model` does not duplicate an already healthy listener. Record real outcomes, not assumptions.
+
+Before any further code changes, re-fetch the live branch, PR #28 and CI state. Keep `main` unchanged and do not merge PR #28 without explicit permission. M5 training still requires an explicitly approved, consented/licensed corpus and a suitable training environment; no specialist weights have been trained.
+
