@@ -39,6 +39,7 @@ from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchReject
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 from unai_engine.verification.proof import summarize_proof
 from unai_engine.verification.probes import BoundaryProbeGenerator, ProbeTargetError
+from unai_engine.verification.transparency import TransparencyCheckpointStore
 from unai_engine.verification.grounded import (
     GroundedTestVerifier,
     GroundedVerificationError,
@@ -86,6 +87,11 @@ grounded_test_verifier = GroundedTestVerifier(
     task_test_runner,
     trusted_oracle_public_keys=settings.oracle_trusted_public_keys,
     trusted_oracle_publisher_keys=settings.oracle_trusted_publisher_keys,
+    trusted_oracle_transparency_log_keys=settings.oracle_transparency_log_keys,
+    trusted_oracle_transparency_witness_keys=settings.oracle_transparency_witness_keys,
+    oracle_transparency_required=settings.oracle_transparency_required,
+    oracle_transparency_min_witnesses=settings.oracle_transparency_min_witnesses,
+    transparency_checkpoint_store=TransparencyCheckpointStore(settings.oracle_transparency_db_path),
 )
 
 api_token_store = ApiTokenStore(settings.api_token_store_path)
@@ -147,6 +153,10 @@ def _tenant_services(request: Request) -> TenantServices:
                 test_max_bytes=settings.test_max_bytes,
                 trusted_oracle_public_keys=settings.oracle_trusted_public_keys,
                 trusted_oracle_publisher_keys=settings.oracle_trusted_publisher_keys,
+                trusted_oracle_transparency_log_keys=settings.oracle_transparency_log_keys,
+                trusted_oracle_transparency_witness_keys=settings.oracle_transparency_witness_keys,
+                oracle_transparency_required=settings.oracle_transparency_required,
+                oracle_transparency_min_witnesses=settings.oracle_transparency_min_witnesses,
             )
         except (OSError, ValueError) as exc:
             raise HTTPException(status_code=503, detail="Tenant storage could not be initialized safely.") from exc
