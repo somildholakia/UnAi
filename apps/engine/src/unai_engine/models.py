@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 
 TaskKind = Literal["bugfix", "feature", "review", "research", "general"]
@@ -389,6 +389,43 @@ class GroundedOracleAttestation(BaseModel):
         return value
 
 
+class GroundedOracleTransparencyTreeHead(BaseModel):
+    """Operator-pinned log's signed checkpoint envelope."""
+
+    log_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")]
+    key_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
+    timestamp: int = Field(ge=0, le=2**63 - 1)
+    tree_size: int = Field(ge=1, le=2**63 - 1)
+    root_hash: Annotated[str, StringConstraints(pattern=r"^[A-Fa-f0-9]{64}$")]
+    signature_b64: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")]
+
+
+class GroundedOracleTransparencyWitness(BaseModel):
+    """Independent witness signature over one exact signed tree head."""
+
+    key_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
+    signature_b64: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")]
+
+
+class GroundedOracleTransparencyProof(BaseModel):
+    """Bounded inclusion and checkpoint-growth proof supplied with a publisher manifest."""
+
+    tree_head: GroundedOracleTransparencyTreeHead
+    leaf_index: int = Field(ge=0, le=2**63 - 1)
+    inclusion_proof: list[Annotated[str, StringConstraints(pattern=r"^[A-Fa-f0-9]{64}$")]] = Field(max_length=32)
+    consistency_proof: list[Annotated[str, StringConstraints(pattern=r"^[A-Fa-f0-9]{64}$")]] = Field(
+        default_factory=list, max_length=32
+    )
+    witnesses: list[GroundedOracleTransparencyWitness] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def reject_duplicate_witness_keys(self):
+        key_ids = [item.key_id for item in self.witnesses]
+        if len(key_ids) != len(set(key_ids)):
+            raise ValueError("Transparency witness key IDs must be unique.")
+        return self
+
+
 class GroundedOraclePublisherAttestation(BaseModel):
     """External publisher signature over one immutable specification artifact revision."""
 
@@ -408,6 +445,7 @@ class GroundedOraclePublisherAttestation(BaseModel):
     signature_b64: Annotated[
         str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")
     ]
+    transparency: GroundedOracleTransparencyProof | None = None
 
     @field_validator("issued_at")
     @classmethod

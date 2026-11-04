@@ -78,6 +78,17 @@ def verify_publisher_manifest_inclusion(
         root_hash=head.root_hash,
     )
 
+def build_transparency_witness_statement(head: "SignedTreeHead") -> dict[str, object]:
+    """Canonical statement independent witnesses sign for one exact tree head."""
+    return {
+        "schema": "unai.transparency-witness.v1",
+        "log_id": head.log_id,
+        "tree_head_sha256": hashlib.sha256(head.signed_message()).hexdigest(),
+        "tree_size": head.tree_size,
+        "timestamp": head.timestamp,
+        "root_hash": head.root_hash.lower(),
+    }
+
 
 @dataclass(frozen=True)
 class SignedTreeHead:

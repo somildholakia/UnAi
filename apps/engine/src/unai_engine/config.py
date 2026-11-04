@@ -198,6 +198,90 @@ def _oracle_publisher_keys_from_env() -> dict[str, dict[str, Any]]:
     return validated
 
 
+
+def _transparency_keyring_from_env(env_name: str, *, identity_field: str) -> dict[str, dict[str, Any]]:
+    """Load rotating Ed25519 transparency-log or independent-witness public keys."""
+    raw = os.getenv(env_name, "{}")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{env_name} must be a JSON object.") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{env_name} must be a JSON object.")
+
+    allowed_fields = {"public_key_b64", identity_field, "not_before", "not_after", "revoked"}
+    validated: dict[str, dict[str, Any]] = {}
+    for key_id, entry in parsed.items():
+        if (
+            not isinstance(key_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", key_id) is None
+            or not isinstance(entry, dict)
+            or set(entry) - allowed_fields
+        ):
+            raise ValueError(f"{env_name} entries require safe key IDs and supported object fields.")
+        public_key_b64 = entry.get("public_key_b64")
+        identity = entry.get(identity_field)
+        revoked = entry.get("revoked", False)
+        if (
+            not isinstance(public_key_b64, str)
+            or not isinstance(identity, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", identity) is None
+            or not isinstance(revoked, bool)
+        ):
+            raise ValueError(f"{env_name} key {key_id!r} requires a valid {identity_field}, public key and revoked flag.")
+        try:
+            public_key = base64.b64decode(public_key_b64, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError(f"{env_name} public key {key_id!r} is not valid base64.") from exc
+        if len(public_key) != 32:
+            raise ValueError(f"{env_name} public key {key_id!r} must decode to 32 bytes.")
+
+        def parse_bound(value: object, field_name: str) -> datetime | None:
+            if value is None:
+                return None
+            if not isinstance(value, str):
+                raise ValueError(f"{env_name} key {key_id!r} {field_name} must be timezone-aware ISO-8601.")
+            try:
+                parsed_time = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError(f"{env_name} key {key_id!r} {field_name} is invalid ISO-8601.") from exc
+            if parsed_time.tzinfo is None or parsed_time.utcoffset() is None:
+                raise ValueError(f"{env_name} key {key_id!r} {field_name} must include a timezone.")
+            return parsed_time
+
+        not_before = parse_bound(entry.get("not_before"), "not_before")
+        not_after = parse_bound(entry.get("not_after"), "not_after")
+        if not_before is not None and not_after is not None and not_before >= not_after:
+            raise ValueError(f"{env_name} key {key_id!r} has an invalid issuance window.")
+        validated[key_id] = {
+            "public_key_b64": public_key_b64,
+            identity_field: identity,
+            "not_before": not_before,
+            "not_after": not_after,
+            "revoked": revoked,
+        }
+    return validated
+
+
+def _oracle_transparency_log_keys_from_env() -> dict[str, dict[str, Any]]:
+    return _transparency_keyring_from_env(
+        "UNAI_ORACLE_TRANSPARENCY_LOG_KEYS", identity_field="log_id"
+    )
+
+
+def _oracle_transparency_witness_keys_from_env() -> dict[str, dict[str, Any]]:
+    return _transparency_keyring_from_env(
+        "UNAI_ORACLE_TRANSPARENCY_WITNESS_KEYS", identity_field="witness_id"
+    )
+
+
+def _oracle_transparency_required_from_env() -> bool:
+    raw = os.getenv("UNAI_ORACLE_TRANSPARENCY_REQUIRED", "false").strip().casefold()
+    if raw not in {"true", "false"}:
+        raise ValueError("UNAI_ORACLE_TRANSPARENCY_REQUIRED must be true or false.")
+    return raw == "true"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     model_base_url: str = os.getenv("UNAI_MODEL_BASE_URL", "http://127.0.0.1:8080/v1").rstrip("/")
@@ -230,10 +314,35 @@ class Settings:
     oracle_trusted_publisher_keys: dict[str, dict[str, Any]] = field(
         default_factory=_oracle_publisher_keys_from_env
     )
+    oracle_transparency_log_keys: dict[str, dict[str, Any]] = field(
+        default_factory=_oracle_transparency_log_keys_from_env
+    )
+    oracle_transparency_witness_keys: dict[str, dict[str, Any]] = field(
+        default_factory=_oracle_transparency_witness_keys_from_env
+    )
+    oracle_transparency_required: bool = field(default_factory=_oracle_transparency_required_from_env)
+    oracle_transparency_min_witnesses: int = int(os.getenv("UNAI_ORACLE_TRANSPARENCY_MIN_WITNESSES", "0"))
+    oracle_transparency_db_path: Path = _path_setting(
+        "UNAI_ORACLE_TRANSPARENCY_DB_PATH", ".data/transparency-checkpoints.sqlite3"
+    )
 
     def __post_init__(self) -> None:
         if self.api_token and len(self.api_token) < 32:
             raise ValueError("UNAI_API_TOKEN must contain at least 32 characters.")
+        if not 0 <= self.oracle_transparency_min_witnesses <= 10:
+            raise ValueError("UNAI_ORACLE_TRANSPARENCY_MIN_WITNESSES must be between 0 and 10.")
+        if self.oracle_transparency_required:
+            if not self.oracle_transparency_log_keys:
+                raise ValueError("Required publisher transparency needs operator-pinned log keys.")
+            if self.oracle_transparency_min_witnesses < 1:
+                raise ValueError("Required publisher transparency needs at least one independent witness.")
+            available = {
+                entry["witness_id"]
+                for entry in self.oracle_transparency_witness_keys.values()
+                if not entry.get("revoked", False)
+            }
+            if len(available) < self.oracle_transparency_min_witnesses:
+                raise ValueError("Configured independent witness identities do not meet the required quorum.")
 
 
 settings = Settings()
