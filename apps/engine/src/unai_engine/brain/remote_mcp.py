@@ -1,7 +1,9 @@
 """MCP bridge for a hosted unAI Brain API (no GPU and no inference in this process)."""
 from __future__ import annotations
 
+import ipaddress
 import os
+from urllib.parse import urlsplit
 
 import httpx
 from mcp.server import MCPServer
@@ -10,6 +12,24 @@ API_BASE = os.getenv("UNAI_BRAIN_API_URL", "").rstrip("/")
 API_TOKEN = os.getenv("UNAI_BRAIN_API_TOKEN", "")
 if not API_BASE:
     raise RuntimeError("Set UNAI_BRAIN_API_URL to your hosted unAI Brain API.")
+
+parsed_base = urlsplit(API_BASE)
+if (
+    parsed_base.scheme not in {"http", "https"}
+    or not parsed_base.hostname
+    or parsed_base.username is not None
+    or parsed_base.password is not None
+    or parsed_base.query
+    or parsed_base.fragment
+):
+    raise RuntimeError("UNAI_BRAIN_API_URL must be a clean HTTP(S) API origin.")
+try:
+    base_ip = ipaddress.ip_address(parsed_base.hostname)
+    loopback_base = base_ip.is_loopback
+except ValueError:
+    loopback_base = parsed_base.hostname.casefold() == "localhost" or parsed_base.hostname.casefold().endswith(".localhost")
+if not loopback_base and (parsed_base.scheme != "https" or not API_TOKEN):
+    raise RuntimeError("A non-loopback Brain API requires HTTPS and UNAI_BRAIN_API_TOKEN.")
 
 server = MCPServer(
     "unAI Remote Brain",
