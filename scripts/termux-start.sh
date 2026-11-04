@@ -23,7 +23,8 @@ if [[ ! -x "$ENGINE_DIR/.venv/bin/uvicorn" || ! -d "$WEB_DIR/node_modules" ]]; t
 fi
 
 if tmux has-session -t unai 2>/dev/null; then
-  echo "unAI is already running; attaching to its Termux session."
+  echo "unAI is already running; checking its services before attaching."
+  bash "$ROOT/scripts/termux-doctor.sh" || echo "One or more checks failed; inspect the existing tmux windows."
   exec tmux attach-session -t unai
 fi
 
