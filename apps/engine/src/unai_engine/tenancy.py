@@ -17,6 +17,7 @@ from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
 from unai_engine.verification.grounded import GroundedTestVerifier
 from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.probes import BoundaryProbeGenerator
+from unai_engine.verification.transparency import TransparencyCheckpointStore
 
 
 @dataclass(slots=True)
@@ -47,6 +48,10 @@ def build_tenant_services(
     test_max_bytes: int = 50 * 1024 * 1024,
     trusted_oracle_public_keys: dict[str, str] | None = None,
     trusted_oracle_publisher_keys: dict[str, dict] | None = None,
+    trusted_oracle_transparency_log_keys: dict[str, dict] | None = None,
+    trusted_oracle_transparency_witness_keys: dict[str, dict] | None = None,
+    oracle_transparency_required: bool = False,
+    oracle_transparency_min_witnesses: int = 0,
 ) -> TenantServices:
     """Create physically separate workspace, Brain, evidence and graph-cache state."""
     if re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tenant_id) is None or tenant_id == "default":
@@ -81,6 +86,11 @@ def build_tenant_services(
         task_test_runner,
         trusted_oracle_public_keys=trusted_oracle_public_keys or {},
         trusted_oracle_publisher_keys=trusted_oracle_publisher_keys or {},
+        trusted_oracle_transparency_log_keys=trusted_oracle_transparency_log_keys or {},
+        trusted_oracle_transparency_witness_keys=trusted_oracle_transparency_witness_keys or {},
+        oracle_transparency_required=oracle_transparency_required,
+        oracle_transparency_min_witnesses=oracle_transparency_min_witnesses,
+        transparency_checkpoint_store=TransparencyCheckpointStore(data / "transparency-checkpoints.sqlite3"),
     )
     agent = AgentOrchestrator(
         provider,
