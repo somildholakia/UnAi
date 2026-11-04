@@ -270,3 +270,18 @@ The local read-only task MCP server exposes task_get_proof_bundle for model-side
 - No automatic counterexample shrinking, symbolic execution, coverage-guided fuzzing, independent model review or multi-language oracle execution is implemented yet.
 
 The intended progression is evidence first: retain the source hash, oracle provenance, execution trace and unresolved assumptions rather than replacing them with a confidence score.
+
+## Offline publisher transparency proofs
+
+The Engine now includes `unai_engine.verification.transparency`, a verification layer for operator-pinned transparency logs. It adds:
+
+- RFC 6962 Merkle leaf hashing (`SHA256(0x00 || leaf)`) and internal-node hashing (`SHA256(0x01 || left || right)`).
+- Inclusion-proof verification against a signed tree head, including strict index, tree-size, hash-length and proof-length checks.
+- Consistency-proof verification when a log grows from a previously accepted tree size.
+- Ed25519 verification of an unAI canonical-JSON signed tree-head envelope. The key ID must resolve to an operator-pinned 32-byte public key; unknown keys and invalid signatures fail closed.
+- Canonical publisher-manifest leaf encoding and `verify_publisher_manifest_inclusion`, which binds exact manifest bytes to a leaf index and signed tree root.
+- `TransparencyCheckpointStore`, a SQLite observation ledger with append-only update/delete guards. It rejects tree-size rollback, timestamp rollback, same-size root equivocation, missing/invalid growth proofs and untrusted tree-head signatures.
+
+A caller supplies the signed tree head, trusted log-key mapping, leaf index, inclusion path and (when advancing an existing checkpoint) the consistency path. Merkle proof nodes are 32-byte hexadecimal hashes. The tree-head signature covers the schema, log ID, key ID, timestamp, tree size and root hash in canonical UTF-8 JSON; this is the unAI envelope, not a claim of wire compatibility with every public log protocol.
+
+This component verifies cryptographic statements supplied to it. It does **not** fetch proofs, discover logs or keys, perform witness gossip, prove that a log is globally append-only, authenticate a publisher's legal identity, or replace the existing publisher-manifest and reviewer-attestation checks. Operator key pinning and checkpoint storage are local trust inputs. The existing oracle request flow has not yet been wired to require transparency proofs; that integration remains the next M4 task.
