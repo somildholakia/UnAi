@@ -170,3 +170,86 @@ async def test_v1_cache_migrates_and_reparses_to_add_static_call_records(tmp_pat
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
     finally:
         connection.close()
+
+@pytest.mark.asyncio
+async def test_incomplete_discovery_does_not_publish_or_evict_cached_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alpha = tmp_path / "alpha.py"
+    beta = tmp_path / "beta.py"
+    alpha.write_text("def alpha():\\n    return 1\\n", encoding="utf-8")
+    beta.write_text("def beta():\\n    return 2\\n", encoding="utf-8")
+    indexer = PythonCodeGraphIndexer(cache_path=tmp_path / "graph.sqlite3")
+
+    complete = await indexer.index(str(tmp_path))
+    root_key = _root_key(tmp_path)
+    before_meta, before_files, before_edges = indexer.store.load(
+        root_key, str(tmp_path.resolve())
+    )
+    assert before_meta is not None
+    assert set(before_files) == {"alpha.py", "beta.py"}
+
+    # Simulate the bounded walker reaching its file cap before it can observe
+    # beta.py or a newly-created gamma.py.
+    (tmp_path / "gamma.py").write_text(
+        "def gamma():\\n    return 3\\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        indexer,
+        "_candidates",
+        lambda _base: ([Path("alpha.py")], 0, True),
+    )
+
+    partial = await indexer.index(str(tmp_path))
+    assert partial["summary"]["truncated"] is True
+    assert partial["summary"]["scan_complete"] is False
+    assert partial["summary"]["cache"]["state"] == "incomplete"
+    assert partial["summary"]["cache"]["snapshot_persisted"] is False
+    assert partial["summary"]["cache"]["generation"] == complete["summary"]["cache"]["generation"]
+    assert partial["summary"]["cache"]["files_removed"] == 0
+    assert {node["path"] for node in partial["nodes"] if node["type"] == "file"} == {"alpha.py"}
+
+    after_meta, after_files, after_edges = indexer.store.load(
+        root_key, str(tmp_path.resolve())
+    )
+    assert after_meta == before_meta
+    assert after_files == before_files
+    assert after_edges == before_edges
+
+    # A complete retry incorporates all discovered files as one new generation.
+    monkeypatch.undo()
+    recovered = await indexer.index(str(tmp_path))
+    assert recovered["summary"]["scan_complete"] is True
+    assert recovered["summary"]["cache"]["state"] == "stale"
+    assert recovered["summary"]["cache"]["generation"] == 2
+    assert recovered["summary"]["cache"]["snapshot_persisted"] is True
+    assert set(indexer.store.load(root_key, str(tmp_path.resolve()))[1]) == {
+        "alpha.py", "beta.py", "gamma.py"
+    }
+
+
+@pytest.mark.asyncio
+async def test_first_incomplete_discovery_does_not_create_partial_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "visible.py").write_text(
+        "def visible():\\n    return 1\\n", encoding="utf-8"
+    )
+    indexer = PythonCodeGraphIndexer(cache_path=tmp_path / "graph.sqlite3")
+    monkeypatch.setattr(
+        indexer,
+        "_candidates",
+        lambda _base: ([Path("visible.py")], 0, True),
+    )
+
+    partial = await indexer.index(str(tmp_path))
+
+    assert partial["summary"]["scan_complete"] is False
+    assert partial["summary"]["cache"]["state"] == "incomplete"
+    assert partial["summary"]["cache"]["generation"] == 0
+    assert partial["summary"]["cache"]["snapshot_persisted"] is False
+    meta, files, edges = indexer.store.load(_root_key(tmp_path), str(tmp_path.resolve()))
+    assert meta is None
+    assert files == {}
+    assert edges == []
+
