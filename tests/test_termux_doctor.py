@@ -23,6 +23,10 @@ def termux_install(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
         REPOSITORY / "scripts" / "termux-doctor.sh",
         scripts / "termux-doctor.sh",
     )
+    shutil.copy2(
+        REPOSITORY / "scripts" / "termux-supervise.sh",
+        scripts / "termux-supervise.sh",
+    )
 
     engine_bin = root / "apps" / "engine" / ".venv" / "bin"
     web_bin = root / "apps" / "web" / "node_modules" / ".bin"
@@ -83,6 +87,7 @@ fi
             "UNAI_MODEL_DIR": str(model.parent),
             "UNAI_MODEL_FILE": str(model),
             "UNAI_PROBE_TIMEOUT_SECONDS": "1",
+            "UNAI_LOG_DIR": str(home / ".local" / "state" / "unai"),
             "UNAI_SMOKE_TIMEOUT_SECONDS": "5",
         }
     )
@@ -163,3 +168,22 @@ def test_termux_doctor_rejects_partial_model_download(
 
     assert result.returncode == 1
     assert "model file is incomplete" in result.stdout
+
+def test_termux_doctor_includes_recent_log_when_a_service_is_unreachable(
+    termux_install: tuple[Path, dict[str, str], Path],
+) -> None:
+    script, env, _model = termux_install
+    log_dir = Path(env["UNAI_LOG_DIR"])
+    log_dir.mkdir(parents=True)
+    (log_dir / "engine.log").write_text(
+        "engine supervisor started\\nengine crashed while loading configuration\\n",
+        encoding="utf-8",
+    )
+    env["UNAI_TEST_FAIL_URL"] = "http://127.0.0.1:8000/api/health"
+
+    result = run_doctor(script, env)
+
+    assert result.returncode == 1
+    assert "Recent engine supervisor log:" in result.stdout
+    assert "engine crashed while loading configuration" in result.stdout
+
