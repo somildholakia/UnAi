@@ -28,22 +28,17 @@ if tmux has-session -t unai 2>/dev/null; then
   exec tmux attach-session -t unai
 fi
 
-SUPERVISOR="$ROOT/scripts/termux-supervise.sh"
-if [[ ! -f "$SUPERVISOR" ]]; then
-  echo "Service supervisor is missing: $SUPERVISOR"
+SERVICE_LAUNCHER="$ROOT/scripts/termux-service.sh"
+if [[ ! -f "$SERVICE_LAUNCHER" || ! -f "$ROOT/scripts/termux-supervise.sh" ]]; then
+  echo "Termux service launcher or supervisor is missing; update the repository and reinstall."
   exit 1
 fi
 
-# Quote every argument independently so paths and user overrides remain safe.
-printf -v MODEL_COMMAND '%q ' bash "$SUPERVISOR" model -- "$LLAMA_SERVER_BIN" -m "$MODEL_FILE" \
-  --host 127.0.0.1 --port 8080 --alias unai-local-coder \
-  --ctx-size 2048 --threads "$CPU_THREADS" --batch-size 128
-printf -v ENGINE_COMMAND '%q ' bash "$SUPERVISOR" engine -- bash -c \
-  'cd "$1" && shift && exec "$@"' _ "$ENGINE_DIR" "$ENGINE_DIR/.venv/bin/uvicorn" \
-  unai_engine.main:app --host 127.0.0.1 --port 8000
-printf -v WEB_COMMAND '%q ' bash "$SUPERVISOR" web -- bash -c \
-  'cd "$1" && shift && exec "$@"' _ "$WEB_DIR" npm run dev -- \
-  --host 127.0.0.1 --port 5173 --strictPort
+# The same service command is used by startup and explicit recovery, avoiding
+# mismatched flags or duplicate process definitions.
+printf -v MODEL_COMMAND '%q ' bash "$SERVICE_LAUNCHER" model
+printf -v ENGINE_COMMAND '%q ' bash "$SERVICE_LAUNCHER" engine
+printf -v WEB_COMMAND '%q ' bash "$SERVICE_LAUNCHER" web
 
 tmux new-session -d -s unai -n model
 tmux set-window-option -t unai:model remain-on-exit on
