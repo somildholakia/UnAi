@@ -684,3 +684,35 @@ Integrate verified publisher-manifest inclusion and monotonic checkpoint accepta
 - **Brain Worker Actions:** [run #18](https://github.com/somildholakia/UnAi/actions/runs/41830680795) — success; Worker checks, D1 migration smoke test and browser JavaScript syntax passed.
 - PR #28 remains open, mergeable and unmerged. Base `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
 - Next: integrate the proof verifier and checkpoint store into publisher-oracle acceptance/evidence. Keep phone setup deferred until all software work is complete.
+
+
+## 2026-11-04 M4 publisher-transparency integration — CI validated
+
+**Validated code commit:** `1fd8df11144672471318e3db9df9e8fe0b28b92c` (`fix(m4): keep transparency proofs out of generated tests`).  
+**Engine/Web Actions:** [run #344](https://github.com/somildholakia/UnAi/actions/runs/41833570092) — success; **367 tests passed in 14.91s**, Python compileall and Termux shell syntax checks passed; Web production build passed.  
+**Brain Worker Actions:** [run #27](https://github.com/somildholakia/UnAi/actions/runs/41833570066) — success.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`.  
+**PR #28:** open, unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Wired publisher-manifest inclusion verification into grounded publisher-oracle acceptance.
+- Require a trusted Ed25519 signed tree head and verify the exact canonical publisher manifest leaf against the supplied inclusion proof.
+- Enforce per-log monotonic checkpoint acceptance with consistency proofs; reject rollback, timestamp regression, same-size equivocation and invalid/missing consistency material.
+- Verify operator-pinned transparency log keys and validity/revocation windows.
+- Verify independent witness signatures, distinct witness identities and configured minimum witness quorum.
+- Persist accepted checkpoint observations append-only and attach tree-head, proof, witness and checkpoint provenance to publisher-oracle evidence.
+- Preserve the distinct publisher-artifact signature and reviewer-assertion signature roles. Publisher and transparency signatures/proofs are evidence only and are removed from generated pytest input.
+- Regression coverage in `tests/test_grounded.py` includes required transparency, successful evidence recording, tampered inclusion rejection before execution, cross-log key substitution and checkpoint rollback. `tests/test_transparency.py` covers Merkle inclusion/consistency and append-only checkpoint storage.
+- Corrected the earlier stale handoff: the transparency integration is now implemented and CI-tested; it is no longer the next task.
+
+### Trust boundaries
+
+- Proofs are caller-supplied and verified offline; the Engine does not operate/discover a public log or fetch proofs.
+- Operator-pinned log and witness keys, key lifecycle configuration and local checkpoint storage remain trust dependencies. Witness quorum reduces single-log trust but is not a universal consensus protocol.
+- This does not establish publisher legal identity, certificate-chain authority or factual correctness of a specification. Reviewer attestation remains separate and optional/configuration-dependent.
+- CI is Linux automation. Physical Android installation/performance and hosted Brain deployment remain unverified.
+
+### Next software work
+
+Continue the remaining bounded M4 verification backlog (external side-effect fixtures, deeper recursive shrinking policies, nested classes/signature expansion, and coverage/mutation-based verification only with explicit resource and sandbox policies). Continue M5 infrastructure hardening and evaluation tooling, but real adapter training remains blocked on an explicitly approved consented/licensed multi-repository corpus and suitable GPU compute. No weights have been trained or released. Keep phone setup deferred until all software development is complete.
