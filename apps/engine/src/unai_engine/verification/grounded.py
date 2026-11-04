@@ -40,6 +40,12 @@ from unai_engine.verification.attestations import (
 )
 from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.proof import summarize_proof
+from unai_engine.verification.transparency import (
+    SignedTreeHead,
+    TransparencyCheckpointStore,
+    build_transparency_witness_statement,
+    verify_publisher_manifest_inclusion,
+)
 
 
 _MAX_SHRINK_CANDIDATES = 24
@@ -1402,12 +1408,157 @@ class GroundedTestVerifier:
         test_runner: IsolatedPythonTestRunner,
         trusted_oracle_public_keys: dict[str, str] | None = None,
         trusted_oracle_publisher_keys: dict[str, dict[str, Any]] | None = None,
+        trusted_oracle_transparency_log_keys: dict[str, dict[str, Any]] | None = None,
+        trusted_oracle_transparency_witness_keys: dict[str, dict[str, Any]] | None = None,
+        oracle_transparency_required: bool = False,
+        oracle_transparency_min_witnesses: int = 0,
+        transparency_checkpoint_store: TransparencyCheckpointStore | None = None,
     ) -> None:
         self.ledger = ledger
         self.patch_manager = patch_manager
         self.test_runner = test_runner
         self.trusted_oracle_public_keys = dict(trusted_oracle_public_keys or {})
         self.trusted_oracle_publisher_keys = dict(trusted_oracle_publisher_keys or {})
+        self.trusted_oracle_transparency_log_keys = dict(trusted_oracle_transparency_log_keys or {})
+        self.trusted_oracle_transparency_witness_keys = dict(trusted_oracle_transparency_witness_keys or {})
+        self.oracle_transparency_required = bool(oracle_transparency_required)
+        self.oracle_transparency_min_witnesses = int(oracle_transparency_min_witnesses)
+        self.transparency_checkpoint_store = transparency_checkpoint_store
+
+    def _verify_publisher_transparency(
+        self, publisher: GroundedOraclePublisherAttestation,
+        statement: dict[str, Any], case_id: str,
+    ) -> dict[str, Any] | None:
+        proof = publisher.transparency
+        if proof is None:
+            if self.oracle_transparency_required:
+                raise GroundedVerificationError(
+                    f"Publisher oracle case {case_id} requires a transparency inclusion proof.", 403
+                )
+            return None
+
+        head = SignedTreeHead(
+            log_id=proof.tree_head.log_id,
+            key_id=proof.tree_head.key_id,
+            timestamp=proof.tree_head.timestamp,
+            tree_size=proof.tree_head.tree_size,
+            root_hash=proof.tree_head.root_hash,
+            signature_b64=proof.tree_head.signature_b64,
+        )
+        log_entry = self.trusted_oracle_transparency_log_keys.get(head.key_id)
+        if log_entry is None:
+            raise GroundedVerificationError(
+                f"Transparency log key {head.key_id!r} is not operator-trusted.", 403
+            )
+        if log_entry.get("log_id") != head.log_id:
+            raise GroundedVerificationError(
+                f"Transparency log identity does not match key {head.key_id!r}.", 403
+            )
+        if log_entry.get("revoked", False):
+            raise GroundedVerificationError(
+                f"Transparency log key {head.key_id!r} has been revoked.", 403
+            )
+        try:
+            observed_at = datetime.fromtimestamp(head.timestamp, timezone.utc)
+        except (OverflowError, OSError, ValueError) as exc:
+            raise GroundedVerificationError("Transparency tree-head timestamp is outside the supported range.", 403) from exc
+        not_before = log_entry.get("not_before")
+        not_after = log_entry.get("not_after")
+        if not_before is not None and observed_at < not_before:
+            raise GroundedVerificationError("Transparency log key was not valid at the tree-head timestamp.", 403)
+        if not_after is not None and observed_at > not_after:
+            raise GroundedVerificationError("Transparency log key was outside its validity window at the tree-head timestamp.", 403)
+
+        log_keys = {head.key_id: log_entry["public_key_b64"]}
+        if not verify_publisher_manifest_inclusion(
+            statement=statement,
+            head=head,
+            leaf_index=proof.leaf_index,
+            inclusion_proof=proof.inclusion_proof,
+            trusted_log_keys=log_keys,
+        ):
+            raise GroundedVerificationError(
+                f"Publisher manifest inclusion proof or signed tree head is invalid for oracle case {case_id}.", 403
+            )
+
+        witness_statement = build_transparency_witness_statement(head)
+        accepted_witness_ids: set[str] = set()
+        witness_provenance: list[dict[str, Any]] = []
+        for witness in proof.witnesses:
+            witness_entry = self.trusted_oracle_transparency_witness_keys.get(witness.key_id)
+            if witness_entry is None:
+                raise GroundedVerificationError(
+                    f"Transparency witness key {witness.key_id!r} is not operator-trusted.", 403
+                )
+            if witness_entry.get("revoked", False):
+                raise GroundedVerificationError(
+                    f"Transparency witness key {witness.key_id!r} has been revoked.", 403
+                )
+            if not_before := witness_entry.get("not_before"):
+                if observed_at < not_before:
+                    raise GroundedVerificationError(
+                        f"Transparency witness key {witness.key_id!r} was not yet valid at the tree-head timestamp.", 403
+                    )
+            if not_after := witness_entry.get("not_after"):
+                if observed_at > not_after:
+                    raise GroundedVerificationError(
+                        f"Transparency witness key {witness.key_id!r} was outside its validity window at the tree-head timestamp.", 403
+                    )
+            if not verify_ed25519_attestation(
+                public_key_b64=witness_entry["public_key_b64"],
+                signature_b64=witness.signature_b64,
+                message=canonical_attestation_message(witness_statement),
+            ):
+                raise GroundedVerificationError(
+                    f"Transparency witness signature is invalid for key {witness.key_id!r}.", 403
+                )
+            witness_id = witness_entry["witness_id"]
+            accepted_witness_ids.add(witness_id)
+            witness_provenance.append({
+                "key_id": witness.key_id,
+                "witness_id": witness_id,
+                "signature_b64": witness.signature_b64,
+                "statement_sha256": attestation_statement_sha256(witness_statement),
+            })
+
+        required_witnesses = max(
+            self.oracle_transparency_min_witnesses,
+            1 if self.oracle_transparency_required else 0,
+        )
+        if len(accepted_witness_ids) < required_witnesses:
+            raise GroundedVerificationError(
+                f"Transparency witness quorum not met: {len(accepted_witness_ids)} distinct witnesses; {required_witnesses} required.",
+                403,
+            )
+
+        if self.transparency_checkpoint_store is None:
+            raise GroundedVerificationError(
+                "Transparency checkpoint storage is not configured; refusing publisher transparency evidence.", 503
+            )
+        try:
+            checkpoint_added = self.transparency_checkpoint_store.accept(
+                head, log_keys, proof.consistency_proof
+            )
+        except ValueError as exc:
+            raise GroundedVerificationError(f"Transparency checkpoint rejected: {exc}", 409) from exc
+
+        return {
+            "verified": True,
+            "schema": "unai.publisher-transparency-proof.v1",
+            "log_id": head.log_id,
+            "log_key_id": head.key_id,
+            "tree_size": head.tree_size,
+            "tree_head_timestamp": head.timestamp,
+            "root_hash": head.root_hash.lower(),
+            "tree_head_signature_b64": head.signature_b64,
+            "leaf_index": proof.leaf_index,
+            "inclusion_proof": list(proof.inclusion_proof),
+            "consistency_proof": list(proof.consistency_proof),
+            "witnesses": witness_provenance,
+            "distinct_witness_count": len(accepted_witness_ids),
+            "required_witness_count": required_witnesses,
+            "checkpoint_newly_accepted": checkpoint_added,
+        }
 
     def _shrink_property_counterexamples(
         self,
@@ -1992,6 +2143,9 @@ class GroundedTestVerifier:
                     f"Publisher signature for oracle case {case['case_id']} is invalid.",
                     403,
                 )
+            transparency_provenance = self._verify_publisher_transparency(
+                publisher, statement, case["case_id"]
+            )
             case["oracle_publisher_attestation_provenance"] = {
                 "verified": True,
                 "algorithm": "Ed25519",
@@ -2006,6 +2160,7 @@ class GroundedTestVerifier:
                 "key_not_after": not_after.isoformat() if not_after is not None else None,
                 "statement_sha256": attestation_statement_sha256(statement),
                 "trust_bundle": trusted_entry.get("_trust_bundle"),
+                "transparency": transparency_provenance,
             }
             publisher_signatures[case["case_id"]] = publisher.signature_b64
             # Signatures remain in append-only evidence, not generated pytest input.
@@ -2098,7 +2253,14 @@ class GroundedTestVerifier:
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
                     "oracle_artifact_size_bytes": case.get("oracle_artifact_size_bytes"),
                     "oracle_artifact_integrity": (
-                        "trusted-ed25519-publisher-and-reviewer"
+                        "trusted-ed25519-publisher-transparency-and-reviewer"
+                        if case["oracle_publisher_attestation_provenance"]
+                        and case["oracle_publisher_attestation_provenance"].get("transparency")
+                        and case["oracle_attestation_provenance"]
+                        else "trusted-ed25519-publisher-transparency"
+                        if case["oracle_publisher_attestation_provenance"]
+                        and case["oracle_publisher_attestation_provenance"].get("transparency")
+                        else "trusted-ed25519-publisher-and-reviewer"
                         if case["oracle_publisher_attestation_provenance"] and case["oracle_attestation_provenance"]
                         else "trusted-ed25519-publisher-signature"
                         if case["oracle_publisher_attestation_provenance"]
