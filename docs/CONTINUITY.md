@@ -258,3 +258,33 @@ CI run #283 does **not** establish a physical Android installation or local infe
 4. Do not claim Android memory, speed, power, thermal acceptance or production readiness until real measurements are available.
 5. Update this handoff and `docs/CHECKPOINT.md` after the next validated code milestone.
 
+## 2026-11-04 continuation handoff — Termux service crash recovery
+
+**Repository:** https://github.com/somildholakia/UnAi  
+**Active branch:** `feat/m4-instance-methods-m5-specialists`  
+**Validated code/test commit:** `9c997b52fd016924583042dbd1ffc46e439e7263`  
+**GitHub Actions:** [run #296](https://github.com/somildholakia/UnAi/actions/runs/41822272142) — 324 tests passed in 12.25s; compileall, shell syntax and Web production build passed.  
+**PR #28:** open and unmerged. Keep `main` unchanged.
+
+### New behavior
+
+- `scripts/termux-supervise.sh SERVICE -- COMMAND...` restarts a service after a non-zero exit. Defaults: five retries; initial 2-second delay; exponential backoff capped at 30 seconds. Clean exit code 0 stops without restarting. Once retries are exhausted, the wrapper returns the last non-zero exit code.
+- `scripts/termux-start.sh` launches model, Engine and Web through the supervisor and keeps dead tmux panes available for inspection.
+- Per-service logs default to `$HOME/.local/state/unai/{model,engine,web}.log`; each rotates one backup at 1 MiB. Overrides: `UNAI_LOG_DIR`, `UNAI_LOG_MAX_BYTES`, `UNAI_MAX_RESTARTS`, `UNAI_RESTART_DELAY_SECONDS`, `UNAI_MAX_RESTART_DELAY_SECONDS`.
+- `scripts/termux-doctor.sh` checks the supervisor is installed and shows the last eight log lines when a service probe fails.
+- Tests exercise successful recovery after transient process failures, clean exits, retry-limit exhaustion, log rotation, bad configuration and doctor log display.
+- CI validates shell syntax for all four Termux scripts.
+
+### Recovery limitation — keep claims precise
+
+This is a process supervisor inside the existing Termux/tmux session. It recovers a service process that exits non-zero while the supervisor remains alive. It cannot resurrect the entire Termux application after Android force-stops or kills all Termux processes; the user must reopen Termux and run `bash scripts/termux-start.sh`. Actual Android low-memory/background lifecycle behavior has not been tested.
+
+### Resume instructions
+
+1. Fetch the live branch and PR #28 before writing; preserve all existing changes and do not merge or modify `main`.
+2. The M2 cache hardening, doctor and bounded service supervisor milestones are implemented and CI-validated; do not duplicate them.
+3. Next useful work: add an explicit Termux recovery/status command that can distinguish an alive tmux session from missing/stale service processes and safely restart only failed windows, with tests for missing panes, stale panes and healthy services. Keep recovery idempotent and do not start duplicate listeners.
+4. Continue to treat Android whole-app restart behavior, offline inference, memory, TTFT, throughput and thermal results as unverified until measured on the physical device.
+5. Do not train or claim specialist weights without an explicitly approved consented/licensed corpus and a suitable training environment.
+6. Update this handoff and `docs/CHECKPOINT.md` after each validated engineering milestone.
+
