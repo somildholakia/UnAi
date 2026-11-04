@@ -11,6 +11,7 @@ import binascii
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -90,9 +91,9 @@ class SignedTreeHead:
     def signed_message(self) -> bytes:
         if not self.log_id or not self.key_id or len(self.log_id) > 256 or len(self.key_id) > 128:
             raise ValueError("Transparency log and key identifiers must be non-empty and bounded.")
-        if isinstance(self.timestamp, bool) or self.timestamp < 0:
+        if not isinstance(self.timestamp, int) or isinstance(self.timestamp, bool) or self.timestamp < 0:
             raise ValueError("Tree-head timestamp must be a non-negative integer.")
-        if isinstance(self.tree_size, bool) or self.tree_size < 1:
+        if not isinstance(self.tree_size, int) or isinstance(self.tree_size, bool) or self.tree_size < 1:
             raise ValueError("Tree size must be a positive integer.")
         _decode_hash(self.root_hash)
         return _canonical_json({
@@ -234,7 +235,7 @@ class TransparencyCheckpointStore:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS transparency_observations (
                     log_id TEXT NOT NULL,
@@ -258,7 +259,7 @@ class TransparencyCheckpointStore:
             )
 
     def latest(self, log_id: str) -> dict[str, object] | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             row = connection.execute(
                 """SELECT log_id, tree_size, timestamp, root_hash, key_id
                 FROM transparency_observations WHERE log_id = ?
