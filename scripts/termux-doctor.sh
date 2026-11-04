@@ -8,6 +8,8 @@ LLAMA_CPP_DIR="${UNAI_LLAMA_CPP_DIR:-$HOME/src/llama.cpp}"
 MODEL_DIR="${UNAI_MODEL_DIR:-$HOME/models/unai}"
 MODEL_FILE="${UNAI_MODEL_FILE:-$MODEL_DIR/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf}"
 LLAMA_SERVER_BIN="${UNAI_LLAMA_SERVER_BIN:-$LLAMA_CPP_DIR/build/bin/llama-server}"
+SUPERVISOR="$ROOT/scripts/termux-supervise.sh"
+LOG_DIR="${UNAI_LOG_DIR:-$HOME/.local/state/unai}"
 MODEL_URL="${UNAI_MODEL_URL:-http://127.0.0.1:8080}"
 ENGINE_URL="${UNAI_ENGINE_URL:-http://127.0.0.1:8000}"
 WEB_URL="${UNAI_WEB_URL:-http://127.0.0.1:5173}"
@@ -54,7 +56,7 @@ else
   fail "Termux PREFIX is missing; run this command inside Termux"
 fi
 
-for command_name in curl python node npm tmux; do
+for command_name in curl python node npm tmux tee; do
   if command -v "$command_name" >/dev/null 2>&1; then
     pass "command: $command_name"
   else
@@ -66,6 +68,12 @@ if [[ -x "$LLAMA_SERVER_BIN" ]]; then
   pass "llama-server executable found"
 else
   fail "llama-server missing or not executable: $LLAMA_SERVER_BIN"
+fi
+
+if [[ -f "$SUPERVISOR" ]]; then
+  pass "service restart supervisor found"
+else
+  fail "service restart supervisor missing: $SUPERVISOR"
 fi
 
 if [[ -f "$MODEL_FILE" ]]; then
@@ -94,19 +102,25 @@ fi
 probe() {
   local label="$1"
   local url="$2"
+  local service="$3"
+  local log_file="$LOG_DIR/$service.log"
   if curl --fail --silent --show-error --max-time "$PROBE_TIMEOUT" "$url" >/dev/null 2>&1; then
     pass "$label reachable: $url"
     return 0
   fi
   fail "$label unreachable: $url"
+  if [[ -f "$log_file" ]]; then
+    echo "  Recent $service supervisor log:"
+    tail -n 8 "$log_file" | sed 's/^/    /'
+  fi
   return 1
 }
 
 echo
 echo "Service checks"
-probe "Model server" "$MODEL_URL/health" || true
-probe "Engine API" "$ENGINE_URL/api/health" || true
-probe "Web UI" "$WEB_URL/" || true
+probe "Model server" "$MODEL_URL/health" "model" || true
+probe "Engine API" "$ENGINE_URL/api/health" "engine" || true
+probe "Web UI" "$WEB_URL/" "web" || true
 
 if [[ "$SMOKE_CHAT" == true ]]; then
   echo
