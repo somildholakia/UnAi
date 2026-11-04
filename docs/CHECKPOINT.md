@@ -646,3 +646,31 @@ Read `docs/CONTINUITY.md`, `docs/CHECKPOINT.md`, `docs/ROADMAP.md`, then fetch t
 ### Next software priority
 
 Continue with the remaining M4 verification/trust backlog, beginning with the pending public-key transparency inclusion/consistency proofs (or an explicitly scoped organizational identity-discovery design). Do not call the current offline signed trust snapshots a public transparency log or legal identity proof. Continue M5 only with an explicitly consented/licensed multi-repository corpus and suitable training compute; no specialist adapter weights have been trained. Keep M6 phone setup and physical Android benchmarks as the final integration stage after software development is complete.
+
+## 2026-11-04 M4 offline publisher-transparency verification — CI validated
+
+**Validated code commit:** `75578f2bd222874b575005f1097f8f610afd471a`  
+**Engine/Web Actions:** [run #329](https://github.com/somildholakia/UnAi/actions/runs/41830246493) — success; **356 tests passed in 13.09s**, Python compileall, all six Termux shell syntax checks and Web production build passed.  
+**Brain Worker Actions:** [run #12](https://github.com/somildholakia/UnAi/actions/runs/41830246970) — success; Worker type checks, D1 migration/legacy-tenant smoke test and browser JavaScript syntax passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** open, mergeable and unmerged. Base `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
+
+### Delivered
+
+- Added `unai_engine.verification.transparency` with RFC 6962-style Merkle leaf/node hashing and bounded inclusion/consistency proof verification.
+- Added Ed25519 verification for canonical-JSON signed tree heads using operator-pinned log keys.
+- Added canonical publisher-manifest leaf encoding and a helper that verifies exact manifest inclusion under a trusted signed tree head.
+- Added a SQLite transparency observation ledger with append-only update/delete guards and monotonic per-log checkpoint checks. It rejects rollback, timestamp regression, same-size root equivocation, missing/invalid consistency proofs and untrusted signatures.
+- Added regression coverage for left/right inclusion paths, wrong leaves/indices, proof tampering, signed tree heads, publisher-manifest binding, checkpoint growth/rollback and append-only storage.
+- Documented the format and its trust boundaries in `docs/VERIFICATION.md`; updated the M4 roadmap.
+
+### Explicit limitations
+
+- The implementation verifies proofs supplied by a caller; it does not operate or discover a public log, fetch proofs, perform witness gossip, or establish publisher legal identity.
+- The tree-head signature uses the documented unAI canonical-JSON envelope, not a claim of universal public-log wire compatibility.
+- Existing publisher-oracle request/evidence flow is not yet wired to require transparency proofs. Key rotation/revocation and independent witness/checkpoint policy also remain open.
+- CI is Linux automation, not Android runtime or performance validation. Mobile installation remains deferred until all software milestones are complete.
+
+### Next software task
+
+Integrate verified publisher-manifest inclusion and monotonic checkpoint acceptance into the publisher-oracle evidence workflow, preserving the existing separate reviewer-attestation semantics. Add route-level tamper, stale-checkpoint and cross-log tests before considering the M4 transparency integration complete. Continue the remaining bounded M4 verification backlog and M5 training only when an approved corpus and suitable compute are available. Do not begin phone setup yet.
