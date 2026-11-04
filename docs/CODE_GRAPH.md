@@ -44,3 +44,10 @@ The graph summary reports `call_edges`, `instantiation_edges`, `call_sites_index
 These are source-level syntactic relationships, not observed runtime calls or a complete call graph. The indexer does not infer dynamic dispatch, inheritance-based dispatch, reflection, monkey-patching or execution order. Static call metadata is persisted with the per-file AST records. SQLite schema version 2 adds call-site and import-binding columns; an existing version-1 cache is migrated and all eligible files are reparsed once to backfill them. Source bodies remain uncached.
 
 The graph remains Python-only. Heuristic test-to-source mappings are not guaranteed. It is a navigation/retrieval aid, not a complete semantic model.
+
+## Incomplete directory discovery and cache publication
+
+A directory walk that reaches the `MAX_FILES` discovery cap is not a complete view of the repository. The indexer still returns the bounded partial graph for that request, but marks `summary.scan_complete=false` and (when SQLite caching is enabled) `summary.cache.state="incomplete"`. It does not publish a new SQLite generation, reports `snapshot_persisted=false`, retains the previous generation number and records zero confirmed removals. This prevents files beyond the walk cap from being mistaken for deleted files.
+
+A later complete refresh hashes the full eligible candidate set, reconciles additions and removals, and atomically publishes one new generation. This rule concerns incomplete file discovery; symbol, edge and call-site budgets remain separately visible through the graph's truncation indicators.
+
