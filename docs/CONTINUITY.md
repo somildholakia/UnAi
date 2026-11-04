@@ -230,3 +230,31 @@ A bounded directory walk that reaches `MAX_FILES` cannot safely infer that cache
 4. For M5, do not train or claim trained weights until a real consented/licensed corpus and suitable training environment are supplied.
 5. After the next code milestone, update checkpoint and continuity docs with exact code SHA and workflow evidence.
 
+## 2026-11-04 continuation handoff — Termux diagnostics
+
+**Repository:** https://github.com/somildholakia/UnAi  
+**Active branch:** `feat/m4-instance-methods-m5-specialists`  
+**Latest validated code commit:** `aff60b72a9dcb1a909bd918677505a0251c6964a`  
+**GitHub Actions:** [run #283](https://github.com/somildholakia/UnAi/actions/runs/41821364149) — 318 tests passed in 8.39s; Python compileall, Termux shell syntax and web production build passed.  
+**PR #28:** https://github.com/somildholakia/UnAi/pull/28 — open, unmerged; `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
+
+### Added Termux runtime diagnostics
+
+- `scripts/termux-doctor.sh` checks Termux, required commands, llama-server and model file, Engine venv, Vite dependencies, plus model/Engine/Web health URLs.
+- `bash scripts/termux-doctor.sh --smoke-chat` makes a small direct request to the local `/v1/chat/completions` endpoint and validates a non-empty assistant message.
+- `scripts/termux-start.sh` now waits for all three services on first startup and prints recent output from any service that failed to become ready. Reattaching to an existing tmux session runs the doctor first.
+- `tests/test_termux_doctor.py` covers valid service probes, successful local completion, empty completion, Engine failure and incomplete model downloads using mocked services (no real model or device).
+- README and `docs/LOCAL_INSTALL.md` include the diagnostics commands. The M6 local-packaging roadmap now records this tooling as implemented.
+
+### Important distinction
+
+CI run #283 does **not** establish a physical Android installation or local inference result. The next user-side action is to run the documented installer on Termux, start the services, then run `bash scripts/termux-doctor.sh --smoke-chat` and optionally repeat in airplane mode. Record measured device metrics only from an instrumented physical-device run.
+
+### Resume sequence
+
+1. Fetch live branch head, PR #28 and workflow state before further edits; preserve all current files and keep `main` unchanged.
+2. Do not repeat M2 SQLite persistence or the Termux doctor milestone. Fix any actual issue reported by the user/device test, or choose the next bounded engineering item from the roadmap.
+3. Do not start specialist training without an explicitly approved, consented/licensed corpus and suitable GPU environment. No specialist weights exist yet.
+4. Do not claim Android memory, speed, power, thermal acceptance or production readiness until real measurements are available.
+5. Update this handoff and `docs/CHECKPOINT.md` after the next validated code milestone.
+
