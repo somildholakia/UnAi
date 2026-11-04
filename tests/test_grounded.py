@@ -2921,7 +2921,7 @@ def test_publisher_transparency_rejects_cross_log_key_substitution(tmp_path: Pat
     task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
     spec_content = "# Trusted release\\nThe lower clamp boundary is zero.\\n"
     (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
-    request, publisher_trust, log_keys, witness_keys, _head = _publisher_transparency_request(
+    request, publisher_trust, log_keys, witness_keys, _head, _log_private, _witness_private = _publisher_transparency_request(
         task_id, snapshot, spec_content
     )
     log_keys["acme-log-key-2026"]["log_id"] = "attacker-log"
