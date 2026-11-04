@@ -67,5 +67,10 @@ def brain_graph(limit: int = 300) -> dict:
     return _get("/api/graph", {"limit": max(1, min(limit, 800))})
 
 
+def run() -> None:
+    """Run the bridge over stdio; never expose an unauthenticated local MCP listener."""
+    server.run()
+
+
 if __name__ == "__main__":  # pragma: no cover
-    server.run(transport="streamable-http")
+    run()

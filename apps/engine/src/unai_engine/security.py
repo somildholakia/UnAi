@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import re
 import secrets
 import sqlite3
 import uuid
@@ -51,11 +52,7 @@ def _token_digest(token: str) -> str:
 
 
 def _safe_tenant_id(tenant_id: str) -> bool:
-    if tenant_id == "default":
-        return False
-    if not tenant_id or len(tenant_id) > 64:
-        return False
-    return all(char.islower() or char.isdigit() or char in "_-" for char in tenant_id) and tenant_id[0].isalnum()
+    return tenant_id != "default" and re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tenant_id) is not None
 
 
 class ApiTokenStore:
@@ -169,7 +166,13 @@ class ApiTokenStore:
             return None
         if expires.tzinfo is None or expires <= _utcnow():
             return None
-        if not isinstance(scopes, list) or not scopes or not set(scopes).issubset(ALL_SCOPES):
+        if (
+            not isinstance(scopes, list) or not scopes
+            or any(not isinstance(scope, str) for scope in scopes)
+            or len(scopes) != len(set(scopes))
+            or not set(scopes).issubset(ALL_SCOPES)
+            or not _safe_tenant_id(str(row["tenant_id"]))
+        ):
             return None
         return AuthContext(
             tenant_id=str(row["tenant_id"]),

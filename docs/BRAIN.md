@@ -75,7 +75,7 @@ From a trusted terminal, issue a separate token for each isolated person/workspa
 
 The response contains the scoped token once. Enter that token in the browser's “Unlock private brain” dialog. For remote MCP, use a token with only brain:read as UNAI_BRAIN_API_TOKEN; the bridge requires HTTPS and a token for non-loopback hosts.
 
-The resulting Worker URL serves the browser app at / and the API under /api/*. The UI uses the same origin by default. To connect the remote MCP bridge, set UNAI_BRAIN_API_URL to that Worker URL and UNAI_BRAIN_API_TOKEN to the read token. On the website, choose "Unlock private brain" and enter the read token; it is retained only in sessionStorage for that browser tab.
+The resulting Worker URL serves the browser app at / and the API under /api/*. The UI uses the same origin by default. To connect the remote MCP bridge, set UNAI_BRAIN_API_URL to that Worker URL and UNAI_BRAIN_API_TOKEN to a scoped token with brain:read. On the website, choose "Unlock private brain" and enter a scoped token containing brain:read (add brain:write only when note creation is needed); it is retained only in sessionStorage for that browser tab. The administrator secret must remain server-side.
 
 These commands are deployment instructions only. No Cloudflare account, D1 database, secrets or live URL have been configured in this repository yet.
 

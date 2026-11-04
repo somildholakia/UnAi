@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
 import sqlite3
 
+import pytest
+
 from unai_engine.security import ApiTokenStore, AuthContext, resolve_api_identity
 
 
@@ -81,3 +83,25 @@ def test_identity_resolution_preserves_loopback_admin_and_accepts_scoped_tokens(
     assert scoped.tenant_id == "tenant-a"
     assert not scoped.is_admin
     assert scoped.scopes == frozenset({"brain:read"})
+
+
+def test_authentication_fails_closed_for_corrupt_scope_payload_and_tenant_id(tmp_path):
+    path = tmp_path / "tokens.sqlite3"
+    store = ApiTokenStore(path)
+    issued = store.create_token("tenant-a", "valid", ["brain:read"])
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "UPDATE api_tokens SET scopes_json=? WHERE token_id=?",
+            ('["brain:read", {"unexpected": true}]', issued["token_id"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    assert store.authenticate(issued["token"]) is None
+
+
+def test_token_store_rejects_non_ascii_tenant_ids(tmp_path):
+    store = ApiTokenStore(tmp_path / "tokens.sqlite3")
+    with pytest.raises(ValueError):
+        store.create_token("ténant", "unicode", ["brain:read"])

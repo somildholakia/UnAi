@@ -320,6 +320,11 @@ export default {
     }
 
     try {
+      const configuredSecrets = [env.BRAIN_ADMIN_TOKEN, env.BRAIN_READ_TOKEN, env.BRAIN_WRITE_TOKEN]
+        .filter((secret): secret is string => Boolean(secret));
+      if (configuredSecrets.some(secret => secret.length < 32)) {
+        return json({ error: "Configured Brain bearer secrets must be at least 32 characters." }, 503, origin);
+      }
       const identity = await authenticate(request, env);
       if (!identity) return json({ error: "A valid bearer token is required for Brain API access." }, 401, origin);
       if (!await allowRequest(request, env, identity)) {
