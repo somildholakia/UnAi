@@ -64,6 +64,20 @@ def publisher_manifest_leaf(statement: dict[str, object]) -> bytes:
     return _canonical_json(statement)
 
 
+def verify_publisher_manifest_inclusion(
+    *, statement: dict[str, object], head: "SignedTreeHead", leaf_index: int,
+    inclusion_proof: Sequence[str], trusted_log_keys: Mapping[str, str],
+) -> bool:
+    """Verify that a canonical publisher manifest is committed by a trusted tree head."""
+    return verify_signed_tree_head(head, trusted_log_keys) and verify_inclusion_proof(
+        leaf=publisher_manifest_leaf(statement),
+        leaf_index=leaf_index,
+        tree_size=head.tree_size,
+        proof=inclusion_proof,
+        root_hash=head.root_hash,
+    )
+
+
 @dataclass(frozen=True)
 class SignedTreeHead:
     log_id: str
