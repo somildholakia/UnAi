@@ -21,6 +21,16 @@ The installer installs Termux packages, compiles the `llama-server` CPU runtime 
 
 After startup, open `http://127.0.0.1:5173` in the browser on the same Android device. The tmux session has three windows: `model`, `engine`, and `web`. Detach with Ctrl+B then D; reattach with `bash scripts/termux-start.sh`; stop with `tmux kill-session -t unai`.
 
+## Crash recovery and service logs
+
+Each tmux service now runs through `scripts/termux-supervise.sh`. A non-zero process exit triggers up to five automatic retries with exponential delays (2, 4, 8, 16, then at most 30 seconds). A clean exit (code 0) is treated as an intentional stop and is not restarted. After the retry budget is exhausted, the supervisor exits with the service's last exit code and the tmux window remains available for inspection.
+
+Service logs are written outside the repository to `$HOME/.local/state/unai/{model,engine,web}.log` by default. Once a log exceeds 1 MiB, the previous log is rotated to `.log.1`. Override `UNAI_LOG_DIR` and `UNAI_LOG_MAX_BYTES` to change this behavior. Tune retries with `UNAI_MAX_RESTARTS`, `UNAI_RESTART_DELAY_SECONDS` and `UNAI_MAX_RESTART_DELAY_SECONDS`. For example, set `UNAI_MAX_RESTARTS=8` before launching for a larger retry budget.
+
+When a service health check fails, `bash scripts/termux-doctor.sh` prints the last lines of that service's supervisor log. The tmux panes also remain after a process exits so that its terminal output can be inspected.
+
+This supervisor can restart a service process while the Termux/tmux session is still alive. It cannot restart the entire Termux app after Android force-stops or kills all Termux processes; in that case, reopen Termux and run `bash scripts/termux-start.sh` again. Android process-lifecycle recovery still needs physical-device testing.
+
 The first build can take time and the first model download needs roughly 1.2 GB of free storage. Start with the 2K context and CPU-only settings; increase context or threads only after observing memory and thermal behavior. Android may terminate a process under memory pressure.
 
 Startup waits for all three loopback services (model, Engine and Web UI), for up to 90 seconds each by default. Change this with `UNAI_STARTUP_TIMEOUT_SECONDS`. A failed wait prints recent output from the corresponding tmux window; startup still opens tmux so you can inspect the failing process.
