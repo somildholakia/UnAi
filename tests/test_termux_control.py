@@ -186,7 +186,7 @@ def test_recover_does_not_duplicate_a_live_supervisor_pane(
     result = run_control(script, env, "recover", "model")
 
     assert result.returncode == 1
-    assert "supervisor pane is alive" in result.stdout
+    assert "tmux pane is alive but endpoint is not ready" in result.stdout
     assert not calls.exists()
 
 
