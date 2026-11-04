@@ -42,22 +42,48 @@ tmux send-keys -t unai:engine "$ENGINE_COMMAND" C-m
 tmux new-window -t unai -n web
 tmux send-keys -t unai:web "$WEB_COMMAND" C-m
 
-echo "Waiting for the local model server..."
-MODEL_READY=false
-for _ in $(seq 1 30); do
-  if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
-    MODEL_READY=true
-    break
-  fi
-  sleep 1
-done
-if [[ "$MODEL_READY" != true ]]; then
-  echo "Model server is not ready yet; inspect the 'model' tmux window."
+STARTUP_TIMEOUT="${UNAI_STARTUP_TIMEOUT_SECONDS:-90}"
+if ! [[ "$STARTUP_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "UNAI_STARTUP_TIMEOUT_SECONDS must be a positive integer."
+  tmux kill-session -t unai 2>/dev/null || true
+  exit 1
 fi
 
+wait_for_service() {
+  local label="$1"
+  local window="$2"
+  local url="$3"
+  local attempt
+
+  echo "Waiting for $label ($url)..."
+  for ((attempt = 1; attempt <= STARTUP_TIMEOUT; attempt++)); do
+    if curl --fail --silent --show-error --max-time 2 "$url" >/dev/null 2>&1; then
+      echo "$label is ready."
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "$label did not become ready within ${STARTUP_TIMEOUT}s."
+  echo "Recent output from tmux window '$window':"
+  tmux capture-pane -pt "unai:$window" -S -12 2>/dev/null | tail -n 8 || true
+  return 1
+}
+
+ALL_READY=true
+wait_for_service "model server" "model" "http://127.0.0.1:8080/health" || ALL_READY=false
+wait_for_service "Engine API" "engine" "http://127.0.0.1:8000/api/health" || ALL_READY=false
+wait_for_service "Web UI" "web" "http://127.0.0.1:5173/" || ALL_READY=false
+
+echo
 echo "Web UI:  http://127.0.0.1:5173"
 echo "Engine:  http://127.0.0.1:8000/api/health"
 echo "Model:   http://127.0.0.1:8080/health"
+if [[ "$ALL_READY" == true ]]; then
+  echo "All three local services responded. Run: bash scripts/termux-doctor.sh --smoke-chat"
+else
+  echo "At least one service is not ready. Inspect the tmux windows and run: bash scripts/termux-doctor.sh"
+fi
 echo "Detach: Ctrl+B, then D | Stop: tmux kill-session -t unai"
 tmux select-window -t unai:web
 exec tmux attach-session -t unai
