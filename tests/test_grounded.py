@@ -1118,6 +1118,143 @@ def test_staticmethod_grounded_target_uses_explicit_class_binding(tmp_path: Path
     assert runner.calls[0]["metadata"]["target_is_async"] is False
 
 
+def test_nested_instance_method_runs_with_explicit_fixture_in_generated_harness(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = (
+        "class Namespace:\n"
+        "    class Counter:\n"
+        "        def __init__(self, start):\n"
+        "            self.value = start\n"
+        "        def add(self, amount):\n"
+        "            return self.value + amount\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Namespace.Counter.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="nested-counter-add",
+                arguments={"amount": 5},
+                instance_arguments={"start": 7},
+                expected_output=12,
+                oracle_kind="user",
+                oracle_reference="User supplied nested Counter.add result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated_call = runner.calls[0]
+    assert "_OWNER_PATH = ('Namespace', 'Counter')" in generated_call["content"]
+    staged_root = tmp_path / "nested-instance-harness"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert result.oracle_evidence[0].metadata["instance_arguments_sha256"]
+
+
+def test_nested_staticmethod_runs_through_explicit_namespace_path(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = (
+        "class Namespace:\n"
+        "    class Math:\n"
+        "        @staticmethod\n"
+        "        def add(value, offset=2):\n"
+        "            return value + offset\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Namespace.Math.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="nested-static-add",
+                arguments={"value": 8},
+                expected_output=10,
+                oracle_kind="user",
+                oracle_reference="User supplied nested static method result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated_call = runner.calls[0]
+    staged_root = tmp_path / "nested-static-harness"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_nested_class_inheritance_is_rejected_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = (
+        "class Namespace:\n"
+        "    class Base:\n"
+        "        pass\n"
+        "    class Counter(Base):\n"
+        "        def read(self, value):\n"
+        "            return value\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Namespace.Counter.read",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="nested-inheritance-rejected",
+                arguments={"value": 1},
+                instance_arguments={},
+                expected_output=1,
+                oracle_kind="user",
+                oracle_reference="User supplied nested class fixture check",
+            )
+        ],
+    )
+
+    with pytest.raises(
+        GroundedVerificationError,
+        match="Nested-class targets require undecorated namespace classes without bases or metaclass keywords",
+    ):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+
 def test_async_classmethod_uses_bound_cls_and_asyncio_run(tmp_path: Path) -> None:
     task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
     target.write_text(

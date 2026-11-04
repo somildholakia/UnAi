@@ -60,7 +60,7 @@ _LIMITATIONS = [
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
-    "Grounded targets include undecorated module-level functions and explicitly decorated top-level-class @staticmethod/@classmethod methods; ordinary instance methods, nested classes and all other decorators remain unsupported.",
+    "Grounded targets include undecorated module-level functions and supported methods on top-level or one-level nested classes; nested namespace classes must be undecorated and have no bases/metaclass keywords, and all other decorators remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
     "Return-value oracles require JSON-compatible results; an explicit raises_exception property may require only one of the fixed allowlisted built-in exception types, never an arbitrary caller-supplied class name.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
@@ -333,11 +333,11 @@ def _decorator_name(decorator: ast.expr) -> str | None:
 
 
 def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
-    """Resolve only deterministic module functions and narrowly supported class methods."""
+    """Resolve module functions and a deliberately bounded class-method surface."""
     parts = symbol_name.split(".")
-    if len(parts) not in {1, 2} or any(not part.isidentifier() for part in parts):
+    if len(parts) not in {1, 2, 3} or any(not part.isidentifier() for part in parts):
         raise GroundedVerificationError(
-            "Use a module-level function name or one ClassName.method name."
+            "Use a module-level function, ClassName.method or Outer.Inner.method."
         )
     try:
         tree = ast.parse(source)
@@ -369,20 +369,35 @@ def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
         owner_name = None
         constructor = None
     else:
-        owner_name, method_name = parts
-        classes = [
-            node for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == owner_name
-        ]
-        if len(classes) != 1:
-            if not classes:
+        owner_path, method_name = parts[:-1], parts[-1]
+        owner = None
+        namespace_body = tree.body
+        for depth, owner_component in enumerate(owner_path):
+            classes = [
+                node for node in namespace_body
+                if isinstance(node, ast.ClassDef) and node.name == owner_component
+            ]
+            if len(classes) != 1:
+                if not classes:
+                    scope = "Top-level" if depth == 0 else "Nested"
+                    raise GroundedVerificationError(
+                        f"{scope} class not found: {'.'.join(owner_path[:depth + 1])}.",
+                        404,
+                    )
                 raise GroundedVerificationError(
-                    f"Top-level class not found: {owner_name}.", 404
+                    f"Class name is ambiguous: {'.'.join(owner_path[:depth + 1])}.",
+                    409,
                 )
-            raise GroundedVerificationError(
-                f"Class name is ambiguous: {owner_name}.", 409
-            )
-        owner = classes[0]
+            owner = classes[0]
+            if len(owner_path) > 1 and (
+                owner.decorator_list or owner.bases or owner.keywords
+            ):
+                raise GroundedVerificationError(
+                    "Nested-class targets require undecorated namespace classes without bases or metaclass keywords."
+                )
+            namespace_body = owner.body
+
+        assert owner is not None
         methods = [
             node for node in owner.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -408,7 +423,7 @@ def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
             invocation_kind = "instance_method"
             if owner.decorator_list or owner.bases or owner.keywords:
                 raise GroundedVerificationError(
-                    "Instance-method targets require an undecorated top-level class without bases or metaclass keywords."
+                    "Instance-method targets require an undecorated class without bases or metaclass keywords."
                 )
             if any(
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -450,6 +465,8 @@ def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
             raise GroundedVerificationError(
                 "Only explicitly decorated @staticmethod/@classmethod methods or safe undecorated instance methods are supported."
             )
+
+        owner_name = ".".join(owner_path)
 
     if function.args.posonlyargs or function.args.vararg or function.args.kwarg:
         raise GroundedVerificationError(
@@ -784,20 +801,31 @@ def _generated_pytest(
     file_literal = repr(file_path)
     symbol_literal = repr(symbol_name)
     if "." in symbol_name:
-        owner_name, method_name = symbol_name.split(".", 1)
+        owner_path = symbol_name.split(".")[:-1]
+        method_name = symbol_name.split(".")[-1]
+        if len(owner_path) == 1:
+            owner_resolution = (
+                f"_OWNER = {owner_path[0]!r}\n"
+                "_CLASS = getattr(_MODULE, _OWNER, None)\n"
+            )
+        else:
+            owner_resolution = (
+                f"_OWNER_PATH = {tuple(owner_path)!r}\n"
+                "_CLASS = _MODULE\n"
+                "for _OWNER_COMPONENT in _OWNER_PATH:\n"
+                "    _CLASS = getattr(_CLASS, _OWNER_COMPONENT, None)\n"
+            )
         if invocation_kind == "instance_method":
             target_resolution = (
-                f"_OWNER = {owner_name!r}\n"
-                f"_METHOD = {method_name!r}\n"
-                "_CLASS = getattr(_MODULE, _OWNER, None)\n"
-                "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None\n"
+                owner_resolution
+                + f"_METHOD = {method_name!r}\n"
+                + "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None\n"
             )
         else:
             target_resolution = (
-                f"_OWNER = {owner_name!r}\n"
-                f"_METHOD = {method_name!r}\n"
-                "_CLASS = getattr(_MODULE, _OWNER, None)\n"
-                "_FUNCTION = getattr(_CLASS, _METHOD, None)\n"
+                owner_resolution
+                + f"_METHOD = {method_name!r}\n"
+                + "_FUNCTION = getattr(_CLASS, _METHOD, None)\n"
             )
     else:
         target_resolution = "_FUNCTION = getattr(_MODULE, _SYMBOL, None)\n"
