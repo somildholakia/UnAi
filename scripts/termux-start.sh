@@ -28,19 +28,31 @@ if tmux has-session -t unai 2>/dev/null; then
   exec tmux attach-session -t unai
 fi
 
-printf -v MODEL_COMMAND '%q ' "$LLAMA_SERVER_BIN" -m "$MODEL_FILE" \
+SUPERVISOR="$ROOT/scripts/termux-supervise.sh"
+if [[ ! -f "$SUPERVISOR" ]]; then
+  echo "Service supervisor is missing: $SUPERVISOR"
+  exit 1
+fi
+
+# Quote every argument independently so paths and user overrides remain safe.
+printf -v MODEL_COMMAND '%q ' bash "$SUPERVISOR" model -- "$LLAMA_SERVER_BIN" -m "$MODEL_FILE" \
   --host 127.0.0.1 --port 8080 --alias unai-local-coder \
   --ctx-size 2048 --threads "$CPU_THREADS" --batch-size 128
-printf -v ENGINE_PATH '%q' "$ENGINE_DIR"
-printf -v WEB_PATH '%q' "$WEB_DIR"
-ENGINE_COMMAND="cd $ENGINE_PATH && .venv/bin/uvicorn unai_engine.main:app --host 127.0.0.1 --port 8000"
-WEB_COMMAND="cd $WEB_PATH && npm run dev -- --host 127.0.0.1 --port 5173 --strictPort"
+printf -v ENGINE_COMMAND '%q ' bash "$SUPERVISOR" engine -- bash -c \
+  'cd "$1" && shift && exec "$@"' _ "$ENGINE_DIR" "$ENGINE_DIR/.venv/bin/uvicorn" \
+  unai_engine.main:app --host 127.0.0.1 --port 8000
+printf -v WEB_COMMAND '%q ' bash "$SUPERVISOR" web -- bash -c \
+  'cd "$1" && shift && exec "$@"' _ "$WEB_DIR" npm run dev -- \
+  --host 127.0.0.1 --port 5173 --strictPort
 
 tmux new-session -d -s unai -n model
+tmux set-window-option -t unai:model remain-on-exit on
 tmux send-keys -t unai:model "$MODEL_COMMAND" C-m
 tmux new-window -t unai -n engine
+tmux set-window-option -t unai:engine remain-on-exit on
 tmux send-keys -t unai:engine "$ENGINE_COMMAND" C-m
 tmux new-window -t unai -n web
+tmux set-window-option -t unai:web remain-on-exit on
 tmux send-keys -t unai:web "$WEB_COMMAND" C-m
 
 STARTUP_TIMEOUT="${UNAI_STARTUP_TIMEOUT_SECONDS:-90}"
