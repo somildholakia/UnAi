@@ -674,3 +674,13 @@ Continue with the remaining M4 verification/trust backlog, beginning with the pe
 ### Next software task
 
 Integrate verified publisher-manifest inclusion and monotonic checkpoint acceptance into the publisher-oracle evidence workflow, preserving the existing separate reviewer-attestation semantics. Add route-level tamper, stale-checkpoint and cross-log tests before considering the M4 transparency integration complete. Continue the remaining bounded M4 verification backlog and M5 training only when an approved corpus and suitable compute are available. Do not begin phone setup yet.
+
+### M4 transparency CI test-discovery correction — 2026-11-04
+
+- The initial transparency regression file was placed under `apps/engine/tests`, which is not the directory invoked by the repository workflow (`pytest -q tests` from the repository root). The CI log therefore did not include those tests.
+- Moved the suite to the active top-level `tests/test_transparency.py` directory and removed the inactive duplicate.
+- **Latest validated code commit:** `0131ae54ec9f8bdd19635585d0d18c2c281dcf2a`.
+- **Engine/Web Actions:** [run #335](https://github.com/somildholakia/UnAi/actions/runs/41830680030) — success; **363 tests passed in 13.37s**, compileall, all six Termux shell syntax checks and Web production build passed. The 363 count includes the transparency regression suite.
+- **Brain Worker Actions:** [run #18](https://github.com/somildholakia/UnAi/actions/runs/41830680795) — success; Worker checks, D1 migration smoke test and browser JavaScript syntax passed.
+- PR #28 remains open, mergeable and unmerged. Base `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`.
+- Next: integrate the proof verifier and checkpoint store into publisher-oracle acceptance/evidence. Keep phone setup deferred until all software work is complete.
