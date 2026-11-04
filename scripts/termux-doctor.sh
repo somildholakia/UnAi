@@ -76,6 +76,14 @@ else
   fail "service restart supervisor missing: $SUPERVISOR"
 fi
 
+for helper in termux-service.sh termux-control.sh; do
+  if [[ -f "$ROOT/scripts/$helper" ]]; then
+    pass "$helper found"
+  else
+    fail "$helper missing: $ROOT/scripts/$helper"
+  fi
+done
+
 if [[ -f "$MODEL_FILE" ]]; then
   MODEL_BYTES="$(wc -c < "$MODEL_FILE" | tr -d '[:space:]')"
   if [[ "$MODEL_BYTES" =~ ^[0-9]+$ ]] && (( MODEL_BYTES >= MIN_MODEL_BYTES )); then
