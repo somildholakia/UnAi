@@ -203,3 +203,30 @@ Tests cover local/imported calls, module aliases, class instantiation, `self` me
 - Code commit `7e93f8b5f8f0079b103c0504f458451e664e5e64` corrects partial GGUF download recovery: the installer resumes an existing incomplete file and validates a 1 GB minimum before proceeding.
 - CI #41677589811 passed: 311 Python tests in 8.28s, compileall, shell syntax and web production build.
 - The current user test path remains `docs/LOCAL_INSTALL.md`; physical-device execution and metrics are still pending.
+
+## 2026-11-04 continuation handoff — M2 persistence hardening
+
+**Repository:** https://github.com/somildholakia/UnAi  
+**Active branch:** `feat/m4-instance-methods-m5-specialists`  
+**Latest validated code commit:** `ac75a68ba6d6805c3470216596995c3d0282cd43`  
+**Code validation:** [GitHub Actions run #273](https://github.com/somildholakia/UnAi/actions/runs/41820372989) — 313 tests passed in 6.59s; compileall, Termux shell syntax and web production build passed.  
+**Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open and unmerged. Keep `main` unchanged.
+
+### M2 persistence edge case fixed
+
+A bounded directory walk that reaches `MAX_FILES` cannot safely infer that cached files beyond the discovered subset were deleted. The indexer now returns the request's partial graph while marking `scan_complete=false`; with SQLite enabled, cache state is `incomplete`, `snapshot_persisted=false`, and the previous complete generation is retained without changing its files, edges or fingerprint. File removals are reported only after complete discovery. The next complete refresh reconciles and atomically publishes the new generation.
+
+### Regression tests
+
+- Existing cached snapshot remains byte-for-byte equivalent at the loaded metadata/file/edge level after an incomplete scan; a complete retry creates the next generation and incorporates all files.
+- An incomplete first scan does not create any repository cache record.
+- Full Actions validation passed: 313 Python tests; Python compilation; Termux shell syntax; web UI production build.
+
+### Resume instructions
+
+1. Re-fetch the live branch and PR #28 before any further write; preserve the current branch head and do not merge.
+2. M2 persistence and its incomplete-discovery publication guard are implemented and CI-validated. Do not duplicate this milestone.
+3. The outstanding user/device validation remains the Termux install and offline smoke test in `docs/LOCAL_INSTALL.md`; record real install errors and instrumented physical-device memory/TTFT/throughput/thermal measurements only after they are actually collected.
+4. For M5, do not train or claim trained weights until a real consented/licensed corpus and suitable training environment are supplied.
+5. After the next code milestone, update checkpoint and continuity docs with exact code SHA and workflow evidence.
+
