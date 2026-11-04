@@ -38,6 +38,18 @@ def _inclusion_path(leaves: list[bytes], index: int) -> list[str]:
     return _inclusion_path(leaves[split:], index - split) + [_root(leaves[:split]).hex()]
 
 
+def _consistency_path(old_size: int, leaves: list[bytes]) -> list[str]:
+    def subproof(size: int, values: list[bytes], known_old_root: bool) -> list[str]:
+        if size == len(values):
+            return [] if known_old_root else [_root(values).hex()]
+        split = 1 << ((len(values) - 1).bit_length() - 1)
+        if size <= split:
+            return subproof(size, values[:split], known_old_root) + [_root(values[split:]).hex()]
+        return subproof(size - split, values[split:], False) + [_root(values[:split]).hex()]
+
+    return subproof(old_size, leaves, True)
+
+
 def _keypair() -> tuple[Ed25519PrivateKey, dict[str, str]]:
     private = Ed25519PrivateKey.generate()
     public = private.public_key().public_bytes(
@@ -83,24 +95,28 @@ def test_inclusion_proof_rejects_wrong_leaf_index_and_tampering() -> None:
 
 
 def test_consistency_proofs_verify_growth_and_reject_tampering() -> None:
-    first = [b"one"]
-    second = [b"one", b"two"]
-    third = [b"one", b"two", b"three"]
+    for new_size in range(2, 12):
+        leaves = [f"leaf-{index}".encode() for index in range(new_size)]
+        for old_size in range(1, new_size):
+            proof = _consistency_path(old_size, leaves)
+            assert verify_consistency_proof(
+                old_size=old_size, new_size=new_size,
+                old_root_hash=_root(leaves[:old_size]).hex(),
+                new_root_hash=_root(leaves).hex(), proof=proof,
+            )
+            if proof:
+                tampered = [*proof]
+                tampered[0] = hashlib.sha256(b"tampered").hexdigest()
+                assert not verify_consistency_proof(
+                    old_size=old_size, new_size=new_size,
+                    old_root_hash=_root(leaves[:old_size]).hex(),
+                    new_root_hash=_root(leaves).hex(), proof=tampered,
+                )
+
+    leaves = [b"one", b"two", b"three"]
     assert verify_consistency_proof(
-        old_size=1, new_size=2, old_root_hash=_root(first).hex(),
-        new_root_hash=_root(second).hex(), proof=[leaf_hash(b"two").hex()],
-    )
-    assert verify_consistency_proof(
-        old_size=2, new_size=3, old_root_hash=_root(second).hex(),
-        new_root_hash=_root(third).hex(), proof=[leaf_hash(b"three").hex()],
-    )
-    assert not verify_consistency_proof(
-        old_size=2, new_size=3, old_root_hash=_root(second).hex(),
-        new_root_hash=_root(third).hex(), proof=[leaf_hash(b"tampered").hex()],
-    )
-    assert verify_consistency_proof(
-        old_size=3, new_size=3, old_root_hash=_root(third).hex(),
-        new_root_hash=_root(third).hex(), proof=[],
+        old_size=3, new_size=3, old_root_hash=_root(leaves).hex(),
+        new_root_hash=_root(leaves).hex(), proof=[],
     )
 
 
