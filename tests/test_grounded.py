@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -1988,6 +1989,128 @@ def _execute_filesystem_audit_harness(
     assert record["status"] == "complete"
     assert "side-effect.txt" not in json.dumps(record)
     return completed, record, staged_root
+
+
+def _execute_external_fixture_harness(
+    tmp_path: Path,
+    *,
+    source: str,
+    fixture_mounted: bool = True,
+):
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        property_kind="external_fixture_filesystem_unchanged",
+    )
+    result = verifier.run(task_id, request, workspace_root)
+    assert result.status == "passed"
+
+    generated_call = runner.calls[0]
+    staged_root = tmp_path / "external-fixture-audit-workspace"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+    fixture_root = tmp_path / "managed-external-side-effects"
+    fixture_root.mkdir()
+    environment = dict(os.environ)
+    if fixture_mounted:
+        environment["UNAI_SIDE_EFFECTS_ROOT"] = str(fixture_root)
+    else:
+        environment.pop("UNAI_SIDE_EFFECTS_ROOT", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        env=environment,
+    )
+    trace_path = staged_root / generated_call["metadata"]["replay_trace_relative_path"]
+    assert trace_path.is_file()
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    record = trace["records"][0]
+    return completed, record, fixture_root
+
+
+def test_external_side_effect_fixture_audit_passes_without_mutation(tmp_path: Path) -> None:
+    completed, record, fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source=(
+            "def clamp(value):\n"
+            "    return value\n"
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["status"] == "complete"
+    assert record["unchanged"] is True
+    assert record["changed_entry_count"] == 0
+    assert record["before_sha256"] == record["after_sha256"]
+    assert list(fixture_root.iterdir()) == []
+
+
+def test_external_side_effect_fixture_audit_detects_managed_mount_writes(tmp_path: Path) -> None:
+    completed, record, fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source=(
+            "import os\n"
+            "from pathlib import Path\n"
+            "def clamp(value):\n"
+            "    root = Path(os.environ['UNAI_SIDE_EFFECTS_ROOT'])\n"
+            "    (root / 'outbox.json').write_text(str(value), encoding='utf-8')\n"
+            "    return value\n"
+        ),
+    )
+
+    assert completed.returncode != 0
+    assert "UNAI_COUNTEREXAMPLE:" in completed.stdout + completed.stderr
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["unchanged"] is False
+    assert record["changed_entry_count"] >= 1
+    assert record["before_sha256"] != record["after_sha256"]
+    assert (fixture_root / "outbox.json").is_file()
+    assert "outbox.json" not in json.dumps(record)
+
+
+def test_external_fixture_audit_does_not_ignore_python_cache_named_directories(tmp_path: Path) -> None:
+    completed, record, fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source=(
+            "import os\n"
+            "from pathlib import Path\n"
+            "def clamp(value):\n"
+            "    cache = Path(os.environ['UNAI_SIDE_EFFECTS_ROOT']) / '__pycache__'\n"
+            "    cache.mkdir()\n"
+            "    (cache / 'side-effect.pyc').write_bytes(b'payload')\n"
+            "    return value\n"
+        ),
+    )
+
+    assert completed.returncode != 0
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["unchanged"] is False
+    assert record["changed_entry_count"] >= 2
+    assert (fixture_root / "__pycache__" / "side-effect.pyc").is_file()
+
+
+def test_external_side_effect_fixture_is_unavailable_without_explicit_mount(tmp_path: Path) -> None:
+    completed, record, _fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source="def clamp(value):\n    return value\n",
+        fixture_mounted=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["status"] == "unavailable"
+    assert record["reason_code"] == "fixture_unavailable"
 
 
 def test_workspace_filesystem_unchanged_passes_without_mutation(tmp_path: Path) -> None:

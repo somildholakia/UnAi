@@ -59,6 +59,7 @@ _LIMITATIONS = [
     "Trusted reviewer identities and publisher identities are local operator configuration; publisher signatures authenticate a trusted issuer's exact artifact revision, while reviewer signatures approve a test assertion. Neither proves logical correctness.",
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
     "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
+    "The external side-effect fixture is an opt-in 16 MiB ephemeral Docker tmpfs with noexec/nosuid/nodev, no network, and bounded before/after manifests; it is not access to host files, databases, queues or remote services.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Grounded targets include undecorated module-level functions and supported methods on top-level or one-level nested classes; nested namespace classes must be undecorated and have no bases/metaclass keywords, and all other decorators remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
@@ -987,9 +988,28 @@ _FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES = {{
 }}
 
 
-def _workspace_filesystem_snapshot():
-    """Hash a bounded manifest of the disposable workspace without following symlinks."""
+def _workspace_filesystem_snapshot(root_path=None):
+    """Hash a bounded filesystem root without following symlinks."""
     global _FILESYSTEM_AUDIT_REQUEST_BYTES
+    audit_root = _ROOT
+    if root_path is not None:
+        candidate_root = Path(root_path)
+        try:
+            if candidate_root.is_symlink() or not candidate_root.is_dir():
+                return None, 0, "fixture_unavailable"
+            audit_root = candidate_root.resolve(strict=True)
+            workspace_root = _ROOT.resolve(strict=True)
+            if (
+                audit_root == workspace_root
+                or audit_root.is_relative_to(workspace_root)
+                or workspace_root.is_relative_to(audit_root)
+            ):
+                return None, 0, "fixture_root_unsafe"
+        except OSError:
+            return None, 0, "fixture_unavailable"
+    excluded_directories = (
+        _FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES if root_path is None else set()
+    )
     manifest = {{}}
     snapshot_bytes = 0
     partial_file_bytes = 0
@@ -1010,16 +1030,16 @@ def _workspace_filesystem_snapshot():
         return True
 
     try:
-        for current, dirs, files in os.walk(_ROOT, topdown=True, followlinks=False):
+        for current, dirs, files in os.walk(audit_root, topdown=True, followlinks=False):
             current_path = Path(current)
             dirs.sort()
             files.sort()
             for name in list(dirs):
-                if name in _FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES:
+                if name in excluded_directories:
                     dirs.remove(name)
                     continue
                 candidate = current_path / name
-                relative_path = candidate.relative_to(_ROOT).as_posix()
+                relative_path = candidate.relative_to(audit_root).as_posix()
                 info = candidate.lstat()
                 if stat.S_ISLNK(info.st_mode):
                     target = os.readlink(candidate)
@@ -1044,7 +1064,7 @@ def _workspace_filesystem_snapshot():
 
             for name in files:
                 candidate = current_path / name
-                relative_path = candidate.relative_to(_ROOT).as_posix()
+                relative_path = candidate.relative_to(audit_root).as_posix()
                 info = candidate.lstat()
                 if stat.S_ISLNK(info.st_mode):
                     target = os.readlink(candidate)
@@ -1213,13 +1233,28 @@ def test_grounded_oracle_case(case):
     property_spec = case.get("oracle_property")
     if (
         property_spec is not None
-        and property_spec["kind"] == "workspace_filesystem_unchanged"
+        and property_spec["kind"] in {
+            "workspace_filesystem_unchanged",
+            "external_fixture_filesystem_unchanged",
+        }
     ):
-        before_manifest, before_bytes, before_reason = _workspace_filesystem_snapshot()
+        audit_kind = property_spec["kind"]
+        audit_root = None
+        if audit_kind == "external_fixture_filesystem_unchanged":
+            audit_root = os.environ.get("UNAI_SIDE_EFFECTS_ROOT")
+            if not audit_root:
+                _record_replay_trace({{
+                    "case_id": case["case_id"],
+                    "kind": audit_kind,
+                    "status": "unavailable",
+                    "reason_code": "fixture_unavailable",
+                }})
+                return
+        before_manifest, before_bytes, before_reason = _workspace_filesystem_snapshot(audit_root)
         if before_manifest is None:
             _record_replay_trace({{
                 "case_id": case["case_id"],
-                "kind": "workspace_filesystem_unchanged",
+                "kind": audit_kind,
                 "status": "unavailable",
                 "reason_code": before_reason,
             }})
@@ -1231,11 +1266,11 @@ def test_grounded_oracle_case(case):
         except Exception as exc:
             invocation_exception = exc
 
-        after_manifest, after_bytes, after_reason = _workspace_filesystem_snapshot()
+        after_manifest, after_bytes, after_reason = _workspace_filesystem_snapshot(audit_root)
         if after_manifest is None:
             _record_replay_trace({{
                 "case_id": case["case_id"],
-                "kind": "workspace_filesystem_unchanged",
+                "kind": audit_kind,
                 "status": "unavailable",
                 "reason_code": after_reason,
             }})
@@ -1247,7 +1282,7 @@ def test_grounded_oracle_case(case):
         unchanged = filesystem_delta["changed_entry_count"] == 0
         audit_record = {{
             "case_id": case["case_id"],
-            "kind": "workspace_filesystem_unchanged",
+            "kind": audit_kind,
             "status": "complete",
             "unchanged": unchanged,
             "before_sha256": filesystem_delta["before_sha256"],
@@ -1265,12 +1300,20 @@ def test_grounded_oracle_case(case):
                 "actual_type": (
                     type(invocation_exception).__name__
                     if invocation_exception is not None
-                    else "WorkspaceMutation"
+                    else (
+                        "ExternalFixtureMutation"
+                        if audit_kind == "external_fixture_filesystem_unchanged"
+                        else "WorkspaceMutation"
+                    )
                 ),
                 "actual_summary": (
-                    "The target changed the disposable workspace filesystem."
+                    (
+                        "The target changed the managed external side-effect fixture."
+                        if audit_kind == "external_fixture_filesystem_unchanged"
+                        else "The target changed the disposable workspace filesystem."
+                    )
                     if invocation_exception is None
-                    else "The target raised an exception during the workspace filesystem audit."
+                    else "The target raised an exception during the filesystem audit."
                 ),
                 "actual_sha256": filesystem_delta["after_sha256"],
                 "exception_message_sha256": (
@@ -2320,6 +2363,7 @@ class GroundedTestVerifier:
             and case["oracle_property"].get("kind") in {
                 "output_stable_across_replays",
                 "workspace_filesystem_unchanged",
+                "external_fixture_filesystem_unchanged",
             }
         ]
         filesystem_case_ids = [
@@ -2327,6 +2371,12 @@ class GroundedTestVerifier:
             for case in normalized
             if case.get("oracle_property")
             and case["oracle_property"].get("kind") == "workspace_filesystem_unchanged"
+        ]
+        external_fixture_case_ids = [
+            case["case_id"]
+            for case in normalized
+            if case.get("oracle_property")
+            and case["oracle_property"].get("kind") == "external_fixture_filesystem_unchanged"
         ]
         replay_trace_relative_path = (
             generated_path[:-3] + ".replay.json" if trace_case_ids else None
@@ -2364,6 +2414,7 @@ class GroundedTestVerifier:
             "oracle_case_ids": [case["case_id"] for case in normalized],
             "trace_case_ids": trace_case_ids,
             "filesystem_case_ids": filesystem_case_ids,
+            "external_fixture_case_ids": external_fixture_case_ids,
             "replay_trace_relative_path": replay_trace_relative_path,
             "oracle_references": [
                 {
@@ -2675,7 +2726,11 @@ class GroundedTestVerifier:
         shrinkable_case_ids = {
             case_id for case_id in counterexample_case_ids
             if case_by_id[case_id]["oracle_property"].get("kind")
-            not in {"output_stable_across_replays", "workspace_filesystem_unchanged"}
+            not in {
+                "output_stable_across_replays",
+                "workspace_filesystem_unchanged",
+                "external_fixture_filesystem_unchanged",
+            }
         }
         shrinking_results: list[GroundedShrinkResult] = []
         if (

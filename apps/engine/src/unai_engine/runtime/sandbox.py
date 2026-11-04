@@ -26,7 +26,15 @@ class DockerSandbox:
         self.image = image
         self.timeout_seconds = timeout_seconds
 
-    def run(self, workspace: Path, command: str) -> ExecutionResult:
+    def run(
+        self,
+        workspace: Path,
+        command: str,
+        *,
+        external_side_effect_fixture: bool = False,
+    ) -> ExecutionResult:
+        if not isinstance(external_side_effect_fixture, bool):
+            raise TypeError("External side-effect fixture flag must be boolean.")
         docker = shutil.which("docker")
         if not docker:
             raise SandboxUnavailable("Docker is unavailable; unAI will not execute commands on the host.")
@@ -43,8 +51,15 @@ class DockerSandbox:
             "--security-opt=no-new-privileges",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
             "-v", f"{root}:/workspace:rw", "-w", "/workspace",
-            self.image, "sh", "-lc", command,
         ]
+        if external_side_effect_fixture:
+            # This is the only extra writable filesystem made available to the test.
+            # It is ephemeral, bounded, non-executable and never backed by host data.
+            args.extend([
+                "--tmpfs", "/unai_side_effects:rw,noexec,nosuid,nodev,size=16m",
+                "-e", "UNAI_SIDE_EFFECTS_ROOT=/unai_side_effects",
+            ])
+        args.extend([self.image, "sh", "-lc", command])
         try:
             completed = subprocess.run(
                 args,

@@ -59,12 +59,13 @@
 - [x] Add structured counterexample traces with canonical JSON result hashes, exception-message hashes and target source line/function, preserving bounded redacted previews.
 - [x] Add opt-in per-case same-process replay stability checks for 2–4 identical JSON inputs, with fresh input copies, hash-only replay traces, a 24-invocation request budget and no automatic shrinking of replay-divergence cases.
 - [x] Add an opt-in workspace_filesystem_unchanged property that compares bounded before/after manifests in the disposable Docker workspace; hashes regular-file contents and symlink targets, does not follow symlinks, and reports unavailable on entry/byte/read limits.
-- [ ] Extend discriminating checks beyond the filtered workspace to explicitly managed external side effects only with dedicated fixtures, isolation and resource policies.
+- [x] Add opt-in `external_fixture_filesystem_unchanged` verification for a dedicated 16 MiB Docker tmpfs at `/unai_side_effects` (`noexec`, `nosuid`, `nodev`, no network, no host-backed volume); hash every entry in the fixture without following symlinks, with 1,024-entry, 2 MiB/file and 16 MiB/request audit limits, and report unavailable rather than passing when the fixture or budget is unavailable. This covers only the managed filesystem fixture, not databases, queues or remote services.
 - [ ] Extend deeper or broader recursive reductions only with additional per-type correctness/resource policies.
 - [x] Extend grounded execution to undecorated module-level async Python functions using a fixed asyncio.run harness.
 - [x] Support explicitly decorated top-level-class @staticmethod and @classmethod targets with bound invocation, async support, signature validation and generated-harness tests.
 - [x] Support ordinary instance methods on top-level classes with JSON-only constructor fixtures, explicit self/constructor signatures, no inheritance/metaclass/custom __new__, and the existing Docker-only runner; bind fixture hashes into reviewer attestations.
-- [ ] Extend grounded tests to nested classes, other decorators and broader Python signatures only with separately reviewed construction/invocation rules.
+- [x] Support one explicit nested class namespace level (`Outer.Inner.method`) for static, class and ordinary instance methods when each class in the chain is directly declared, undecorated and has no bases or metaclass keywords; instance methods retain hash-bound fresh constructor fixtures.
+- [ ] Extend grounded tests to other decorators and broader Python signatures only with separately reviewed construction/invocation rules.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
 
 ## M5 — Specialist training

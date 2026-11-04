@@ -291,7 +291,10 @@ def _validated_replay_trace(
                 "stable": computed_stable,
                 "results": results,
             })
-        elif kind == "workspace_filesystem_unchanged":
+        elif kind in {
+            "workspace_filesystem_unchanged",
+            "external_fixture_filesystem_unchanged",
+        }:
             audit_status = record.get("status")
             if audit_status == "unavailable":
                 reason_code = record.get("reason_code")
@@ -303,6 +306,8 @@ def _validated_replay_trace(
                     "unsafe_file_type",
                     "filesystem_read_error",
                     "file_changed_during_snapshot",
+                    "fixture_unavailable",
+                    "fixture_root_unsafe",
                 }
                 if reason_code not in allowed_reasons:
                     return [], "invalid"
@@ -342,7 +347,7 @@ def _validated_replay_trace(
                 return [], "invalid"
             normalized.append({
                 "case_id": record["case_id"],
-                "kind": "workspace_filesystem_unchanged",
+                "kind": kind,
                 "status": "complete",
                 "unchanged": unchanged,
                 "before_sha256": record["before_sha256"].lower(),
@@ -576,10 +581,30 @@ class IsolatedPythonTestRunner:
                         staged.bytes_copied + len(generated_content.encode("utf-8")),
                         staged.skipped_files,
                     )
-                result = self.sandbox.run(stage_path, COMMAND)
+                external_fixture_case_ids = (evidence_metadata or {}).get(
+                    "external_fixture_case_ids", []
+                )
+                if external_fixture_case_ids:
+                    result = self.sandbox.run(
+                        stage_path,
+                        COMMAND,
+                        external_side_effect_fixture=True,
+                    )
+                else:
+                    result = self.sandbox.run(stage_path, COMMAND)
                 stdout = result.stdout or ""
                 stderr = result.stderr or ""
                 effective_evidence_metadata = dict(evidence_metadata or {})
+                external_fixture_case_ids = effective_evidence_metadata.get(
+                    "external_fixture_case_ids", []
+                )
+                if external_fixture_case_ids:
+                    # Missing or invalid trace plumbing must never downgrade a
+                    # requested external audit into an ordinary passing test.
+                    effective_evidence_metadata["external_fixture_audit_status"] = "unavailable"
+                    effective_evidence_metadata["external_fixture_audit_unavailable_case_ids"] = sorted(
+                        set(external_fixture_case_ids)
+                    )
                 replay_trace_relative_path = effective_evidence_metadata.get("replay_trace_relative_path")
                 if replay_trace_relative_path is not None:
                     generated_relative = PurePosixPath(relative_text)
@@ -612,6 +637,26 @@ class IsolatedPythonTestRunner:
                                 case_id
                                 for case_id in filesystem_case_ids
                                 if filesystem_records.get(case_id, {}).get("status") != "complete"
+                            )
+                        external_fixture_case_ids = effective_evidence_metadata.get(
+                            "external_fixture_case_ids", []
+                        )
+                        if external_fixture_case_ids:
+                            external_fixture_records = {
+                                record["case_id"]: record
+                                for record in replay_records
+                                if record.get("kind") == "external_fixture_filesystem_unchanged"
+                            }
+                            effective_evidence_metadata["external_fixture_audit_status"] = (
+                                "complete"
+                                if set(external_fixture_records) == set(external_fixture_case_ids)
+                                and all(record.get("status") == "complete" for record in external_fixture_records.values())
+                                else "unavailable"
+                            )
+                            effective_evidence_metadata["external_fixture_audit_unavailable_case_ids"] = sorted(
+                                case_id
+                                for case_id in external_fixture_case_ids
+                                if external_fixture_records.get(case_id, {}).get("status") != "complete"
                             )
                 if result.exit_code != 0 and (
                     "No module named pytest" in stderr
@@ -649,6 +694,27 @@ class IsolatedPythonTestRunner:
                         stdout=stdout,
                         stderr=stderr,
                         error="workspace_filesystem_audit_unavailable",
+                        sandboxed=True,
+                        evidence_source=evidence_source,
+                        evidence_metadata=effective_evidence_metadata,
+                        artifact_ref=artifact_ref,
+                    )
+                if (
+                    result.exit_code == 0
+                    and not result.timed_out
+                    and effective_evidence_metadata.get("external_fixture_audit_status") == "unavailable"
+                ):
+                    return self._response(
+                        snapshot,
+                        "unavailable",
+                        None,
+                        "External side-effect fixture audit could not be completed within its safe snapshot budget; no verdict is available.",
+                        exit_code=result.exit_code,
+                        timed_out=result.timed_out,
+                        staged=staged,
+                        stdout=stdout,
+                        stderr=stderr,
+                        error="external_fixture_audit_unavailable",
                         sandboxed=True,
                         evidence_source=evidence_source,
                         evidence_metadata=effective_evidence_metadata,

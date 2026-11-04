@@ -49,9 +49,17 @@ class FakeSandbox:
         self.stderr = stderr
         self.timed_out = timed_out
         self.called_with = None
+        self.external_fixture_enabled = False
 
-    def run(self, workspace: Path, command: str) -> ExecutionResult:
+    def run(
+        self,
+        workspace: Path,
+        command: str,
+        *,
+        external_side_effect_fixture: bool = False,
+    ) -> ExecutionResult:
         self.called_with = (workspace, command)
+        self.external_fixture_enabled = external_side_effect_fixture
         assert command == "python -m pytest -q"
         assert (workspace / "src" / "module.py").is_file()
         assert (workspace / "tests" / "test_module.py").is_file()
@@ -323,3 +331,151 @@ def test_staging_budget_failure_stops_before_sandbox_run(tmp_path: Path) -> None
 
     assert destination.exists()
     assert len(list(destination.rglob("*.py"))) <= 1
+
+
+def test_runner_enables_external_fixture_only_for_explicit_case_metadata(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _make_workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _make_task(ledger)
+    sandbox = FakeSandbox()
+    runner = IsolatedPythonTestRunner(ledger, sandbox)
+
+    result = runner.run_generated_test(
+        task_id,
+        root,
+        "unai_generated_tests/test_external.py",
+        "def test_placeholder():\n    assert True\n",
+        {"external_fixture_case_ids": ["external-case"]},
+    )
+
+    assert result.status == "unavailable"
+    assert result.evidence.passed is None
+    assert result.evidence.metadata["error"] == "external_fixture_audit_unavailable"
+    assert sandbox.external_fixture_enabled is True
+
+
+def test_runner_fails_closed_when_external_fixture_trace_path_is_missing(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _make_workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _make_task(ledger)
+    sandbox = FakeSandbox()
+
+    result = IsolatedPythonTestRunner(ledger, sandbox).run_generated_test(
+        task_id,
+        root,
+        "unai_generated_tests/test_external.py",
+        "def test_placeholder():\n    assert True\n",
+        {"external_fixture_case_ids": ["external-case"]},
+    )
+
+    assert result.status == "unavailable"
+    assert result.evidence.passed is None
+    assert result.evidence.metadata["error"] == "external_fixture_audit_unavailable"
+    assert result.evidence.metadata["external_fixture_audit_status"] == "unavailable"
+
+
+def test_runner_marks_unavailable_external_fixture_audit_without_false_pass(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _make_workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _make_task(ledger)
+
+    class UnavailableExternalFixtureSandbox(FakeSandbox):
+        def run(
+            self, workspace: Path, command: str, *, external_side_effect_fixture: bool = False
+        ) -> ExecutionResult:
+            assert external_side_effect_fixture is True
+            super().run(
+                workspace, command, external_side_effect_fixture=external_side_effect_fixture
+            )
+            trace_path = workspace / "unai_generated_tests" / "test_external.replay.json"
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            trace_path.write_text(
+                json.dumps({
+                    "schema": "unai.replay-trace.v1",
+                    "records": [{
+                        "case_id": "external-case",
+                        "kind": "external_fixture_filesystem_unchanged",
+                        "status": "unavailable",
+                        "reason_code": "fixture_unavailable",
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            return ExecutionResult(command, 0, "1 passed", "")
+
+    result = IsolatedPythonTestRunner(ledger, UnavailableExternalFixtureSandbox()).run_generated_test(
+        task_id,
+        root,
+        "unai_generated_tests/test_external.py",
+        "def test_placeholder():\n    assert True\n",
+        {
+            "trace_case_ids": ["external-case"],
+            "external_fixture_case_ids": ["external-case"],
+            "replay_trace_relative_path": "unai_generated_tests/test_external.replay.json",
+        },
+    )
+
+    assert result.status == "unavailable"
+    assert result.evidence.passed is None
+    assert result.evidence.metadata["error"] == "external_fixture_audit_unavailable"
+    assert result.evidence.metadata["external_fixture_audit_unavailable_case_ids"] == ["external-case"]
+
+
+def test_runner_validates_external_fixture_trace_records_and_audit_status(tmp_path: Path) -> None:
+    root = tmp_path / "workspaces"
+    _make_workspace(root)
+    ledger = EvidenceLedger(tmp_path / "evidence.sqlite3")
+    task_id = _make_task(ledger)
+
+    class ExternalFixtureTraceSandbox(FakeSandbox):
+        def run(
+            self, workspace: Path, command: str, *, external_side_effect_fixture: bool = False
+        ) -> ExecutionResult:
+            assert external_side_effect_fixture is True
+            super().run(
+                workspace, command, external_side_effect_fixture=external_side_effect_fixture
+            )
+            trace_path = workspace / "unai_generated_tests" / "test_external.replay.json"
+            trace_path.parent.mkdir(parents=True, exist_ok=True)
+            trace_path.write_text(
+                json.dumps({
+                    "schema": "unai.replay-trace.v1",
+                    "records": [{
+                        "case_id": "external-case",
+                        "kind": "external_fixture_filesystem_unchanged",
+                        "status": "complete",
+                        "unchanged": False,
+                        "before_sha256": "1" * 64,
+                        "after_sha256": "2" * 64,
+                        "changed_entry_count": 1,
+                        "changed_paths_sha256": "3" * 64,
+                        "entry_count": 2,
+                        "bytes_hashed": 12,
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            return ExecutionResult(command, 1, "1 failed", "")
+
+    result = IsolatedPythonTestRunner(ledger, ExternalFixtureTraceSandbox()).run_generated_test(
+        task_id,
+        root,
+        "unai_generated_tests/test_external.py",
+        "def test_placeholder():\n    assert True\n",
+        {
+            "trace_case_ids": ["external-case"],
+            "external_fixture_case_ids": ["external-case"],
+            "replay_trace_relative_path": "unai_generated_tests/test_external.replay.json",
+        },
+    )
+
+    assert result.status == "failed"
+    assert result.evidence.metadata["external_fixture_audit_status"] == "complete"
+    assert result.evidence.metadata["external_fixture_audit_unavailable_case_ids"] == []
+    record = result.evidence.metadata["replay_trace_records"][0]
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["unchanged"] is False
+    assert record["changed_entry_count"] == 1

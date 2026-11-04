@@ -349,6 +349,7 @@ class GroundedPropertyOracle(BaseModel):
         "raises_exception",
         "output_stable_across_replays",
         "workspace_filesystem_unchanged",
+        "external_fixture_filesystem_unchanged",
     ]
     replay_count: int = Field(default=1, ge=1, le=4)
     argument_name: Annotated[
