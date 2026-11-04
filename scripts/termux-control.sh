@@ -65,7 +65,9 @@ is_healthy() {
 
 has_window() {
   local service="$1"
-  tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null | grep -Fxq "$service"
+  local windows
+  windows="$(tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null)" || return 1
+  grep -Fxq "$service" <<< "$windows"
 }
 
 pane_is_dead() {
