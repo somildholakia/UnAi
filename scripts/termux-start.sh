@@ -7,7 +7,6 @@ LLAMA_CPP_DIR="${UNAI_LLAMA_CPP_DIR:-$HOME/src/llama.cpp}"
 MODEL_DIR="${UNAI_MODEL_DIR:-$HOME/models/unai}"
 MODEL_FILE="${UNAI_MODEL_FILE:-$MODEL_DIR/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf}"
 LLAMA_SERVER_BIN="${UNAI_LLAMA_SERVER_BIN:-$LLAMA_CPP_DIR/build/bin/llama-server}"
-CPU_THREADS="${UNAI_CPU_THREADS:-4}"
 
 if ! command -v tmux >/dev/null 2>&1; then
   echo "tmux is missing. Run bash scripts/termux-install.sh first."
