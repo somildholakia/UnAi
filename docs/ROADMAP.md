@@ -87,5 +87,6 @@
 - [x] Add a repeatable Android/Termux install script for a CPU `llama.cpp` runtime, local GGUF model, Engine venv and Web UI dependencies.
 - [x] Add a single tmux-based local launcher with model/Engine/UI windows bound to loopback.
 - [x] Add CI checks for Python, web production build and shell syntax.
+- [x] Add a Termux doctor for prerequisite/model-file checks, model/Engine/Web health probes and an optional direct local-inference smoke test; make startup wait for and diagnose all three services.
 - [ ] Verify install and offline chat on a physical Android device; record RSS/PSS, TTFT, throughput and thermal behavior.
 - [ ] Validate memory, process lifecycle and recovery after Android background/low-memory kills.
