@@ -716,3 +716,43 @@ Integrate verified publisher-manifest inclusion and monotonic checkpoint accepta
 ### Next software work
 
 Continue the remaining bounded M4 verification backlog (external side-effect fixtures, deeper recursive shrinking policies, nested classes/signature expansion, and coverage/mutation-based verification only with explicit resource and sandbox policies). Continue M5 infrastructure hardening and evaluation tooling, but real adapter training remains blocked on an explicitly approved consented/licensed multi-repository corpus and suitable GPU compute. No weights have been trained or released. Keep phone setup deferred until all software development is complete.
+
+
+## 2026-11-04 M4 nested-class and managed external-side-effect fixture checkpoint
+
+**Nested-class code commit:** `4c0921c3faf9d608cf563b9641b54279b638e446`  
+**External-fixture code commit:** `be4849df4bb4fe0bb3590a07519d2e70e5e4f51e`  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** open and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Nested class support
+
+- Added one bounded nested namespace level using `Outer.Inner.method` for static, class and ordinary instance targets.
+- Every class in the nested path must be directly declared in its parent namespace, undecorated, and have no bases or metaclass keywords. Deeper nesting, inheritance, decorated namespaces and dynamic resolution remain unsupported.
+- The generated harness resolves each class path component explicitly. Ordinary instance methods continue to require JSON constructor fixtures, fresh instances and fixture-hash evidence.
+- Regression tests execute nested static and instance method harnesses and reject nested inheritance.
+
+### Managed external side-effect fixture
+
+- Added the opt-in property `external_fixture_filesystem_unchanged`.
+- Only requests containing this property cause DockerSandbox to add the dedicated `/unai_side_effects` tmpfs (16 MiB, `noexec`, `nosuid`, `nodev`) and set `UNAI_SIDE_EFFECTS_ROOT`. The container remains network-disabled, its root filesystem read-only, and the fixture is not a host-backed volume.
+- The verifier snapshots the managed fixture before and after the target invocation, records manifest hashes and change counts (not raw paths), and never follows symlinks. Unlike the workspace audit, it excludes no directory names.
+- Limits: 1,024 entries, 2 MiB per file and 16 MiB of aggregate file bytes across the request. Missing fixtures, unsupported entries, read races or exceeded limits produce an unavailable audit; a missing/invalid trace path also fails closed rather than yielding a pass.
+- This is a persistent filesystem-state comparison for one managed temporary directory. It does not capture transient write-then-delete activity, or provide database, queue, host-file, network or remote-service fixtures. The separate `workspace_filesystem_unchanged` property is needed to check workspace state too.
+
+### Validation
+
+The exact code contents in commit `be4849d` passed the remote Linux CI-equivalent checks:
+
+- **380 Python tests passed** (`PYTHONPATH=apps/engine/src:. pytest -q tests`, 32.24s).
+- Python `compileall` passed for Engine source and training code.
+- All six Termux scripts passed `bash -n`.
+- Web TypeScript check and Vite production build passed.
+- `git diff --check` passed.
+- Focused sandbox/runner/grounded suite passed **117 tests** after the fail-closed trace-path regression was added.
+
+The Docker command-line contract is covered with a mocked Docker invocation; generated-harness behavior is exercised with local temporary fixture directories. A live Docker-container integration run was not performed in this validation. GitHub Actions for code commit `be4849d` (Engine/Web run #349 and Brain Worker run #32) were queued at checkpoint recording time; do not represent them as completed.
+
+### Remaining software work
+
+Continue M4 with broader recursive shrinking only where each type has its own correctness/resource policy, and other decorators/signatures or coverage/mutation verification only with separately reviewed sandbox and execution budgets. M5 specialist adapters remain untrained: no explicitly approved consented/licensed multi-repository corpus or reproducible GPU training run has been supplied. Keep Android install, offline inference and physical-device benchmarks for the final integration phase.

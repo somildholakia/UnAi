@@ -492,3 +492,31 @@ Continue with the next software task: wire transparency proofs and persistent mo
 - docs/ROADMAP.md now marks the publisher-transparency integration item complete. docs/CHECKPOINT.md records the exact implementation and boundaries.
 - PR #28 remains open/unmerged. Keep main at `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`; do not merge without explicit user approval.
 - Continue with remaining bounded M4 verification items and M5 infrastructure/evaluation work. Actual M5 adapter training requires a user-approved consented/licensed multi-repository corpus and suitable GPU compute; no weights are trained. Mobile installation and Android measurement remain deferred until all software development is complete.
+
+
+## Authoritative continuation handoff — M4 nested targets and external fixture audit — 2026-11-04
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Branch:** `feat/m4-instance-methods-m5-specialists`
+- **Latest code commit:** `be4849df4bb4fe0bb3590a07519d2e70e5e4f51e` — `feat(m4): add isolated external side-effect fixture audit`.
+- **Previous nested-class code commit:** `4c0921c3faf9d608cf563b9641b54279b638e446`.
+- **Local Linux validation at the latest code commit:** 380 tests passed; compileall, six Termux shell syntax checks, Web production build and diff whitespace checks passed. The focused sandbox/runner/grounded tests passed 117 tests.
+- **Hosted GitHub Actions:** Engine/Web run #349 and Brain Worker run #32 were queued on `be4849d` when this handoff was recorded. The previous commit's run #348/#31 were also still queued; do not claim hosted Actions completed.
+- **PR #28:** open, unmerged, mergeable. Base `main` remains `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`. Do not merge PR #28 or modify main without explicit permission.
+
+### Delivered in the latest M4 checkpoint
+
+One explicit nested class namespace level is supported for static, class and ordinary instance methods, with strict class-chain restrictions and generated-harness tests. The external side-effect audit is an opt-in property backed only by a dedicated 16 MiB ephemeral Docker tmpfs. It checks persistent file/directory/symlink state under strict entry/file/byte budgets, and the test runner fails closed if the requested audit cannot be read or its trace is missing. It does not provide actual DB/queue/remote-service fixtures or detect transient write-then-delete activity. See `docs/VERIFICATION.md` and the latest sections of `docs/CHECKPOINT.md`.
+
+### What remains
+
+- Deeper/broader recursive reductions need per-type correctness and resource policies.
+- Additional decorators and broader Python signatures need explicit construction and invocation rules.
+- Coverage-guided/mutation-based checks need fixed targets, isolation and strict execution budgets.
+- M5 corpus collection, all three specialist adapter training runs, held-out evaluation and promotion remain blocked on approved consented/licensed multi-repository data and suitable GPU compute. No adapter weights are trained or released.
+- Hosted Brain deployment is still unprovisioned and requires operational/production review.
+- Physical Android setup, offline inference and memory/latency/thermal/lifecycle measurements remain deferred until software development is complete.
+
+### Mandatory sequencing
+
+The user requested one checkpoint at a time and explicitly requires all software work to be completed before mobile setup. Continue on `feat/m4-instance-methods-m5-specialists`; keep `main` unchanged and PR #28 unmerged. Update GitHub and the continuity/checkpoint docs at each validated milestone. Do not ask the user to install or test on Android yet.
