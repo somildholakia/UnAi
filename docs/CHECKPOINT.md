@@ -570,3 +570,48 @@ CI validates the scripts with mocked tmux/HTTP endpoints and synthetic panes; it
 ### Next development priority
 
 Continue software engineering before mobile installation. The next major security milestone is a complete design for per-user/scoped credentials, revocation, rate limiting and tenant-isolated storage. Do not add an authentication facade and call it tenant isolation: the workspace, evidence ledger, Brain vault/index and repository graph cache must be reviewed together. Mobile installation and physical-device validation remain the final integration stage, after the remaining software work is complete.
+
+
+## 2026-11-04 chat handoff — software-first continuation
+
+**Current branch HEAD:** `a64e2f54bdbdff5b3422035e5cb48f673dc26cde` (documentation-only handoff commit after the validated code checkpoint below).  
+**Validated code checkpoint:** `cd522d27cb00ee01168cc4b0f46e6c337884f4ab`.  
+**Latest CI:** [run #315](https://github.com/somildholakia/UnAi/actions/runs/41824420044) — 339 tests passed in 12.54s; Engine compileall, Termux shell syntax checks and Web production build all passed. Run #315 validates the current HEAD and contains the same code as the validated code checkpoint.  
+**PR #28:** open, unmerged, mergeable; base `main` SHA `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`. **Do not merge or modify main.**
+
+### User instruction — mandatory sequencing
+
+The user explicitly wants all software development done first. Do not ask them to install, run, or test UnAi on their phone yet. Physical Android setup, offline inference, and device benchmarking are deferred to the final integration stage only.
+
+### Current milestone
+
+Termux process supervisor, health/status/recovery helpers, shared service launch contract, signal forwarding, and CI tests are in place. The code checkpoint includes:
+- bounded restart/backoff and rotated per-service logs;
+- safe status/recovery behavior designed not to duplicate healthy listeners;
+- direct-child TERM/INT/HUP forwarding;
+- tests for service commands, working directories, missing dependencies, supervisor restarts, and shutdown;
+- CI workflow checks for Engine tests/compile, Termux shell syntax, and Web build.
+
+No physical Android behavior or performance has been validated. Do not claim it has.
+
+### Next software milestone
+
+Begin with a full security/data-boundary review before implementing tenant auth:
+1. workspace path resolution and task ownership;
+2. task/evidence/patch/test/proof ledger read and write routes;
+3. Brain vault files and SQLite index;
+4. repository graph cache namespaces;
+5. MCP server/remote bridge credentials and permissions.
+
+Design scoped identities, token issuance/rotation/revocation, rate limits and storage isolation together. Add adversarial cross-tenant tests for every read/write path. A bearer token or scope field alone is not tenant isolation. Preserve loopback-only local operation; do not expose public hosting until security is complete and tested.
+
+### Still blocked by external inputs
+
+- No consented/licensed multi-repository training corpus has been supplied.
+- No specialist adapters have been trained or released.
+- Suitable GPU training, held-out comparisons and physical Android measurements remain pending.
+- Do not fabricate data or claim trained weights.
+
+### Start the next chat here
+
+Read `docs/CONTINUITY.md`, `docs/CHECKPOINT.md`, `docs/ROADMAP.md`, then fetch the live branch/PR/CI state. Continue directly with the security/data-boundary audit and software implementation. Keep all work on `feat/m4-instance-methods-m5-specialists`; do not merge PR #28 or modify `main`. Mobile setup is last, only after software development is complete.

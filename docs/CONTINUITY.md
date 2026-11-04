@@ -373,3 +373,35 @@ A key ID or request scope by itself is not tenant isolation. All read and write 
 3. Continue with a complete tenant-isolation/security design and tests; avoid partial authentication changes that overstate isolation.
 4. Keep `main` unchanged and do not merge PR #28 without explicit instruction.
 5. Only after the software milestones are complete, return to the Termux installation and physical Android validation stage.
+
+
+## Authoritative chat handoff — 2026-11-04 (latest)
+
+This section supersedes older "recommended next action" passages in earlier handoff entries that suggested doing the Termux setup immediately. The user has explicitly requested a software-first sequence: **finish software development first; mobile setup and device validation happen only at the end.**
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Branch:** `feat/m4-instance-methods-m5-specialists`
+- **Current HEAD before this handoff update:** `a64e2f54bdbdff5b3422035e5cb48f673dc26cde`
+- **Validated code checkpoint:** `cd522d27cb00ee01168cc4b0f46e6c337884f4ab`
+- **Latest CI:** [run #315](https://github.com/somildholakia/UnAi/actions/runs/41824420044), success — 339 tests passed in 12.54s, compileall, Termux syntax checks and Web build passed.
+- **PR #28:** open, unmerged, mergeable. Base `main` SHA: `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`. Do not merge or change main.
+
+### What to do next
+
+1. Fetch live branch, PR #28 and CI before making changes.
+2. Read the current roadmap and checkpoint.
+3. Work on the complete security/data-isolation milestone: workspace/task ownership, evidence and patch/test/proof routes, Brain vault/index, graph cache, MCP credentials, scoped tokens, revocation and rate limiting.
+4. Add adversarial cross-user/tenant tests before claiming isolation. Preserve loopback-only mode until all remote paths are secure.
+5. Continue the remaining software roadmap, training infrastructure and release checks. Specialist training is blocked until a suitable consented/licensed corpus and training hardware are actually available; do not fabricate training results.
+6. **Do not ask the user to install or test on their phone yet.** Physical Termux install, offline chat, Android process lifecycle, memory/latency/throughput/power/thermal benchmarks are the final integration stage after software work is otherwise complete.
+
+### Important boundaries
+
+- CI is automated Linux test evidence, not physical Android evidence.
+- Current supervisor signal forwarding covers the direct child process, not necessarily every descendant of a wrapper.
+- No specialist adapter weights have been trained or released.
+- Keep changes on `feat/m4-instance-methods-m5-specialists`. PR #28 stays open; no merge and no main-branch edits without explicit instruction.
+
+### Copy/paste opening instruction for the next chat
+
+"Continue UnAi from GitHub. First read docs/CONTINUITY.md, docs/CHECKPOINT.md and docs/ROADMAP.md, then verify live branch HEAD, PR #28 and latest CI. Current branch: feat/m4-instance-methods-m5-specialists. Continue the next software milestone: complete security/data-boundary audit and implementation with adversarial cross-tenant tests. Do not ask me to set up or test on my phone until all software development is complete. Keep main unchanged and do not merge PR #28. Update GitHub and both handoff documents at every validated checkpoint."
