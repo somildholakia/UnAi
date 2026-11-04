@@ -434,3 +434,38 @@ Continue the M4 trust/verification backlog: public key-transparency inclusion an
 2. Keep all development on `feat/m4-instance-methods-m5-specialists`; never alter `main` or merge PR #28 without explicit permission.
 3. Continue code, tests, CI and handoff updates before any phone setup.
 4. Do not ask the user to install or test UnAi on the phone until all software milestones are complete. Physical install, offline chat, Android process lifecycle and measured PSS/RSS, TTFT, tokens/sec, power and thermals remain the final integration stage.
+
+## Authoritative continuation handoff — 2026-11-04 M4 transparency primitives validated
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Active branch:** `feat/m4-instance-methods-m5-specialists`
+- **Latest validated code commit:** `75578f2bd222874b575005f1097f8f610afd471a`
+- **Latest checkpoint documentation commit:** `b4ee562effebc4a11e30abaeb0c44183b16e9352` (this continuity file update follows it).
+- **Engine/Web CI:** [run #329](https://github.com/somildholakia/UnAi/actions/runs/41830246493) — success; 356 tests passed in 13.09s, compileall, Termux shell syntax and Web production build passed.
+- **Brain Worker CI:** [run #12](https://github.com/somildholakia/UnAi/actions/runs/41830246970) — success; Worker type checks, D1 migration smoke test and browser JavaScript syntax passed.
+- **PR #28:** open, mergeable, unmerged. Base `main` SHA is `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`. Do not merge it or modify `main`.
+
+### Latest software milestone
+
+Added `apps/engine/src/unai_engine/verification/transparency.py` and `apps/engine/tests/test_transparency.py`:
+- RFC 6962-style Merkle leaf/node hashing, inclusion verification and consistency verification.
+- Operator-pinned Ed25519 signed tree-head verification using the documented unAI canonical-JSON envelope.
+- Canonical publisher-manifest leaf encoding and signed-log inclusion verification.
+- SQLite append-only transparency observations with per-log monotonic tree-size/timestamp checks, rollback and same-size equivocation rejection.
+- Regression coverage for proof tampering, wrong leaves/indices, manifest substitution, untrusted signatures, checkpoint rollback and append-only guards.
+
+See the new section in `docs/VERIFICATION.md` and the M4 status in `docs/ROADMAP.md`.
+
+### Important boundaries
+
+This is an offline proof-verification primitive, not a deployed public transparency log. It does not discover logs/keys, retrieve proofs, perform witness gossip, or establish legal publisher identity. The publisher-oracle request/evidence workflow is not yet wired to require these proofs. Log-key rotation/revocation and independent witness/checkpoint policy remain open. Do not overstate this milestone.
+
+### Next task — continue software development
+
+Integrate publisher-manifest inclusion and monotonic checkpoint verification into the existing publisher-oracle evidence path. Preserve the distinction between publisher-signed artifact manifests and reviewer-signed exact oracle assertions. Add route-level adversarial tests for missing/tampered inclusion paths, stale or rolled-back checkpoints, cross-log proof substitution and key rotation/revocation. Then continue remaining M4 limitations and M5 pipeline/release work.
+
+### Mandatory user sequencing
+
+The user explicitly requires all software development to finish before phone setup. **Do not ask the user to install, run or test UnAi on Android yet.** Physical Termux install, offline inference, Android lifecycle/recovery and PSS/RSS, TTFT, tokens/sec, power and thermal measurements are final integration work only after software milestones are complete.
+
+Keep all work on `feat/m4-instance-methods-m5-specialists`. Keep `main` unchanged. Never merge PR #28 without explicit permission. Update CHECKPOINT and CONTINUITY after each meaningful validated milestone.
