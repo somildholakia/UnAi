@@ -504,3 +504,24 @@ No model training, specialist weights, physical Android benchmarks or production
 
 The new tests use mocked services and a sparse fixture model file; CI does not download the 1.12 GB GGUF, run llama.cpp, or execute the install on Android. This makes the diagnostic workflow testable but is not a physical-device smoke test. On-device offline inference and RSS/PSS, TTFT, throughput and thermal measurements remain pending.
 
+## 2026-11-04 Termux service crash-recovery checkpoint
+
+**Validated code/test commit:** `9c997b52fd016924583042dbd1ffc46e439e7263`  
+**GitHub Actions:** [run #296](https://github.com/somildholakia/UnAi/actions/runs/41822272142) — **324 tests passed in 12.25s**; Python compileall, Termux shell syntax (including the supervisor) and Web production build passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** remains open and unmerged; `main` remains unchanged.
+
+### Implementation
+
+- Added `scripts/termux-supervise.sh`, a per-service runner with bounded retries after non-zero exits, exponential delay (2 seconds initially, capped at 30 seconds), and a configurable retry budget (five by default).
+- A clean process exit (code 0) is treated as intentional and is not restarted. After the retry budget is exhausted, the supervisor exits with the last process code.
+- The model, Engine and Web tmux panes now run through this supervisor. Tmux panes remain visible after the process exits so the last output can be inspected.
+- Service output is mirrored to `$HOME/.local/state/unai/{model,engine,web}.log` by default. Logs rotate to one `.log.1` backup after exceeding 1 MiB.
+- The doctor checks that the supervisor is present and prints recent service log lines when a health endpoint is unreachable.
+- Added supervisor regression tests for transient failures/recovery, clean exits, bounded restart exhaustion, log rotation and invalid configuration; added doctor coverage for crash-log visibility.
+- Documented configuration overrides and recovery boundaries in `docs/LOCAL_INSTALL.md` and `README.md`; updated the M6 roadmap.
+
+### Verification boundaries
+
+CI uses controlled fixture commands and mocked service endpoints. It does not run llama.cpp, install on a physical Android device, or measure mobile resource usage. The supervisor can recover a child service while the Termux/tmux session remains alive; it cannot revive Termux after Android terminates all of its processes. Physical Android process-lifecycle and low-memory recovery remain open.
+
