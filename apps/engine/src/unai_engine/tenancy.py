@@ -51,8 +51,15 @@ def build_tenant_services(
     """Create physically separate workspace, Brain, evidence and graph-cache state."""
     if re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tenant_id) is None or tenant_id == "default":
         raise ValueError("A non-reserved lowercase tenant identifier is required.")
-    workspace = Path(workspace_root).expanduser().resolve() / tenant_id
-    data = Path(data_root).expanduser().resolve() / tenant_id
+    workspace_base = Path(workspace_root).expanduser().resolve()
+    data_base = Path(data_root).expanduser().resolve()
+    workspace = (workspace_base / tenant_id).resolve()
+    data = (data_base / tenant_id).resolve()
+    try:
+        workspace.relative_to(workspace_base)
+        data.relative_to(data_base)
+    except ValueError as exc:
+        raise ValueError("Tenant storage path escapes its configured root.") from exc
     workspace.mkdir(parents=True, exist_ok=True)
     data.mkdir(parents=True, exist_ok=True)
 
