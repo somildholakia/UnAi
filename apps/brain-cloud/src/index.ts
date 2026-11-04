@@ -323,10 +323,9 @@ export default {
       const identity = await authenticate(request, env);
       if (!identity) return json({ error: "A valid bearer token is required for Brain API access." }, 401, origin);
       if (!await allowRequest(request, env, identity)) {
-        return new Response(JSON.stringify({ error: "API rate limit exceeded" }), {
-          status: 429,
-          headers: { ...json({}, 200, origin).headers, "retry-after": "60" }
-        });
+        const limited = json({ error: "API rate limit exceeded" }, 429, origin);
+        limited.headers.set("retry-after", "60");
+        return limited;
       }
 
       if (request.method === "POST" && path === "/api/auth/tokens") {

@@ -16,5 +16,6 @@ dist/
 # Runtime data
 .data/
 .workspaces/
+.tenant-workspaces/
 *.log
 .DS_Store

@@ -27,5 +27,27 @@ jobs:
       - name: Generate Cloudflare binding types and check Worker
         working-directory: apps/brain-cloud
         run: npm run typecheck
+      - name: Validate D1 migrations and legacy tenant assignment
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import sqlite3
+
+          connection = sqlite3.connect(":memory:")
+          connection.executescript(Path("apps/brain-cloud/migrations/0001_init.sql").read_text())
+          connection.execute(
+              "INSERT INTO notes(id,slug,title,body,tags_json,source,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+              ("legacy-id", "legacy-note", "Legacy", "existing note", "[]", "test", "2026-11-04T00:00:00Z", "2026-11-04T00:00:00Z"),
+          )
+          connection.executescript(Path("apps/brain-cloud/migrations/0002_tenant_tokens.sql").read_text())
+          tenant = connection.execute("SELECT tenant_id FROM notes WHERE id='legacy-id'").fetchone()[0]
+          assert tenant == "default", tenant
+          for table in ("notes", "links", "tags"):
+              columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+              assert "tenant_id" in columns, (table, columns)
+          for table in ("api_tokens", "rate_buckets"):
+              assert connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+          print("D1 tenant/token migrations passed; legacy rows remain in default tenant.")
+          PY
       - name: Check browser UI JavaScript syntax
         run: node --check apps/brain-web/app.js

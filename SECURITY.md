@@ -1,17 +1,22 @@
 # Security policy
 
-unAI is an experimental agent. Report security issues privately to the repository owner. Do not include API keys, credentials, private source code, or personal data in public bug reports.
+unAI is an experimental local-first agent. Report vulnerabilities privately to the repository owner. Do not include credentials, private source code, or personal data in public issues.
 
-## Engine API access
+## Current controls
 
-- With `UNAI_API_TOKEN` set, every HTTP request except CORS preflight requires the matching `Authorization: Bearer <token>` header.
-- Use a randomly generated secret of at least 32 characters. Do not commit it, expose it in browser bundles, or put it in logs.
-- With `UNAI_API_TOKEN` unset, the Engine accepts loopback clients only and rejects non-loopback peer addresses. Forwarded-IP headers are not trusted.
-- CORS preflight requests are allowed through so browser clients can negotiate the Authorization header; the actual request still requires authentication.
-- `UNAI_BRAIN_WRITE_TOKEN` remains a separate optional write credential for Brain note creation. Send it with the `X-Brain-Write-Token` header; remote writes require both it and the Engine's `Authorization: Bearer` token.
+- The Engine requires a valid scoped bearer token, the installation administrator token, or a loopback-local identity. With UNAI_API_TOKEN unset, non-loopback access is denied unless a scoped token is presented.
+- Scoped tokens are high-entropy opaque secrets; only SHA-256 hashes are stored. Tokens carry a tenant ID, explicit scopes, expiry (1–365 days), and revocation state. Token issuance and revocation are installation-admin-only.
+- Engine requests are rate-limited independently by token principal and source IP. Scope checks apply to chat, task, workspace execution/write, and Brain routes.
+- Each non-default tenant gets physically separate workspace files, Brain Markdown/index, evidence ledger, and repository graph cache. A token for one tenant cannot resolve another tenant's task IDs or notes.
+- The hosted Brain Worker fails closed when credentials are absent. D1 notes, links, and tags are tenant-keyed; scoped tokens are hash-stored, revocable, expiring, and rate-limited.
+- The local read-only Brain MCP server uses stdio; remote Brain MCP requires HTTPS and an explicit token.
 
-This is an installation-wide shared bearer secret, not per-user identity or scoped API keys. There is no tenant isolation, rate limiting, token rotation/revocation registry, or production deployment threat model yet. Keep the Engine private and do not expose it directly to public traffic.
+Setup and scope details: docs/SECURITY.md and docs/BRAIN.md.
 
-## Remaining prototype limits
+## Remaining trust boundaries
 
-Task-level workspace approvals and separate patch/test confirmations remain mandatory, but the API token does not replace those controls. The Docker test image and sandbox still require deployment-specific review and hardening.
+- A tenant is the isolation boundary. Tokens deliberately share data when assigned the same tenant ID. Issue a unique tenant ID per person/workspace when separate ownership is required.
+- Loopback-local access is installation-admin access to the reserved default tenant. Protect local processes and do not expose the local server port beyond trusted peers.
+- A configured installation administrator token can create other scoped tokens. Keep it server-side; never embed it in browser assets or send it to models.
+- The Cloudflare Worker is a scaffold, not a deployed or penetration-tested service. Restrict CORS origins and secure D1/admin secrets before deployment.
+- Host-level network policy, disk encryption, backup retention, dependency review, Docker sandbox hardening, and Android whole-process lifecycle tests remain deployment acceptance work.

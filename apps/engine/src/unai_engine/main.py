@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+import sqlite3
 from threading import RLock
 
 from fastapi.responses import JSONResponse
@@ -187,7 +188,7 @@ async def enforce_api_access(request: Request, call_next):
                         content={"detail": "API request rate limit exceeded. Retry after the current minute."},
                         headers={"Retry-After": "60"},
                     )
-        except (TokenStoreError, OSError):
+        except (TokenStoreError, OSError, sqlite3.Error):
             return JSONResponse(status_code=503, content={"detail": "API authentication storage is unavailable."})
         if denial is not None or identity is None:
             status_code, detail = denial or (401, "Authentication failed.")
@@ -206,8 +207,10 @@ def create_api_token(request: ApiTokenCreateRequest, http_request: Request) -> A
             request.tenant_id, request.label, request.scopes, request.expires_in_days
         )
         return ApiTokenCreateResponse(**created)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        status_code = 503 if isinstance(exc, sqlite3.Error) else 400
+        detail = "API token storage is unavailable." if status_code == 503 else str(exc)
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @app.post("/api/auth/tokens/{token_id}/revoke", response_model=ApiTokenRevokeResponse)
@@ -216,7 +219,7 @@ def revoke_api_token(token_id: str, http_request: Request) -> ApiTokenRevokeResp
     _require_admin(http_request)
     try:
         revoked = api_token_store.revoke(token_id)
-    except (OSError, TokenStoreError) as exc:
+    except (OSError, TokenStoreError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail="API token storage is unavailable.") from exc
     if not revoked:
         raise HTTPException(status_code=404, detail="Active API token not found.")
@@ -638,8 +641,10 @@ async def plugin_manifest() -> dict[str, list[str]]:
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health(http_request: Request) -> HealthResponse:
+    identity = _request_identity(http_request)
     services = _tenant_services(http_request)
-    return HealthResponse(provider_configured=provider.configured, model=provider.model, notes=services.brain.status()["notes"])
+    notes = services.brain.status()["notes"] if identity.is_admin or "brain:read" in identity.scopes else 0
+    return HealthResponse(provider_configured=provider.configured, model=provider.model, notes=notes)
 
 
 @app.post("/api/chat", response_model=ChatResponse)
