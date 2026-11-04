@@ -461,3 +461,27 @@ These are conservative source-level AST relationships, not runtime traces or a c
 - **CI:** [run #41677589811](https://github.com/somildholakia/UnAi/actions/runs/41677589811) — 311 tests passed in 8.28s; Python compileall, Termux script syntax and web production build passed.
 - The Termux installer now detects an incomplete model file and resumes the Hugging Face range download on rerun; it requires at least 1,000,000,000 bytes before accepting the file as complete.
 - This remains CI-validated only. A physical Termux build/inference session has not yet been run.
+
+## 2026-11-04 M2 incomplete-discovery persistence hardening
+
+**Validated code commit:** `ac75a68ba6d6805c3470216596995c3d0282cd43`  
+**GitHub Actions:** [run #273](https://github.com/somildholakia/UnAi/actions/runs/41820372989) — **313 tests passed in 6.59s**; Python compileall, Termux shell syntax and the web production build passed.  
+**Branch:** `feat/m4-instance-methods-m5-specialists`  
+**PR #28:** remains open and unmerged; `main` was not modified.
+
+### Change
+
+- Hardened incremental SQLite graph refreshes when the bounded repository walk reaches `MAX_FILES`.
+- An incomplete file-discovery pass still returns its bounded partial graph, but marks `summary.scan_complete=false` and the persisted-cache state as `incomplete`.
+- The partial graph is not published to SQLite. The previous complete generation, file rows, edges and repository fingerprint remain untouched; the partial pass reports `snapshot_persisted=false` and zero confirmed file removals.
+- A subsequent complete scan reconciles the full eligible file set and publishes the next generation atomically.
+- Documented the distinction between incomplete file discovery and the separately reported symbol/edge/call-site budgets in `docs/CODE_GRAPH.md`.
+
+### Regression coverage
+
+- A truncated refresh over an existing cache cannot evict unseen files or replace its generation; a complete retry then incorporates newly discovered files.
+- An initial truncated scan cannot create a partial persisted cache.
+- Existing tests continue to cover unchanged-cache reuse, content-hash stale detection (including same-size/same-mtime edits), additions/changes/deletions, transactional rollback, future-schema rejection and v1-to-v2 migration.
+
+No model training, specialist weights, physical Android benchmarks or production-readiness claims are added by this milestone.
+
