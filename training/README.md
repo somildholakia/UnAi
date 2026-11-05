@@ -33,7 +33,7 @@ The default creates 720 deterministic records (240 per specialist) across 20 pro
 
 These examples are explicitly marked `source_type: synthetic`, carry generator/version/rights-basis provenance, and use the selected output license (default `CC0-1.0`). Change `--license` only when you intend to use that license for the generated corpus. Synthetic verification validates the generator's own response contracts; it is not a real codebase test, real user trajectory or evidence of model capability. Treat this as a bootstrap corpus for testing the pipeline and initial experiments, not a substitute for diverse, independently verified tasks.
 
-For public datasets, do not treat public visibility as permission to train. Every record marked `source_type: public` must include an HTTPS `source_url`, immutable `source_revision`, HTTPS `license_url`, named license, explicit consent/permission metadata and a repository/project grouping key. The audit reports source types in aggregate only. Data from local projects requires explicit authorization; do not ingest private chats or repositories by default.
+For public datasets, do not treat public visibility as permission to train. Every record marked `source_type: public` must include an HTTPS `source_url`, content-addressed immutable `source_revision` (40/64-character commit SHA or `sha256:` digest), HTTPS `license_url`, named license, explicit consent/permission metadata and a repository/project grouping key. The audit reports source types in aggregate only. Data from local projects requires explicit authorization; do not ingest private chats or repositories by default.
 
 ## 1. Collect eligible trajectories
 
