@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timezone
 from types import SimpleNamespace
 import hashlib
 
@@ -10,6 +11,7 @@ from unai_engine.agent.orchestrator import AgentOrchestrator
 from unai_engine.main import app
 from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
+from unai_engine.models import EvidenceRecord
 from unai_engine.runtime.patches import PatchManager
 from unai_engine.verification.probes import BoundaryProbeGenerator
 from unai_engine.verification.ledger import EvidenceLedger
