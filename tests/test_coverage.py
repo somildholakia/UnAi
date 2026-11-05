@@ -582,7 +582,11 @@ def test_coverage_runs_in_disposable_docker_sandbox(tmp_path: Path) -> None:
 
     assert result.status == "passed"
     assert result.coverage is not None
-    assert result.coverage.status == "complete"
+    assert result.coverage.status == "complete", (
+        f"coverage={result.coverage.model_dump(mode='json')}; "
+        f"trace_status={result.execution_evidence.metadata.get('coverage_trace_status')}; "
+        f"trace_path={result.execution_evidence.metadata.get('coverage_trace_relative_path')}"
+    )
     assert result.coverage.branch_coverage == 1.0
     assert result.execution_evidence.metadata["coverage_trace_status"] == "complete"
     assert result.execution_evidence.metadata["coverage_trace"]["executed_lines"] == [2, 3, 5]
