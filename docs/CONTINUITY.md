@@ -23,9 +23,10 @@ Read these in order before extending unAI:
 - The task MCP bridge remains read-only. It can retrieve proof bundles but cannot run grounded tests, apply patches, run tests, execute shell commands or grant permissions.
 - Counterexamples mean observed mismatch against a supplied oracle, not automatic proof that the code or specification is wrong.
 - Oracle references and property contracts are requester-supplied. A workspace specification artifact may be SHA-256-pinned for byte integrity, but that does not authenticate its author/publisher or prove the expected output is correct. Passing examples are not a semantic proof; keep acceptance gaps and unknowns visible.
-- Shrinking may run only for an explicitly supplied fixed property oracle; it is integer-only, bounded to 24 candidates per request, and reports the smallest observed violation without claiming global minimality.
+- Shrinking may run only for an explicitly supplied fixed property oracle; deterministic reductions cover non-zero integers, finite floats, non-empty strings, lists and string-keyed dictionaries, with depth/node/candidate/round limits and a 24-execution request budget. Results are the smallest observed violations, not global-minimality proofs.
 - Execution trace hashes and redacted previews are bounded evidence, not full deterministic replay. Do not include secrets in oracle inputs or expected outputs.
-- Current grounded testing supports synchronous and async, undecorated module-level Python functions, explicitly decorated top-level-class @staticmethod/@classmethod methods, and ordinary instance methods on undecorated top-level classes with no bases/metaclass keywords. Instance cases supply JSON-only `instance_arguments`; constructor/method signatures are separately validated, and a fresh instance is built for each invocation in the Docker test copy. Custom `__new__`, async/decorated `__init__`, nested classes, positional-only parameters, `*args`, `**kwargs` and other decorators remain unsupported. Constructor fixture hashes are bound into evidence and reviewer attestations.
+- Coverage is an opt-in audit of the supplied grounded oracle cases (`measure_coverage: true`), not a source of new expected values. It records bounded target statement lines and supported branch arms against the exact source hash; unavailable coverage must not alter the oracle verdict, and this does not yet implement automatic case generation or fuzzing.
+- Current grounded testing supports synchronous/async Python functions and static, class and ordinary instance methods on supported top-level classes, including one explicit nested class namespace level. The bounded `typing.final` identity marker and positional-only, positional-or-keyword, keyword-only, `*args` and `**kwargs` binding are supported through server-derived fixed harness plans. Instance cases supply JSON-only `instance_arguments`; constructor/method signatures are separately validated and a fresh instance is built for each invocation in the disposable Docker copy. Inheritance, metaclass keywords, custom `__new__`, async/decorated constructors, deeper nesting, ambiguous/custom decorators and unsupported argument forms remain fail-closed. Constructor fixture hashes are bound into evidence and reviewer attestations.
 - Do not describe a Cloudflare scaffold as deployed until a D1 database, secrets, access policy and live URL have been verified.
 - Do not claim weights have been trained unless an adapter artifact and reproducible training manifest exist.
 - Keep Markdown as the portable Brain source of truth; SQLite indexes are rebuildable.
@@ -60,10 +61,20 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest validated code commit:** `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc` — bounded mutation-based test-strength verification.
-**Latest code CI:** [run #366](https://github.com/somildholakia/UnAi/actions/runs/41999448683) — 421 tests passed in 20.42s; the Docker-backed mutation integration test, Python compileall, six Termux shell syntax checks and the Web production build passed. [Brain Worker run](https://github.com/somildholakia/UnAi/actions/runs/41999448612) also passed.
+**Latest validated code/test commit:** `e6af02a48fa03ace04627b9910c39f6c2bd57233` — opt-in grounded coverage measurement and Docker trace-lifecycle fix.
+**Latest Engine/Web CI:** [run #372](https://github.com/somildholakia/UnAi/actions/runs/42006411694) — 433 tests passed in 17.19s, including Docker-backed coverage, compileall, six Termux shell syntax checks and Web production build. [Brain Worker run #55](https://github.com/somildholakia/UnAi/actions/runs/42006411841) passed.
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.
+
+### Current M4 coverage increment
+
+- `measure_coverage: true` opts into a bounded statement/branch-arm report during the same source-hash-bound grounded Docker run. Trace content contains target line numbers, case IDs, target path and target SHA-256; no raw oracle arguments or outputs are added.
+- Planner bounds: 50,000 AST nodes, 5,000 target statement lines, 200 supported branch descriptions, 300 condition characters and 500 response missing-line entries. Trace is capped at 256 KiB and validated before use.
+- Coverage evidence is append-only and appears in proof bundles. A missing/unusable trace yields coverage `unavailable` and a proof risk without changing the grounded oracle verdict.
+- The container executes as the staging process UID/GID; the harness persists aggregate coverage after each measured invocation and at exit. Run #372 exercised this through the production Docker runner.
+- This does not implement automatic coverage-guided input synthesis or fuzzing. Keep the exact supplied oracle as the sole verdict source.
+
+**Next:** M4 coverage measurement is validated. M5 adapter training is blocked on an approved consented/licensed multi-repository corpus and suitable GPU compute; do not invent data or claim trained weights. Continue one checkpoint at a time and defer physical Android setup until software development is complete.
 
 ### Earlier M2 increment (historical)
 
