@@ -77,6 +77,8 @@
 **M4 coverage-guided probe-ranking validation (2026-11-05):** validated code/test HEAD `4920622429f31dbed780f325efcbcb7f2bfdeae9`; Engine/Web Actions run #395 passed **442 tests in 18.82s**, including the new planner/API/evidence-boundary tests; Docker sandbox build, Python compileall, all six Termux shell syntax checks and the Web production build passed. Brain Worker run #78 passed Worker typecheck, D1 migration validation and browser JavaScript syntax. The first attempt (#391) found a syntax error in newly added API test fixture escaping; it was corrected before the passing run. See `docs/VERIFICATION.md` for exact evidence and no-execution limits.
 
 ## M5 — Specialist training
+- [x] Add a read-only, metadata-only corpus preflight with a 2 GiB input ceiling, bounded JSONL record handling and no raw conversation/repository/provenance values in its report.
+- [x] Expand credential sanitization for provider tokens, cloud access-key IDs, bearer/JWT forms, database URLs, PEM private keys and signed URL signatures, with regression tests.
 - [x] Build consent/license/verification-gated corpus preparation with sanitized deduplication, hashed repository groups and deterministic repository-disjoint specialist train/eval splits.
 - [x] Record the raw corpus input SHA-256/byte count and preflight all specialist splits before writing outputs, preserving previous artifacts on split-validation failures.
 - [x] Add separate next-action, planner and verifier LoRA/QLoRA training runs with provenance checks, leakage rejection and reproducible data/library/hardware manifests.

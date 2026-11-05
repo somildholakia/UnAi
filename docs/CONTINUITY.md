@@ -61,27 +61,34 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest validated code/test commit:** `4920622429f31dbed780f325efcbcb7f2bfdeae9` — read-only coverage-guided ranking of existing unverified probes.
-**Latest Engine/Web CI:** [run #395](https://github.com/somildholakia/UnAi/actions/runs/42009350095) — 442 tests passed in 18.82s, including the new coverage-guided planner/API tests; Docker sandbox build, Python compileall, six Termux shell syntax checks and Web production build passed. [Brain Worker run #78](https://github.com/somildholakia/UnAi/actions/runs/42009349905) passed typecheck, D1 migration validation and browser JavaScript syntax. The code/test head is the validated commit above.
+**Latest validated code/test commit:** `90b75a8db13defaf9e76084e2c8c8bd228d8f256` — corrected the oversized-corpus audit regression-test fixture.
+**Engine/Web CI:** [run #405](https://github.com/somildholakia/UnAi/actions/runs/42011170907) — **447 tests passed in 23.51s**; Docker sandbox image build, Python compileall, all six Termux shell syntax checks and Web production build passed.
+**Brain Worker CI:** [run #88](https://github.com/somildholakia/UnAi/actions/runs/42011170937) — Worker typecheck, D1 migration validation and browser JavaScript syntax passed.
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.
 
-### Current M4 coverage increment
+### M4 completion status
 
-- `measure_coverage: true` opts into a bounded statement/branch-arm report during the same source-hash-bound grounded Docker run. Trace content contains target line numbers, case IDs, target path and target SHA-256; no raw oracle arguments or outputs are added.
-- Planner bounds: 50,000 AST nodes, 5,000 target statement lines, 200 supported branch descriptions, 300 condition characters and 500 response missing-line entries. Trace is capped at 256 KiB and validated before use.
-- Coverage evidence is append-only and appears in proof bundles. A missing/unusable trace yields coverage `unavailable` and a proof risk without changing the grounded oracle verdict.
-- The container executes as the staging process UID/GID; the harness persists aggregate coverage after each measured invocation and at exit. Run #372 exercised this through the production Docker runner.
+- M4 roadmap implementation is complete: grounded oracles, property/exception contracts, bounded shrinking, supported async/function/method invocation, mutation verification, source-bound coverage measurement and read-only coverage-guided ranking are implemented.
+- Grounded checks remain tied to caller-supplied expected outputs and exact source hashes. Coverage ranks existing candidates only; it does not synthesize expected values or prove general correctness.
+- Supported target shapes and fail-closed boundaries remain as documented below and in `docs/VERIFICATION.md`.
 
-### Current coverage-guided probe ranking increment
+### M5 engineering-foundation status
 
-- `POST /api/tasks/{task_id}/coverage-guided-probes` consumes existing AST-probe and complete grounded-coverage evidence IDs. It verifies the current file hash, task ownership, file/symbol match and the coverage record's linked grounded execution.
-- It ranks existing candidates only for explicit if/else branches where a coverage arm remains unobserved. A bounded, side-effect-free AST evaluator predicts supported conditions; unsupported expressions remain `unknown`.
-- Results are append-only `kind=probe` evidence with `passed=null`, `executed=false` and `expected_outputs_inferred=false`. It requires `tasks:write` + `workspace:read` scopes and task-level `workspace_read`, not `workspace:execute`.
-- Candidate/expression/value bounds are 60 candidates, 16 expression levels, 8 JSON nesting levels, 128 container items, 10,000-character strings and 256-bit integers.
-- This is prioritization of existing unverified probes, not automatic input synthesis, fuzzing, oracle generation or proof of correctness.
+- Training corpus preparation now has a separate read-only preflight command: `python -m training.audit_corpus --input PATH`. It reports hashes, byte counts, aggregated eligibility/rejection counts and per-specialist split readiness without printing conversations, raw repository identifiers or provenance-source strings. It rejects inputs above 2 GiB and records above the existing 1 MiB JSONL-line limit.
+- Expanded sanitization covers additional provider credentials, cloud access-key IDs, webhook tokens, package/model-hosting tokens, bearer/JWT values, database connection URLs, PEM private-key blocks and signed URL query signatures. Regression tests assert whole-secret redaction.
+- M5 code infrastructure is complete: consent/license/verification-gated corpus preparation, repository-disjoint splits, read-only preflight, three role-specific LoRA/QLoRA trainers, manifest/provenance validation, matched held-out evaluation, statistical release gates and server-configured specialist routing.
+- The latest CI regression was a test-fixture issue: a mocked `Path.stat()` omitted `st_mode`, causing `Path.is_file()` to fail before the file-size check. The test now lowers the module limit with a tiny real file, preserving the actual production guard. Run #405 passed all 447 tests.
 
-**Next:** M4 now has bounded case-coverage measurement and read-only coverage-guided probe ranking. M5 adapter training is blocked on a real consented/licensed multi-repository trajectory corpus and suitable GPU compute; do not fabricate data or claim trained weights. Continue one checkpoint at a time and defer physical Android setup until software development is complete.
+### External inputs still required — not code-complete claims
+
+- No real consented/licensed multi-repository trajectory corpus has been supplied. Do not use private chats, private repositories or third-party data without explicit permission and compatible rights.
+- No specialist adapters have been trained; suitable GPU compute and retained, reproducible artifacts are still required.
+- No matched held-out comparison or physical Android RSS/PSS, TTFT, throughput, power or thermal report exists. Run these per adapter before promotion.
+- Cloudflare Brain remains a deployment scaffold until its D1 database, secrets, access policy and live URL are verified.
+- Do not merge PR #28 or modify `main` without explicit user instruction.
+
+**Next:** the M4/M5 software foundation is ready for real-data training and evaluation once the approved corpus and suitable compute are available. Continue with those external gates; do not fabricate training data, weights, benchmark scores or device measurements.
 
 ### Earlier M2 increment (historical)
 

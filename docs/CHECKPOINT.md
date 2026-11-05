@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 coverage-guided ranking of existing unverified probes implemented and CI-validated on code/test HEAD `4920622429f31dbed780f325efcbcb7f2bfdeae9`; 442 Engine tests passed, with Engine/Web and Brain Worker workflows green.
+**Checkpoint:** M4 implementation and M5 engineering infrastructure validated through read-only consented-corpus preflight and expanded credential redaction; code/test HEAD `90b75a8db13defaf9e76084e2c8c8bd228d8f256`; 447 Engine tests passed and both Engine/Web and Brain Worker workflows are green.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -20,6 +20,28 @@
 **M4 cumulative multi-argument shrinking merge commit:** 8c2ff696c33efd905374e6c11527465a5deff111
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
+
+## 2026-11-05 M5 corpus-preflight and credential-redaction checkpoint
+
+**Branch:** `feat/m4-instance-methods-m5-specialists`
+**M5 read-only corpus audit:** `c2ffb4ad40e801b21c1121d3ccc6e9e44c158bc9`
+**Expanded secret redaction:** `0a6800a312042c209464cbb07b793235de6bd277`
+**CI regression-test correction:** `90b75a8db13defaf9e76084e2c8c8bd228d8f256`
+**Engine/Web Actions run #405:** success — **447 tests passed in 23.51s**; disposable Docker sandbox image build, Python compileall, six Termux shell syntax checks and Vite production build passed.
+**Brain Worker Actions run #88:** success — Worker typecheck, D1 migration validation and browser JavaScript syntax passed.
+**Integration PR #28:** open and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Added `python -m training.audit_corpus --input PATH`, a read-only, metadata-only preflight before corpus preparation. It reports the input digest/byte count, aggregate eligible/rejected/duplicate counts and per-specialist distinct-group split readiness.
+- The audit omits conversation bodies, raw repository/project identifiers and provenance-source strings from its output. It enforces the 2 GiB input ceiling and the corpus preparer's 1 MiB per-record ceiling; readiness means only that a structural split is possible, not that the data is sufficiently large or that consent/license statements are independently authenticated.
+- Expanded secret scrubbing to provider-specific tokens, cloud access key IDs, webhook/package/model-hosting tokens, bearer/JWT forms, database connection strings, PEM private-key blocks and signed URL signatures. Added focused regression coverage for those forms.
+- Fixed the oversized-input audit test so it changes the audit module's limit with a tiny real file rather than mocking `Path.stat()` with an incomplete stat object. This tests the intended guard without depending on pathlib implementation details.
+
+### Remaining external gates
+
+No approved real-world training corpus, trained adapter artifacts, held-out model comparison or physical Android benchmark has been supplied or run. These are still release prerequisites, not missing code primitives. Keep all three specialists unrouted until their adapters are trained and validated; the server-side routes intentionally fail closed for missing models.
+
 
 ## 2026-11-05 M4 bounded coverage-measurement checkpoint
 
