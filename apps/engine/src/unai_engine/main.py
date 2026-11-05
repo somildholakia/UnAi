@@ -24,7 +24,8 @@ from unai_engine.models import (
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
     WorkspaceFileSnapshot, TaskProofResponse, ProbeRequest, ProbeResponse,
     TaskQualityCheckResponse, TaskCodeContextResponse, CodeContextSlice,
-    EvidenceRecord, GroundedMutationApprovalRequest,
+    EvidenceRecord, CoverageGuidedProbeRequest, CoverageGuidedProbeResponse,
+    GroundedMutationApprovalRequest,
     GroundedMutationResponse, GroundedTestApprovalRequest,
     GroundedTestResponse, TaskProofBundleResponse,
   )
@@ -41,6 +42,7 @@ from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 from unai_engine.verification.proof import summarize_proof
 from unai_engine.verification.mutation import MutationTestVerifier
 from unai_engine.verification.probes import BoundaryProbeGenerator, ProbeTargetError
+from unai_engine.verification.coverage_guided import CoverageGuidedProbePlanner, CoverageGuidanceError
 from unai_engine.verification.transparency import TransparencyCheckpointStore
 from unai_engine.verification.grounded import (
     GroundedTestVerifier,
@@ -400,6 +402,34 @@ def generate_task_probes(task_id: str, request: ProbeRequest, http_request: Requ
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ProbeTargetError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/tasks/{task_id}/coverage-guided-probes",
+    response_model=CoverageGuidedProbeResponse,
+)
+def generate_coverage_guided_probes(
+    task_id: str,
+    request: CoverageGuidedProbeRequest,
+    http_request: Request,
+) -> CoverageGuidedProbeResponse:
+    """Rank existing unverified probes against source-bound uncovered if/else arms."""
+    _require_scopes(http_request, "tasks:write", "workspace:read")
+    services = _tenant_services(http_request)
+    planner = CoverageGuidedProbePlanner(
+        services.evidence_ledger,
+        services.patch_manager,
+    )
+    try:
+        return planner.generate(task_id, request, services.workspace_root)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+    except PatchRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CoverageGuidanceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/tasks/{task_id}/grounded-tests", response_model=GroundedTestResponse)
