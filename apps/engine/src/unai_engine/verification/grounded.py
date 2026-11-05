@@ -498,7 +498,7 @@ def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
         function = matches[0]
         if not _has_only_typing_final(function.decorator_list, final_names, typing_names):
             raise GroundedVerificationError(
-                "Only an unambiguously imported typing.final identity decorator is supported on module functions."
+                "Decorated functions are not supported at module level unless they use an unambiguously imported typing.final identity decorator."
             )
         invocation_kind = "module_function"
         owner_name = None
@@ -530,7 +530,7 @@ def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
                 )
             if len(owner_path) > 1 and (owner.bases or owner.keywords):
                 raise GroundedVerificationError(
-                    "Nested-class targets require namespace classes without bases or metaclass keywords."
+                    "Nested-class targets require undecorated namespace classes without bases or metaclass keywords."
                 )
             namespace_body = owner.body
 
@@ -593,7 +593,7 @@ def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
                     )
                 ):
                     raise GroundedVerificationError(
-                        "Instance fixture __init__ must be synchronous, with self first, and undecorated or marked only with typing.final."
+                        "Instance fixture __init__ must be a synchronous, undecorated method (or marked only with typing.final) with self first."
                     )
             first_method_parameter = (
                 function.args.posonlyargs[0].arg
@@ -635,7 +635,7 @@ def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
             constructor = None
         else:
             raise GroundedVerificationError(
-                "Only undecorated instance methods, explicit @staticmethod/@classmethod, and the safe typing.final marker are supported."
+                "Only explicitly decorated @staticmethod/@classmethod methods, undecorated instance methods, and the safe typing.final marker are supported."
             )
 
         owner_name = ".".join(owner_path)
@@ -718,15 +718,16 @@ def _validate_signature_values(values: dict[str, Any], plan: dict[str, Any], lab
     allowed = declared | {name for name in (vararg_name, varkw_name) if name}
     unknown = set(values) - allowed
     if unknown:
+        qualifier = " constructor" if "constructor arguments" in label else ""
         raise GroundedVerificationError(
-            f"{label} contains unknown parameters: {', '.join(sorted(unknown))}."
+            f"{label} contains unknown{qualifier} parameters: {', '.join(sorted(unknown))}."
         )
     varargs = values.get(vararg_name, []) if vararg_name else []
     if type(varargs) is not list:
         raise GroundedVerificationError(
             f"{label} variadic parameter {vararg_name} must be a JSON list."
         )
-    extra_keywords = values.get(varkw_name, {{}}) if varkw_name else {{}}
+    extra_keywords = values.get(varkw_name, {}) if varkw_name else {}
     if type(extra_keywords) is not dict or any(type(key) is not str for key in extra_keywords):
         raise GroundedVerificationError(
             f"{label} variadic keyword parameter {varkw_name} must be a JSON object with string keys."
@@ -746,8 +747,9 @@ def _validate_signature_values(values: dict[str, Any], plan: dict[str, Any], lab
     extra_bound_names = set(extra_keywords) & (set(plan["poskw"]) | set(plan["kwonly"]))
     missing = required - set(values) - extra_bound_names
     if missing:
+        qualifier = " constructor" if "constructor arguments" in label else ""
         raise GroundedVerificationError(
-            f"{label} is missing required parameters: {', '.join(sorted(missing))}."
+            f"{label} is missing required{qualifier} parameters: {', '.join(sorted(missing))}."
         )
     if vararg_name and varargs:
         missing_positional = set(plan["posonly"] + plan["poskw"]) - set(values)
