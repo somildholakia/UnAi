@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 bounded coverage measurement implemented and Docker-backed CI-validated on code/test HEAD `e6af02a48fa03ace04627b9910c39f6c2bd57233`; 433 Engine tests passed, with Engine/Web and Brain Worker workflows green.
+**Checkpoint:** M4 coverage-guided ranking of existing unverified probes implemented and CI-validated on code/test HEAD `4920622429f31dbed780f325efcbcb7f2bfdeae9`; 442 Engine tests passed, with Engine/Web and Brain Worker workflows green.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -51,6 +51,36 @@
 Coverage measurement completes the pending M4 roadmap item. It does not implement automatic test generation, coverage-guided fuzzing, symbolic execution or universal branch semantics. Do not treat a high coverage ratio as proof of correctness; the supplied oracle and its provenance remain decisive.
 
 M5 model training remains blocked until a real consented/licensed multi-repository trajectory corpus and suitable GPU compute are available. No specialist weights or held-out evaluation are claimed. Physical Android setup and measurement remain deferred until the software roadmap is complete. Do not merge PR #28 or modify `main` without explicit permission.
+
+## 2026-11-05 M4 coverage-guided probe-ranking checkpoint
+
+**Repository:** https://github.com/somildholakia/UnAi
+**Branch:** `feat/m4-instance-methods-m5-specialists`
+**Validated code/test HEAD:** `4920622429f31dbed780f325efcbcb7f2bfdeae9`
+**Coverage-guided planner:** `8f831dd527153e720f4a256def3fdbacf17bd941`
+**Response schemas:** `69349514151c5240acf799a3baa1db1e5792d9f1`
+**API route:** `0cf27a483bd81974153cc1f8867e01178b203a26`
+**Focused tests/API tests:** `07d1d88c8e9b4e2f870fdd00280d8f69a72c24c4`, `f0b84486001ba4a69eb89bc0e22642b8b5f01268`
+**Evidence-binding hardening:** `11764c04958ec9db3197e48fdef4f499b14041c2`
+**Engine/Web Actions run #395:** success — [442 tests passed in 18.82s](https://github.com/somildholakia/UnAi/actions/runs/42009350095); the job built the Docker sandbox image, passed Python compileall, all six Termux shell syntax checks and the Web production build.
+**Brain Worker Actions run #78:** success — [Worker checks](https://github.com/somildholakia/UnAi/actions/runs/42009349905), including typecheck, D1 migration validation and browser JavaScript syntax.
+**Integration PR #28:** open, unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Added read-only `POST /api/tasks/{task_id}/coverage-guided-probes`. It consumes an existing AST-probe evidence ID and a complete grounded-coverage evidence ID, verifies both belong to the same task/file/symbol/source SHA-256, and requires the coverage event to link to the matching grounded execution evidence.
+- Ranks only existing unverified AST candidates against explicit if/else arms with unobserved coverage. It uses a bounded static expression evaluator for native JSON values, comparisons, boolean operations, arithmetic, conditional expressions and `len`; unsupported expressions are marked `unknown` rather than executed.
+- Returns the predicted arm, unobserved arms and a deterministic priority. The result is appended as `kind=probe`, `source=coverage-guided-probes`, with `passed=null`, `executed=false` and `expected_outputs_inferred=false`.
+- The endpoint requires `tasks:write` and `workspace:read` API scopes plus the task's `workspace_read` approval. It does not require `workspace:execute`, invoke Docker or import/run the target.
+- Bounds: 60 candidates, 16 expression levels, 8 nested JSON value levels, 128 container items, 10,000 characters per string, 256-bit integers and the existing 200-branch coverage-plan ceiling.
+- Regression tests cover ranking of an unobserved else arm, omission of already-covered arms, refusal to execute unsupported calls, stale source hashes, mismatched evidence, evidence append-only behavior and the API's no-execution path.
+- The first CI attempt exposed incorrectly escaped test-fixture source strings during test collection; those fixture literals were corrected before the passing run #395.
+
+### Boundaries and next step
+
+This is coverage-guided prioritization of existing unverified probes, not automatic test synthesis, fuzzing or a correctness proof. It does not produce expected outputs. Every suggestion still needs a caller-supplied oracle and separately approved grounded execution. Only explicit if/else branches with both arms represented by the coverage plan are currently ranked.
+
+M5 training remains blocked on an actual consented/licensed multi-repository trajectory corpus and suitable GPU compute. No specialist weights or held-out results are claimed. Do not merge PR #28 or modify `main` without explicit permission; defer Android setup until software work is complete.
 
 ## 2026-11-03 continuation checkpoint
 
