@@ -85,10 +85,20 @@ def test_audit_counts_duplicates_without_leaking_source_content(tmp_path):
     assert report["rejected_reasons"] == {}
 
 
-def test_audit_fails_closed_for_oversized_input(tmp_path):
-    source = tmp_path / "oversized.jsonl"
-    source.write_bytes(b"x" * (2 * 1024 * 1024 * 1024 + 1))
+def test_audit_fails_closed_for_oversized_input(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from pathlib import Path
 
+    source = tmp_path / "oversized.jsonl"
+    source.write_text("", encoding="utf-8")
+    original_stat = Path.stat
+
+    def fake_stat(path, *args, **kwargs):
+        if path == source:
+            return SimpleNamespace(st_size=2 * 1024 * 1024 * 1024 + 1)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
     try:
         audit(source)
     except ValueError as exc:
