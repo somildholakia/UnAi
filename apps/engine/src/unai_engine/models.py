@@ -305,6 +305,41 @@ class ProbeResponse(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class CoverageGuidedProbeRequest(BaseModel):
+    file_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
+    symbol_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
+    source_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    probe_evidence_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    coverage_evidence_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    limit: int = Field(default=24, ge=1, le=60)
+
+
+class CoverageGuidedProbeCandidate(BaseModel):
+    candidate_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    source_line: int = Field(ge=1)
+    parameter_values: dict[str, Any]
+    branch_id: Annotated[str, StringConstraints(pattern=r"^branch-[0-9]{3}$")]
+    branch_kind: Literal["if"] = "if"
+    predicted_arm: Literal["then", "else", "unknown"]
+    unobserved_arms: list[Literal["then", "else"]] = Field(min_length=1, max_length=2)
+    priority: int = Field(ge=1, le=100)
+    rationale: str = Field(max_length=300)
+    note: str = Field(max_length=300)
+
+
+class CoverageGuidedProbeResponse(BaseModel):
+    task_id: str
+    file_path: str
+    symbol_name: str
+    source_sha256: str
+    status: Literal["ranked", "no_uncovered_candidates"]
+    candidates: list[CoverageGuidedProbeCandidate] = Field(default_factory=list, max_length=60)
+    probe_evidence_id: str
+    coverage_evidence_id: str
+    evidence: EvidenceRecord
+    limitations: list[str] = Field(default_factory=list)
+
+
 class TaskProofResponse(BaseModel):
     task_id: str
     status: Literal[
