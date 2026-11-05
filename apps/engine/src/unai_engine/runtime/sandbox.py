@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -52,6 +53,11 @@ class DockerSandbox:
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
             "-v", f"{root}:/workspace:rw", "-w", "/workspace",
         ]
+        if os.name == "posix":
+            # Keep bind-mounted artifacts owned by the staging process, so the
+            # host-side runner can inspect and clean them after Docker exits.
+            args.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+
         if external_side_effect_fixture:
             # This is the only extra writable filesystem made available to the test.
             # It is ephemeral, bounded, non-executable and never backed by host data.
