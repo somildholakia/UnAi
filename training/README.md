@@ -245,3 +245,6 @@ The existing preference-data and DPO scripts remain an experimental second stage
 ## Current M5 status
 
 The consented-corpus preparation, repository-disjoint splitting, role-specific LoRA/QLoRA trainer, matched-result evaluator and physical-device release gate are implemented. The pinned Qwen3-1.7B default, sequential three-role launcher, checkpoint resume option and pre/post adapter held-out loss comparison are now part of the executable workflow. CI validation on `5143c42bd39c525bf0ac2ab5b24d58b0c1302968` passed 460 tests (Engine/Web run #423) and Brain Worker run #106. The built-in synthetic corpus remains a smoke-test dataset only. No GPU training run or specialist adapter artifact is claimed until a real CUDA execution produces a manifest and hashed adapter files; no physical Android benchmark has been run.
+
+
+Documentation handoff sync: the full checkpoint/continuity/roadmap refresh is at commit `dff355f7f3df6c4c92a761ff56e3c75b50709a4f`. This documentation-only follow-up does not change model weights or training results.
