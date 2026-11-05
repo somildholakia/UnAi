@@ -42,6 +42,16 @@ Read these in order before extending unAI:
 - Do not claim Android memory, speed, power or thermal targets are met until measured on physical hardware.
 - Update docs/CHECKPOINT.md and docs/ROADMAP.md after each meaningful milestone.
 
+## Current training-pipeline continuation — 2026-11-05
+
+- Continue on `feat/m4-instance-methods-m5-specialists`; do not merge PR #28 or modify `main` without explicit instruction.
+- First-party collection is now available through `python -m training.collect_synthetic`. Its deterministic output is suitable for pipeline smoke tests and bootstrap experiments, not as real-world performance evidence.
+- Run the documented collect → audit → prepare commands in `training/README.md`. Default collection is 720 synthetic examples across all three specialists; raw/prepared data is git-ignored.
+- New synthetic provenance carries source type, generator/version, rights basis and declared output license. New public imports require HTTPS source and license URLs plus an immutable revision. Do not ingest private chats or repositories without explicit authorization.
+- The audit remains metadata-only and bounded; it now reports source types in aggregate. Preparation still performs credential redaction, exact deduplication, deterministic repository-disjoint splits and manifest hashing.
+- CI must be checked for the newest pushed commit before declaring this increment validated. The generator's self-check is not independent code verification.
+- No adapters have been trained or released. Do not claim model-quality gains or Android metrics until the matched evaluation and physical-device release gates pass.
+
 ## Publisher trust-bundle mode
 
 An optional offline publisher trust snapshot is supported through
