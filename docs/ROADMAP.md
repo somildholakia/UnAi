@@ -77,6 +77,10 @@
 **M4 coverage-guided probe-ranking validation (2026-11-05):** validated code/test HEAD `4920622429f31dbed780f325efcbcb7f2bfdeae9`; Engine/Web Actions run #395 passed **442 tests in 18.82s**, including the new planner/API/evidence-boundary tests; Docker sandbox build, Python compileall, all six Termux shell syntax checks and the Web production build passed. Brain Worker run #78 passed Worker typecheck, D1 migration validation and browser JavaScript syntax. The first attempt (#391) found a syntax error in newly added API test fixture escaping; it was corrected before the passing run. See `docs/VERIFICATION.md` for exact evidence and no-execution limits.
 
 ## M5 — Specialist training
+- [x] Add deterministic first-party synthetic trajectory collection for next_action, planner and verifier, with contract self-checks, seed/version/license manifest and local-only output.
+- [x] Preserve explicit synthetic/public source metadata through corpus preparation; require HTTPS source and license evidence plus immutable revision for public imports, and generator/rights metadata for synthetic records.
+- [x] Report source classes in aggregate during read-only corpus audit without exposing raw source identifiers.
+- [x] Document and test the collect → audit → deterministic split workflow; keep generated corpora, adapters and reports out of Git.
 - [x] Add a read-only, metadata-only corpus preflight with a 2 GiB input ceiling, bounded JSONL record handling and no raw conversation/repository/provenance values in its report.
 - [x] Expand credential sanitization for provider tokens, cloud access-key IDs, bearer/JWT forms, database URLs, PEM private keys and signed URL signatures, with regression tests.
 - [x] Read raw corpus JSONL through a bounded line reader, drain oversized records without buffering full lines, and enforce the total input byte budget during streaming while hashing the consumed snapshot.
