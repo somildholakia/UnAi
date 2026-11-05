@@ -62,7 +62,7 @@ minimum; it is not automatically persisted.
 **Repository:** https://github.com/somildholakia/UnAi
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
 **Latest validated code/test commit:** `e6af02a48fa03ace04627b9910c39f6c2bd57233` — opt-in grounded coverage measurement and Docker trace-lifecycle fix.
-**Latest Engine/Web CI:** [run #372](https://github.com/somildholakia/UnAi/actions/runs/42006411694) — 433 tests passed in 17.19s, including Docker-backed coverage, compileall, six Termux shell syntax checks and Web production build. [Brain Worker run #55](https://github.com/somildholakia/UnAi/actions/runs/42006411841) passed.
+**Latest Engine/Web CI:** [run #378](https://github.com/somildholakia/UnAi/actions/runs/42007140164) — 433 tests passed in 23.74s on docs-updated code/test branch HEAD `8318d190b7403a6eac77773fa64bb1f9199e1838`, including Docker-backed coverage, compileall, six Termux shell syntax checks and Web production build. [Brain Worker run #61](https://github.com/somildholakia/UnAi/actions/runs/42007140229) passed. These checks include all code changes; later checkpoint/roadmap edits are documentation-only.
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.
 
