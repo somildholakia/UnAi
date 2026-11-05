@@ -36,6 +36,31 @@ Supported patterns remain intentionally narrow:
 
 Candidates contain the function name, source line, source condition, parameter assignments and a rationale. They remain passed=null and executed=false. The probe generator does not infer expected outputs.
 
+## 1A. Rank existing probes from coverage feedback
+
+The read-only coverage-guided ranking endpoint is:
+
+    POST /api/tasks/{task_id}/coverage-guided-probes
+
+Example request:
+
+    {
+      "file_path": "src/service.py",
+      "symbol_name": "clamp",
+      "source_sha256": "<current source SHA-256>",
+      "probe_evidence_id": "<evidence ID returned by /probes>",
+      "coverage_evidence_id": "<coverage_evidence.evidence_id from a grounded run>",
+      "limit": 24
+    }
+
+Use the exact resolved symbol name and source hash returned by probe generation and the grounded coverage report. The planner re-reads the current file, then requires both evidence IDs to belong to the same task and match the same file, symbol and source SHA-256. The coverage record must be complete and linked to the matching grounded execution event. Stale evidence is rejected; regenerate the probes and rerun grounded coverage after a source edit.
+
+The planner ranks only candidates from the supplied AST-probe evidence. It currently guides explicit if/else branches whose two arms are represented by the coverage plan. A bounded static evaluator predicts an arm only for a small safe expression subset (JSON values, comparisons, boolean operators, bounded arithmetic, conditional expressions and len of a supported native value). Unsupported expressions remain marked unknown. The response reports the predicted arm, currently unobserved arms and deterministic priority.
+
+This endpoint does not import or execute the target program, run Docker, infer expected outputs, or change any candidate's unverified status. It appends another passed=null probe evidence record containing the source/evidence links and ranked candidates. The caller must still inspect a suggestion, supply an explicit user/specification oracle and use the separately approved grounded-test endpoint before any execution verdict exists.
+
+Limits: at most 60 candidates, 16 levels of expression evaluation, 8 levels/128 items for candidate JSON values, 10,000 characters per string, 256-bit integers and the existing 200-branch coverage-plan ceiling. The endpoint requires API scopes tasks:write and workspace:read plus the task's explicit workspace_read permission; it does not require workspace:execute because no target code runs.
+
 ## 2. Attach an explicit oracle and execute a test
 
 The grounded test endpoint is:
