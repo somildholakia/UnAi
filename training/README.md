@@ -248,3 +248,12 @@ The consented-corpus preparation, repository-disjoint splitting, role-specific L
 
 
 Documentation handoff sync: the full checkpoint/continuity/roadmap refresh is at commit `dff355f7f3df6c4c92a761ff56e3c75b50709a4f`. This documentation-only follow-up does not change model weights or training results.
+
+
+## Actual training execution status — 2026-11-05
+
+The pinned model revision and license were checked. A live Colab attempt opened a blank notebook but could not reach a free GPU runtime: the current runtime-selection UI redirected to a Google Cloud deployment dialog. The local execution container has CPU-only PyTorch (`2.10.0+cpu`), no CUDA device and no `nvidia-smi`. No Kaggle session was available because the saved browser profile has no Kaggle sign-in.
+
+**No specialist training was started and no adapter artifacts or metrics exist.** Do not treat `--dry-run`, CI, base-model loading or the existing held-out-loss code as completion. The next operation must run `python -m training.train_specialists` on an actually connected free CUDA runtime and preserve the output root on persistent storage. Confirm `torch.cuda.is_available()` and record the GPU model/VRAM before the first training job.
+
+A compatible public-source candidate was identified: NVIDIA `SWE-Hero-openhands-trajectories` (34,269 trajectories, dataset card CC BY 4.0, with per-record repository SPDX licenses). It has not been downloaded, pinned to a full dataset commit SHA, mapped into specialist rows or used for training. Keep it out of the prepared corpus until attribution, immutable revision, row-level license, and successful execution evidence are retained. The included 720 synthetic records remain a pipeline smoke-test corpus only.
