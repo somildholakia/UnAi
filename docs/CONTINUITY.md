@@ -56,16 +56,16 @@ a public transparency log, certificate-chain validation or proof of legal
 identity. The rollback floor is only as strong as the operator's configured
 minimum; it is not automatically persisted.
 
-## Current resume point — authoritative handoff (2026-11-03)
+## Current resume point — authoritative handoff (2026-11-05)
 
-**Repository:** https://github.com/somildholakia/UnAi  
-**Active branch:** `feat/m4-instance-methods-m5-specialists`  
-**Latest code commit:** `f083452af8bd16ed8cbfec70fb1157e8b76f7084` — conservative static call and class-instantiation graph edges with schema migration.  
-**Latest code CI:** [run #264](https://github.com/somildholakia/UnAi/actions/runs/41674645703) — 311 tests passed in 7.50s; Python compileall passed.  
-**Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.  
-**Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.  
+**Repository:** https://github.com/somildholakia/UnAi
+**Active branch:** `feat/m4-instance-methods-m5-specialists`
+**Latest validated code commit:** `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc` — bounded mutation-based test-strength verification.
+**Latest code CI:** [run #366](https://github.com/somildholakia/UnAi/actions/runs/41999448683) — 421 tests passed in 20.42s; the Docker-backed mutation integration test, Python compileall, six Termux shell syntax checks and the Web production build passed. [Brain Worker run](https://github.com/somildholakia/UnAi/actions/runs/41999448612) also passed.
+**Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.
+**Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.
 
-### Latest M2 increment
+### Earlier M2 increment (historical)
 
 - Python AST file and symbol nodes now carry a SHA-256 computed from the exact byte snapshot decoded and parsed by the indexer.
 - Task inspection copies that source fingerprint into its persisted `symbol-retrieval` evidence.
@@ -600,3 +600,34 @@ The Engine CI workflow now builds `unai-python-test:latest` from `apps/engine/Do
 ### Next incomplete roadmap task
 
 M4 next: add coverage-guided and mutation-based verification only with explicit resource/sandbox policies. Do not start Android installation until remaining software roadmap items are complete. No specialist weights are claimed trained and no physical-device results are claimed.
+
+
+## Authoritative continuation handoff — M4 bounded mutation-based verification — 2026-11-05
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Branch:** `feat/m4-instance-methods-m5-specialists`
+- **Implementation commit:** `49825e84cfafe7dccdaaf043b3a828f6f350a755` — mutation planner, verifier, API route, evidence/proof-bundle integration and tests.
+- **Validated code/test HEAD:** `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc` — corrected the Docker integration fixture's oracle cases.
+- **Starting checkpoint:** `38c2b0b697f334d754ebf8fd573a4e7b6da0da09`
+- **Engine/Web Actions run #366:** success — https://github.com/somildholakia/UnAi/actions/runs/41999448683 — 421 tests passed in 20.42s; CI built the disposable Docker sandbox image and the Docker-backed mutation integration test passed; compileall, all six Termux shell syntax checks and the Web production build passed.
+- **Brain Worker Actions:** success — https://github.com/somildholakia/UnAi/actions/runs/41999448612.
+- **Initial run #365:** the new Docker fixture failed one assertion (420 passed, 1 failed) because its cases did not exercise the first two planned mutants, so both correctly survived. The fixture was corrected in `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc` and run #366 passed.
+- **PR #28:** open, mergeable and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Added `POST /api/tasks/{task_id}/mutation-tests` with an exact `run-grounded-mutation-tests` confirmation, separate from grounded execution. It requires the existing `workspace_read`/`run_tests` task permissions and `tasks:write`, `workspace:read`, `workspace:execute` scopes.
+- A deterministic planner applies one source token change inside the selected target body from a fixed allowlist: comparison swaps, `and`/`or`, `+`/`-`, `*`/`//`, and bool/int/float/string literal changes. Nested functions, lambdas, classes, chained comparisons, annotations and docstrings are excluded.
+- The ordinary grounded suite must pass first. Each mutant then runs through the same generated-pytest and disposable Docker staging path with a harness bound to the mutant SHA-256; pytest failure means killed, success means survived, and sandbox unavailability is not a verdict.
+- Per-mutant evidence is append-only under `source=grounded-mutation-sandbox`; summary evidence uses `kind=mutation`. Proof bundles expose `mutation_run_count`, `latest_mutation_summary`, `mutation_evidence` and a survivor risk.
+- Limits: 8 mutants and 9 Docker rounds (1 baseline + 8 mutants) per request, 2 source overrides and 300,000 bytes per override. Replay/filesystem property cases are rejected. Pinned specification artifacts are re-read before mutant rounds.
+
+### Boundaries
+
+- A mutation score is evidence about the supplied oracle cases and the fixed mutant set. It is not line coverage, a semantic proof or a complete test-quality metric. Equivalent mutants may survive.
+- The verifier does not infer expected outputs, does not mutate arbitrary files, and does not accept caller-supplied test commands.
+- No physical Android or hosted deployment validation is claimed by this checkpoint.
+
+### Next software task
+
+Add coverage-guided verification with deterministic fixed targets, explicit candidate/time/memory budgets and the same Docker/evidence boundaries. M5 remains blocked on an approved consented/licensed multi-repository corpus, GPU training and held-out evaluation. Physical Android/Termux setup and measurements remain deferred until all software roadmap work is complete. Do not merge PR #28 or modify `main` without explicit permission.

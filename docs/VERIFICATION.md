@@ -272,7 +272,7 @@ The local read-only task MCP server exposes task_get_proof_bundle for model-side
 - The test process executes the selected project's Python module. Docker isolation limits its access; it is not a formal sandbox certification.
 - The filtered workspace may omit dependencies, assets or environment state. These conditions can make a run unavailable or inconclusive.
 - Captured trace hashes/previews and workspace manifests are bounded diagnostic evidence, not a deterministic replay or a complete snapshot of external process state.
-- Counterexample shrinking is opt-in, heuristic and resource-bounded; it does not prove global minimality. Symbolic execution, coverage-guided fuzzing, mutation-based verification, independent model review and multi-language oracle execution are not implemented yet.
+- Counterexample shrinking is opt-in, heuristic and resource-bounded; it does not prove global minimality. Symbolic execution, coverage-guided fuzzing, independent model review and multi-language oracle execution are not implemented yet. Bounded mutation-based test-strength verification is implemented separately below; it is evidence about a fixed mutant set, not coverage or a correctness proof.
 
 The intended progression is evidence first: retain the source hash, oracle provenance, execution trace and unresolved assumptions rather than replacing them with a confidence score.
 
@@ -309,3 +309,66 @@ This component verifies cryptographic statements supplied to it. It does **not**
 - The new integration test runs a generated variadic oracle harness through the actual `IsolatedPythonTestRunner` and `DockerSandbox`, not only through a host subprocess/temporary workspace. The fixed command remains `python -m pytest -q`; the container runs network-disabled with read-only root, dropped capabilities, no-new-privileges, one CPU and 1 GB memory. Only the filtered disposable staging copy is mounted.
 - Python compileall, all six Termux shell syntax checks and Web production build passed. Brain Worker run #46 passed Worker typecheck, D1 migration smoke test and browser JS syntax (https://github.com/somildholakia/UnAi/actions/runs/41994458829).
 - This is CI/container validation, not Android/Termux device validation.
+
+## M4 mutation-based test-strength verification — bounded policy
+
+`POST /api/tasks/{task_id}/mutation-tests` accepts the same source-bound,
+explicit oracle cases as `/grounded-tests`, plus:
+
+- `confirm`: must be exactly `run-grounded-mutation-tests`.
+- `max_mutants`: 1–8; default 6.
+
+The request requires the same `workspace_read`/`run_tests` contract permissions
+and `tasks:write`, `workspace:read`, `workspace:execute` API scopes. The
+verifier first runs the ordinary grounded suite against the current source. If
+the baseline does not pass, no mutants execute and the response reports the
+baseline status instead of a mutation score.
+
+### Deterministic mutant planning
+
+Only a single token inside the selected function or method body is changed per
+mutant. The fixed allowlist covers:
+
+- comparison swaps (`<`/`<=`, `>`/`>=`, `==`/`!=`, `in`/`not in`, `is`/`is not`);
+- `and`/`or`;
+- `+`/`-` and `*`/`//`;
+- integer or finite-float literal `+1`, boolean negation and non-empty string
+  to `""`.
+
+Nested functions, lambdas, classes, annotations, docstrings and chained
+comparisons are not mutated. Candidates are ordered by source position,
+deduplicated by resulting source SHA-256, compile-checked and capped by
+`max_mutants`. At most 8 mutants and 9 sandbox rounds (one baseline plus up to
+eight mutants) run per request. Each round uses the existing disposable Docker
+staging copy and the fixed `python -m pytest -q` command; no caller-supplied
+command is accepted.
+
+### Kill semantics and evidence
+
+Before each mutant round the target file in the staging copy is replaced with
+exactly the planned mutant source, and a new harness is generated with that
+mutant's SHA-256 as its target fingerprint. A pytest exit failure counts as a
+killed mutant; exit success is a survivor; an unavailable sandbox or missing
+image is reported as unavailable rather than as a verdict.
+
+Per-mutant execution evidence uses `source=grounded-mutation-sandbox`, where
+`passed=true` means the mutant was killed. The append-only summary uses
+`kind=mutation`, `source=grounded-mutation-summary` and records the baseline
+evidence ID, mutant hashes, operator/line, counts and
+`mutation_score = killed / (killed + survived)`. Proof bundles expose
+`mutation_run_count`, `latest_mutation_summary`, `mutation_evidence` and a risk
+entry for surviving mutants.
+
+### Limitations
+
+A mutation score measures whether these supplied oracle cases distinguish this
+fixed set of source changes. It is not line coverage, a semantic proof or a
+complete test-quality metric. Equivalent mutants may survive. Replay-stability
+and filesystem-audit property cases are rejected because their failure does not
+identify a killed mutant. The baseline's reviewer/publisher attestations and
+pinned-artifact fingerprints are reused; pinned artifacts are re-read and
+checked before the mutant rounds, while other workspace files are re-staged for
+each round as in existing multi-round shrinking.
+
+
+**Validation (2026-11-05):** bounded mutation verification is validated on `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc`. Engine/Web run #366 passed 421 tests in 20.42s, including the Docker-backed mutation integration test; Brain Worker run 41999448612 passed. Locally, 419 tests passed with the two Docker-gated tests skipped, and Python compileall plus `git diff --check` passed.

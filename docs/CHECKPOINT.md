@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 safe Python decorator and signature expansion implemented and Docker-backed CI-validated on `38c2b0b697f334d754ebf8fd573a4e7b6da0da09`; 400 tests and all Engine/Web/Brain Worker checks passed.
+**Checkpoint:** M4 bounded mutation-based test-strength verification implemented and Docker-backed CI-validated on `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc`; 421 tests and all Engine/Web/Brain Worker checks passed.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -824,3 +824,37 @@ Continue M4 with broader recursive shrinking only where each type has its own co
 ### Next incomplete M4 roadmap task
 
 Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies. Keep physical Android/Termux setup deferred until software roadmap work is complete.
+
+
+## 2026-11-05 M4 bounded mutation-based test-strength verification — CI validated
+
+**Repository:** https://github.com/somildholakia/UnAi
+**Branch:** `feat/m4-instance-methods-m5-specialists`
+**Implementation commit:** `49825e84cfafe7dccdaaf043b3a828f6f350a755` — mutation planner, verifier, API route, evidence/proof-bundle integration and tests.
+**Validated code/test HEAD:** `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc` — corrected the Docker integration fixture's oracle cases.
+**Starting checkpoint:** `38c2b0b697f334d754ebf8fd573a4e7b6da0da09`
+**PR #28:** open, mergeable, unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Added `POST /api/tasks/{task_id}/mutation-tests`, separate from grounded tests, requiring the exact `run-grounded-mutation-tests` confirmation plus the existing task permissions and API scopes.
+- Added a deterministic planner for one-token mutants inside the selected function or method body: comparison, boolean, arithmetic and bool/int/float/string literal changes. Candidates are ordered by source position, deduplicated by resulting source SHA-256, compile-checked and capped.
+- The verifier runs the ordinary grounded suite as a baseline first. If the baseline does not pass, no mutants run. A pytest failure against a mutant is a kill; exit success is a survivor; sandbox unavailability is reported as unavailable.
+- Each mutant is written only into the disposable Docker staging copy and bound to a regenerated harness with that mutant's source SHA-256. No caller-supplied command or path is accepted, and source overrides are restricted to the new mutation evidence source.
+- Added append-only per-mutant evidence (`source=grounded-mutation-sandbox`) and a summary record (`kind=mutation`). Proof bundles expose `mutation_run_count`, `latest_mutation_summary`, `mutation_evidence` and a survivor risk.
+- Budgets: at most 8 mutants and 9 Docker rounds per request (1 baseline + 8 mutants); 2 override files and 300,000 bytes per override. Non-deterministic replay/filesystem property cases are rejected, and pinned specification artifacts are re-read before mutant rounds.
+- Added 21 mutation tests covering planning, runner override boundaries, baseline failure, kills/survivors/unavailable, stale source/artifact rejection, proof-bundle exposure and API confirmation.
+
+### Validation
+
+- Local: `pytest -q tests/test_mutation.py` -> **20 passed, 1 skipped** (Docker unavailable locally); full suite -> **419 passed, 2 skipped**; Python `compileall` and `git diff --check` passed.
+- **Engine/Web Actions run #366:** success — https://github.com/somildholakia/UnAi/actions/runs/41999448683. **421 tests passed in 20.42s**; CI built `unai-python-test:latest` and executed the Docker-backed mutation integration test. Python compileall, all six Termux shell syntax checks and the Web production build passed.
+- **Brain Worker Actions:** success — https://github.com/somildholakia/UnAi/actions/runs/41999448612. Worker checks, D1 migration/legacy tenant smoke test and browser JavaScript syntax passed.
+- **Initial mutation run #365 failed one fixture assertion (420 passed, 1 failed):** the Docker test's supplied cases did not exercise the first two planned mutants, so both correctly survived. The fixture now includes the zero boundary case and asserts two kills with `mutation_score == 1.0`; run #366 passed on the corrected HEAD.
+
+### Limits and next task
+
+- Mutation scores cover only the selected target body, the fixed mutation allowlist and the supplied oracle cases. They are not line coverage, semantic correctness or a complete test-quality metric; equivalent mutants may survive.
+- Nested functions, lambdas, classes, chained comparisons, annotations and docstrings are not mutated.
+- **Next incomplete M4 task:** add coverage-guided verification with deterministic fixed targets, explicit candidate/time/memory budgets and the same sandbox/evidence boundaries.
+- M5 still needs an approved consented/licensed multi-repository corpus and GPU training; no specialist weights, held-out model results or physical Android measurements are claimed. Keep Android setup deferred until the software roadmap is complete.
