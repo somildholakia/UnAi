@@ -52,6 +52,8 @@ A mismatching return value is recorded as a counterexample against the supplied 
 
 Optional `measure_coverage: true` on the grounded-test request adds a bounded statement-line and supported branch-arm report from those same supplied cases. It binds the trace to the target source hash, adds append-only coverage evidence and exposes uncovered lines/arms as proof-bundle risks. A missing trace never changes the oracle verdict. This is case-coverage measurement, not automatic input generation or coverage-guided fuzzing.
 
+The read-only `POST /api/tasks/{task_id}/coverage-guided-probes` endpoint can then rank existing unverified AST probes against measured uncovered if/else arms. It requires the exact probe and coverage evidence IDs plus the same target source hash; its bounded static evaluator never imports/runs the target, invents oracle outputs, or marks a candidate verified. Suggestions still require caller-supplied expected outputs and a separately approved grounded run.
+
 The bounded mutation endpoint `POST /api/tasks/{task_id}/mutation-tests` measures whether those oracle cases detect small source changes. It requires the exact `run-grounded-mutation-tests` confirmation, runs a passing grounded baseline first, then executes at most eight deterministic single-token mutants in the same disposable Docker staging copy. Per-mutant and summary evidence are append-only. A high mutation score is evidence about those specific test cases and mutants, not coverage or proof of correctness.
 
 ## Repository code graph — Python AST prototype
