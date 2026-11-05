@@ -1319,6 +1319,9 @@ def _coverage_invoke(case, arguments=None):
         current = _COVERAGE_CURRENT_LINES or set()
         _COVERAGE_CURRENT_LINES = None
         _record_case_coverage(case, current)
+        # Persist after each measured invocation so interpreter shutdown cannot
+        # discard the only trace if the sandbox is interrupted.
+        _write_coverage_trace_file()
 
 
 def _coverage_async_invoke(case, arguments=None):
@@ -1335,6 +1338,7 @@ def _coverage_async_invoke(case, arguments=None):
         current = _COVERAGE_CURRENT_LINES or set()
         _COVERAGE_CURRENT_LINES = None
         _record_case_coverage(case, current)
+        _write_coverage_trace_file()
 
 
 _CASE_INVOCATION_KIND = {invocation_kind!r}
@@ -1634,7 +1638,7 @@ def _write_coverage_trace_file():
             _COVERAGE_TRACE_PATH.name,
             os.O_WRONLY
             | os.O_CREAT
-            | os.O_EXCL
+            | os.O_TRUNC
             | getattr(os, "O_NOFOLLOW", 0),
             0o600,
             dir_fd=_COVERAGE_TRACE_DIRECTORY_FD,
