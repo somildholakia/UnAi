@@ -194,3 +194,25 @@ def test_prepare_validates_all_specialists_before_replacing_existing_outputs(tmp
         if path.is_file()
     }
     assert after == before
+
+
+
+def test_prepare_rejects_oversized_record_while_preserving_exact_input_digest(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("training.prepare_corpus._MAX_LINE_BYTES", 1024)
+    rows = [
+        _record(role, group, f"{role}-{group}")
+        for role in SPECIALISTS
+        for group in ("repo-one", "repo-two")
+    ]
+    oversized = b"x" * 4096 + b"\\n"
+    valid_payload = "".join(json.dumps(row) + "\\n" for row in rows).encode("utf-8")
+    source = tmp_path / "raw.jsonl"
+    payload = oversized + valid_payload
+    source.write_bytes(payload)
+
+    manifest = prepare(source, tmp_path / "prepared")
+
+    assert manifest["accepted_records"] == len(rows)
+    assert manifest["rejected_records"] == 1
+    assert manifest["source_file_bytes"] == len(payload)
+    assert manifest["source_file_sha256"] == hashlib.sha256(payload).hexdigest()

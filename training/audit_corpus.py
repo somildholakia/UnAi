@@ -17,10 +17,9 @@ from training.prepare_corpus import (
     _provenance,
     _validated_messages,
     _verified,
-    _MAX_LINE_BYTES,
+    _MAX_INPUT_BYTES,
+    _read_bounded_jsonl_line,
 )
-
-_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def audit(source: Path) -> dict[str, Any]:
@@ -45,17 +44,26 @@ def audit(source: Path) -> dict[str, Any]:
     groups: dict[str, set[str]] = {role: set() for role in SPECIALISTS}
     seen: set[str] = set()
 
+    source_bytes = 0
     with source.open("rb") as handle:
-        for raw_line in handle:
-            digest.update(raw_line)
-            if not raw_line.strip():
+        while True:
+            raw_line, oversized, record_bytes, has_content = _read_bounded_jsonl_line(
+                handle, digest
+            )
+            if raw_line is None and not oversized:
+                break
+            source_bytes += record_bytes
+            if source_bytes > _MAX_INPUT_BYTES:
+                raise ValueError("Corpus input exceeds the 2 GiB audit limit.")
+            if not has_content:
                 continue
             counts["input_records"] += 1
             reason = None
-            if len(raw_line) > _MAX_LINE_BYTES:
+            if oversized:
                 counts["oversized_records"] += 1
                 reason = "oversized_line"
             else:
+                assert raw_line is not None
                 try:
                     row = json.loads(raw_line.decode("utf-8"))
                     if not isinstance(row, dict):
@@ -113,7 +121,7 @@ def audit(source: Path) -> dict[str, Any]:
     return {
         "schema": "unai.specialist-corpus-audit.v1",
         "source_file_sha256": digest.hexdigest(),
-        "source_file_bytes": source.stat().st_size,
+        "source_file_bytes": source_bytes,
         **counts,
         "rejected_reasons": dict(sorted(rejected_reasons.items())),
         "specialists": per_specialist,

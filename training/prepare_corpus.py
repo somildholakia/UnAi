@@ -20,6 +20,33 @@ _MAX_LINE_BYTES = 1_000_000
 _MAX_MESSAGES = 100
 _MAX_MESSAGE_CHARS = 100_000
 
+_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _read_bounded_jsonl_line(handle, digest):
+    """Read one JSONL record without ever buffering more than one bounded chunk."""
+    first = handle.readline(_MAX_LINE_BYTES + 1)
+    if not first:
+        return None, False, 0, False
+
+    digest.update(first)
+    total_bytes = len(first)
+    has_content = bool(first.strip())
+    oversized = len(first) > _MAX_LINE_BYTES
+    chunk = first
+
+    # Once a record is known to be too large, drain it in bounded chunks without
+    # retaining its contents. Every byte is still included in the source digest.
+    while oversized and chunk and not chunk.endswith(b"\\n"):
+        chunk = handle.readline(_MAX_LINE_BYTES + 1)
+        if not chunk:
+            break
+        digest.update(chunk)
+        total_bytes += len(chunk)
+        has_content = has_content or bool(chunk.strip())
+
+    return (None if oversized else first), oversized, total_bytes, has_content
+
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -131,6 +158,8 @@ def prepare(
         raise ValueError("eval_fraction must be between 0.05 and 0.5.")
     if not source.is_file():
         raise FileNotFoundError(source)
+    if source.stat().st_size > _MAX_INPUT_BYTES:
+        raise ValueError("Corpus input exceeds the 2 GiB preparation limit.")
 
     counts = {
         "input": 0,
@@ -145,15 +174,22 @@ def prepare(
     source_bytes = 0
 
     with source.open("rb") as handle:
-        for raw_line in handle:
-            source_digest.update(raw_line)
-            source_bytes += len(raw_line)
-            if not raw_line.strip():
+        while True:
+            raw_line, oversized, record_bytes, has_content = _read_bounded_jsonl_line(
+                handle, source_digest
+            )
+            if raw_line is None and not oversized:
+                break
+            source_bytes += record_bytes
+            if source_bytes > _MAX_INPUT_BYTES:
+                raise ValueError("Corpus input exceeds the 2 GiB preparation limit.")
+            if not has_content:
                 continue
             counts["input"] += 1
-            if len(raw_line) > _MAX_LINE_BYTES:
+            if oversized:
                 counts["rejected"] += 1
                 continue
+            assert raw_line is not None
             try:
                 row = json.loads(raw_line.decode("utf-8"))
                 if not isinstance(row, dict):

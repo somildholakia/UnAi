@@ -98,3 +98,22 @@ def test_audit_fails_closed_for_oversized_input(tmp_path, monkeypatch):
         assert "2 GiB" in str(exc)
     else:
         raise AssertionError("oversized corpus should be rejected")
+
+
+
+def test_audit_drains_oversized_lines_in_bounded_chunks_and_hashes_all_bytes(tmp_path, monkeypatch):
+    import hashlib
+    import training.prepare_corpus as corpus
+
+    monkeypatch.setattr(corpus, "_MAX_LINE_BYTES", 32)
+    source = tmp_path / "long-line.jsonl"
+    payload = b"x" * 100 + b"\\n"
+    source.write_bytes(payload)
+
+    report = audit(source)
+
+    assert report["input_records"] == 1
+    assert report["oversized_records"] == 1
+    assert report["rejected_records"] == 1
+    assert report["source_file_bytes"] == len(payload)
+    assert report["source_file_sha256"] == hashlib.sha256(payload).hexdigest()
