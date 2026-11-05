@@ -100,7 +100,11 @@ The preparation command:
 
 Do not train if the manifest reports too few groups or examples. One task split into multiple messages is not independent evidence.
 
-## 3. Train each adapter separately
+## 3. Select the base model
+
+The default pinned base is `Qwen/Qwen3-1.7B` at immutable revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`, declared Apache-2.0 by the publisher. It is a practical starting point for a shared compact base: 1.7B parameters, Transformers chat-template support, LoRA/QLoRA compatibility and post-training GGUF quantization options. It is not claimed to be the strongest model overall. Preserve the exact revision and license with every adapter. The model config lives in `training/model_config.json`; update it only after checking the publisher card and license.
+
+## 4. Train each adapter separately
 
 Install from the repository root:
 
@@ -112,7 +116,16 @@ pip install -e "./apps/engine[train]"
 
 QLoRA requires supported CUDA hardware and bitsandbytes. LoRA can use supported hardware, but CPU-only training may be impractical. Training never runs from the Engine API or on the Android phone.
 
-Example for the next-action adapter:
+The orchestrator below validates all six split files and the corpus manifest, then runs one role at a time with a separate output directory. This is the recommended entry point on a free Colab/Kaggle GPU session or another compatible CUDA host:
+
+```bash
+python -m training.train_specialists --dry-run
+python -m training.train_specialists
+```
+
+The default is QLoRA 4-bit NF4, one sample per device, gradient accumulation 16, rank 16, two epochs and a fixed seed. To continue after a notebook/session disconnect, keep the `artifacts/` directory and run `python -m training.train_specialists --resume`. The trainer writes regular epoch checkpoints and the orchestrator never runs two specialists concurrently. Free GPU availability and session duration are provider-controlled; no paid API or GPU is assumed.
+
+Example for an individual next-action adapter:
 
 ```bash
 python training/train_lora.py \
@@ -129,7 +142,7 @@ Repeat with `--specialist planner` and `--specialist verifier`, pointing to thei
 
 A LoRA adapter is not a standalone model. Retain the exact compatible base-model revision and its license.
 
-## 4. Compare matched held-out results
+## 5. Compare matched held-out results
 
 The evaluation harness consumes one JSONL row per system and held-out case. For every `suite_id + case_id + specialist`, provide results for all three systems:
 
@@ -169,7 +182,7 @@ python training/evaluate_results.py \
 
 The report includes verified success rates, paired improvements/regressions, latency and token summaries, plus an exact two-sided McNemar test on discordant paired outcomes. The release floor is 30 matched held-out cases and significance alpha is capped at 0.05. An adapter must improve the matched verified success rate, have zero base-pass/adapter-fail regressions, and pass the exact paired test; a tiny sample can show a descriptive gain but cannot pass the release gate. The evaluator stores the case-content hashes and the release gate recomputes p-values from paired counts instead of trusting a reported boolean. This is a measurement on the supplied held-out set, not proof of general capability.
 
-## 5. Physical-device release gate
+## 6. Physical-device release gate
 
 The evaluation report alone cannot approve a mobile release. Provide a separate instrumented physical-device measurement JSON using schema `unai.mobile-benchmark.v1`:
 
@@ -205,7 +218,7 @@ python training/release_gate.py \
 
 A missing mobile measurement, a failed performance comparison, any regression, a hash mismatch, an out-of-budget measurement or thermal throttling blocks release. Do not edit a release decision manually to mark an adapter ready.
 
-## 6. Serve and route the three specialists
+## 7. Serve and route the three specialists
 
 The Engine can route a request to a separately served OpenAI-compatible adapter model. Configure only model IDs that your local inference server actually exposes:
 
@@ -225,10 +238,10 @@ POST /api/specialists/verifier/chat
 
 Each request accepts `message` and optional user/assistant `history`; the response identifies the selected specialist and configured model ID. The API inherits the Engine bearer-token/loopback perimeter. If a specialist model is missing, the endpoint returns HTTP 503 and does not silently use the base model. This is model routing, not proof that a specialist adapter has been trained or released.
 
-## 7. DPO is optional and later
+## 8. DPO is optional and later
 
 The existing preference-data and DPO scripts remain an experimental second stage. Use them only after a stable SFT baseline and only with chosen/rejected answers whose outcomes have been independently verified. A failed answer is not automatically a useful negative example.
 
 ## Current M5 status
 
-The consented-corpus preparation, repository-disjoint splitting, role-specific LoRA/QLoRA trainer, matched-result evaluator and physical-device release gate are implemented. No user-provided corpus has been supplied, no specialist adapter has been trained, and no physical Android benchmark has been run. M5 is therefore training-ready infrastructure, not a completed training or performance milestone.
+The consented-corpus preparation, repository-disjoint splitting, role-specific LoRA/QLoRA trainer, matched-result evaluator and physical-device release gate are implemented. The pinned Qwen3-1.7B default, sequential three-role launcher, checkpoint resume option and pre/post adapter held-out loss comparison are now part of the executable workflow. The built-in synthetic corpus remains a smoke-test dataset only. No GPU training run or specialist adapter artifact is claimed until a real CUDA execution produces a manifest and hashed adapter files; no physical Android benchmark has been run.

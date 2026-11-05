@@ -1,6 +1,21 @@
 # Development checkpoint
 
-**Checkpoint:** M4 complete; M5 dataset collection, provenance validation, audit and preparation increment validated; code/test commit `cdc52327e1ec8008f5b6aea626fdf80084c32a37`; validated branch HEAD `77f5261fd4ea5f93f39e7d929a3b2886191a2104`; Engine/Web run #420 passed 456 tests and Brain Worker run #103 passed.
+## Current active specialist-training checkpoint (2026-11-05)
+
+**Branch HEAD at start:** ` + "`6caa5ff7313c5c1e3c1f9c52b5576146243fce42`" + ` (verified against PR #28). PR #28 remains open/unmerged and ` + "`main`" + ` is unchanged.
+
+**CI at starting HEAD:** Engine/Web run #421 passed; Brain Worker run #104 passed. Engine job included the test suite, Python compileall, Docker sandbox build, six Termux shell syntax checks and Web production build. Worker job included typecheck, D1 migration validation and browser JavaScript syntax.
+
+**Training implementation:** pinned Qwen3-1.7B Apache-2.0 base revision; sequential three-specialist orchestrator; dry-run command generation; checkpoint resume; base-versus-adapter held-out loss recording; exact loaded corpus digest propagation; focused orchestration tests.
+
+**Training execution status:** no GPU was available in this environment, so no actual adapter artifacts, training metrics or specialist-quality gains are claimed. Run the documented pipeline on a compatible free CUDA session. The 720-row synthetic corpus is only a bootstrap/smoke-test corpus, not sufficient evidence of model quality.
+
+**Next:** run a GPU smoke training for all three roles; then supply a diverse independently verified held-out corpus and execute the matched task-level evaluation. Physical Android measurements remain a later release gate.
+
+---
+
+
+**Checkpoint:** M4 complete; M5 dataset collection/preparation and specialist training implementation incremented; actual GPU training and quality release gates remain open.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists

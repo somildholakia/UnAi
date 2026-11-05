@@ -92,9 +92,11 @@
 - [x] Add a matched held-out evaluator for base, specialist-adapter and tool-augmented outcomes, requiring the exact prompt/acceptance contract and recomputing its canonical SHA-256, rejecting unavailable runs, reporting paired regressions and exact two-sided McNemar significance (minimum 30 held-out cases, alpha no higher than 0.05).
 - [x] Add a release gate that independently recomputes exact paired significance and sample thresholds, requires a verified success-rate gain with zero regressions, verifies evaluation input digests, and requires a matching physical-device memory/TTFT/throughput/thermal report.
 - [x] Add server-configured OpenAI-compatible runtime routing for the three named specialists; unavailable roles fail closed instead of falling back to the base model.
+- [x] Pin a practical Apache-2.0 base-model revision and add a sequential three-specialist launcher with dry-run, separate outputs and checkpoint resume.
+- [x] Record base-model held-out loss before adapter training and adapter held-out loss after training; retain exact corpus snapshot hashes in the artifact manifest.
 - [ ] Collect a real, consented/licensed multi-repository trajectory corpus; none has been supplied to this repository.
-- [ ] Train all three specialist adapters on suitable GPU hardware and retain reproducible artifacts.
-- [ ] Run the held-out comparison and physical Android measurements for each adapter.
+- [ ] Execute all three specialist training jobs on suitable GPU hardware and retain reproducible adapter artifacts/manifests. The code path is implemented; no GPU run has been completed yet.
+- [ ] Run independently verified, matched held-out task comparisons (base vs adapter vs tool-augmented) and physical Android measurements for each adapter.
 - [ ] Package/promote only adapters that pass both gates. No weights have been trained or released.
 
 ## M6 — Mobile and deployment validation

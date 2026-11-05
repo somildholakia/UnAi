@@ -268,6 +268,7 @@ def main() -> None:
     parser.add_argument("--grad-accum", type=int, default=16)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--resume-from-checkpoint", nargs="?", const="latest", default=None, help="Resume from a checkpoint path, or the latest checkpoint in output-dir.")
     parser.add_argument(
         "--target-modules",
         default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj",
@@ -437,8 +438,15 @@ def main() -> None:
         eval_dataset=Dataset.from_list(encoded_eval),
         data_collator=collate,
     )
-    train_result = trainer.train()
-    eval_metrics = trainer.evaluate()
+    # Evaluate the untouched base model on the exact held-out rows before training.
+    # PEFT exposes a scoped adapter-disable context, avoiding a second full model load.
+    with model.disable_adapter():
+        base_eval_metrics = trainer.evaluate(metric_key_prefix="base_eval")
+    resume_checkpoint = args.resume_from_checkpoint
+    if resume_checkpoint == "latest":
+        resume_checkpoint = True
+    train_result = trainer.train(resume_from_checkpoint=resume_checkpoint)
+    eval_metrics = trainer.evaluate(metric_key_prefix="adapter_eval")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     trainer.save_model(str(args.output_dir))
     tokenizer.save_pretrained(args.output_dir)
@@ -475,8 +483,9 @@ def main() -> None:
         "eval_record_ids_sha256": hashlib.sha256(
             "\n".join(sorted(eval_ids)).encode("utf-8")
         ).hexdigest(),
-        "train_file_sha256": sha256_file(args.train_file),
-        "eval_file_sha256": sha256_file(args.eval_file),
+        "train_file_sha256": train_file_sha256,
+        "eval_file_sha256": eval_file_sha256,
+        "base_eval_metrics": base_eval_metrics,
         "train_metrics": train_result.metrics,
         "eval_metrics": eval_metrics,
         "library_versions": {

@@ -52,6 +52,19 @@ Read these in order before extending unAI:
 - Validated branch HEAD: `77f5261fd4ea5f93f39e7d929a3b2886191a2104`; Engine/Web run #420 passed 456 tests, Docker sandbox build, compileall, six Termux shell syntax checks and Web build; Brain Worker run #103 passed typecheck, D1 migration validation and browser JavaScript syntax. The generator's self-check is not independent code verification.
 - No adapters have been trained or released; this checkpoint completes collection, validation, filtering and preparation infrastructure, not model training. Do not claim model-quality gains or Android metrics until the matched evaluation and physical-device release gates pass.
 
+
+
+## 2026-11-05 specialist training execution checkpoint
+
+- Verified live branch HEAD and PR #28 against GitHub: branch `feat/m4-instance-methods-m5-specialists` at `6caa5ff7313c5c1e3c1f9c52b5576146243fce42`; PR #28 remains open and unmerged; `main` remains unchanged.
+- Verified Engine/Web Actions run #421 and Brain Worker run #104 both completed successfully on that HEAD. Engine tests, Python compilation, Docker sandbox build, Termux shell syntax checks and Web production build passed; Worker typecheck, D1 migration validation and browser JS syntax passed.
+- Added a pinned default base model: `Qwen/Qwen3-1.7B`, Apache-2.0, immutable revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`. The 1.7B model is a practical compact starting point, not a claim of frontier-model capability.
+- Added `training/train_specialists.py` to validate the prepared corpus and run next_action, planner and verifier jobs sequentially with distinct output directories; added a dry-run and resume workflow.
+- Added Trainer checkpoint resume support, held-out base-model loss before fine-tuning and adapter held-out loss after fine-tuning. The exact parsed dataset snapshot hashes are now reused in the adapter manifest.
+- Added tests for model pinning, config validation, role-specific command construction and resume flags.
+- Synthetic data remains explicitly smoke-test-only. It cannot establish real-world specialist quality. A free GPU session was not available from this execution environment; no adapter weights or training metrics are claimed. The GPU run must be performed on a compatible free Colab/Kaggle session or other CUDA host, and the generated manifests/artifacts must be retained for honest evaluation.
+- Android 8 GB remains an inference target only. Quantized packaging and actual RSS/TTFT/throughput/thermal measurements remain release gates.
+
 ## Publisher trust-bundle mode
 
 An optional offline publisher trust snapshot is supported through
@@ -68,6 +81,8 @@ identity. The rollback floor is only as strong as the operator's configured
 minimum; it is not automatically persisted.
 
 ## Current resume point — authoritative handoff (2026-11-05)
+
+**Specialist training implementation update:** see the 2026-11-05 specialist training execution checkpoint above. The next required external action is an actual CUDA run of all three roles using `python -m training.train_specialists`; no trained weights are claimed.
 
 **Repository:** https://github.com/somildholakia/UnAi
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
