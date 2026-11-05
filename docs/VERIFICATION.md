@@ -299,3 +299,13 @@ This component verifies cryptographic statements supplied to it. It does **not**
 - Brain Worker run #44 passed Worker typecheck, D1 migration/legacy tenant smoke test and browser JavaScript syntax (https://github.com/somildholakia/UnAi/actions/runs/41993901745).
 - Regression coverage executes generated harnesses from temporary staged workspace copies. This record does not claim a separate live Docker-container integration test or Android execution.
 - Unsupported decorators, ambiguous import bindings, decorator calls, shadowed built-ins, positional-only default holes, malformed variadic containers, duplicate explicit keywords, variadic probes and variadic shrinking remain fail-closed.
+
+
+## Docker-backed generated-harness validation — 2026-11-05
+
+**Validated code/test commit:** `38c2b0b697f334d754ebf8fd573a4e7b6da0da09` on `feat/m4-instance-methods-m5-specialists`.
+
+- Engine/Web Actions run #363 passed **400 tests in 20.88s** and built the repository's `unai-python-test:latest` image from `apps/engine/Dockerfile.sandbox` before test execution (https://github.com/somildholakia/UnAi/actions/runs/41994458856).
+- The new integration test runs a generated variadic oracle harness through the actual `IsolatedPythonTestRunner` and `DockerSandbox`, not only through a host subprocess/temporary workspace. The fixed command remains `python -m pytest -q`; the container runs network-disabled with read-only root, dropped capabilities, no-new-privileges, one CPU and 1 GB memory. Only the filtered disposable staging copy is mounted.
+- Python compileall, all six Termux shell syntax checks and Web production build passed. Brain Worker run #46 passed Worker typecheck, D1 migration smoke test and browser JS syntax (https://github.com/somildholakia/UnAi/actions/runs/41994458829).
+- This is CI/container validation, not Android/Termux device validation.

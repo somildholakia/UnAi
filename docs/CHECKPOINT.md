@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 safe Python decorator and signature expansion implemented and CI-validated on `8ae33e2fa3d1257a9053428cf4602df632a23b5b`; 399 tests and all Engine/Web/Brain Worker checks passed.
+**Checkpoint:** M4 safe Python decorator and signature expansion implemented and Docker-backed CI-validated on `38c2b0b697f334d754ebf8fd573a4e7b6da0da09`; 400 tests and all Engine/Web/Brain Worker checks passed.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -802,7 +802,7 @@ Continue M4 with broader recursive shrinking only where each type has its own co
 
 - **Repository:** https://github.com/somildholakia/UnAi
 - **Branch:** `feat/m4-instance-methods-m5-specialists`
-- **Validated HEAD:** `8ae33e2fa3d1257a9053428cf4602df632a23b5b`
+- **Validated code/test HEAD:** `38c2b0b697f334d754ebf8fd573a4e7b6da0da09`
 - **Starting checkpoint:** `a04a9a848c224ff0826a2f9ecd9805d50ee58b31`
 - **PR #28:** open, mergeable and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
 
@@ -816,10 +816,10 @@ Continue M4 with broader recursive shrinking only where each type has its own co
 
 ### Validation
 
-- **Engine/Web Actions run #361:** success — [run details](https://github.com/somildholakia/UnAi/actions/runs/41993901671). **399 Python tests passed in 15.06s**. Python compileall, all six Termux shell syntax checks, Web dependency install and Vite production build passed.
-- **Brain Worker Actions run #44:** success — [run details](https://github.com/somildholakia/UnAi/actions/runs/41993901745). Worker typecheck, D1 migration/legacy tenant smoke test and browser JavaScript syntax passed.
+- **Engine/Web Actions run #363:** success — [run details](https://github.com/somildholakia/UnAi/actions/runs/41994458856). **400 Python tests passed in 20.88s**. CI built `unai-python-test:latest`, the generated-harness Docker integration test passed, Python compileall and all six Termux shell syntax checks passed, and the Web dependency install/Vite production build passed.
+- **Brain Worker Actions run #46:** success — [run details](https://github.com/somildholakia/UnAi/actions/runs/41994458829). Worker typecheck, D1 migration/legacy tenant smoke test and browser JavaScript syntax passed.
 - Added generated-harness regression tests for async module functions decorated with `typing.final`, variadic static/class methods, variadic module functions and variadic instance constructors/methods, plus preflight rejection, unsafe decorators, malformed containers and positional-only gaps.
-- Harness tests execute generated pytest files in isolated temporary staging workspaces using the repository's existing test pattern. No live Docker-container integration test or physical Android test is claimed by this checkpoint.
+- Generated-harness regression tests execute in isolated temporary staging workspaces, and an additional end-to-end test now executes the variadic harness through the actual `IsolatedPythonTestRunner` and `DockerSandbox`. The CI job builds the repository sandbox image first; the Docker-backed test passed on run #363. No physical Android test is claimed by this checkpoint.
 
 ### Next incomplete M4 roadmap task
 

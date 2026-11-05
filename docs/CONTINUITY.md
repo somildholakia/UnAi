@@ -581,3 +581,22 @@ Continue from the newest branch HEAD, read this handoff plus docs/CHECKPOINT.md,
 ### Next incomplete roadmap task
 
 M4 next: add coverage-guided and mutation-based verification only with explicit resource/sandbox policies. M5 still requires a real consented/licensed corpus, trained specialist weights and held-out evaluation; no such corpus or trained weights are claimed. M6 device metrics and deployment remain unverified. Do not start Android setup or request phone testing until the software roadmap is complete.
+
+
+## Final authoritative handoff — M4 decorator/signature expansion with Docker harness validation — 2026-11-05
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Branch:** `feat/m4-instance-methods-m5-specialists`
+- **Validated code/test commit:** `38c2b0b697f334d754ebf8fd573a4e7b6da0da09`
+- **Final documentation handoff will be a docs-only child of the validated code/test commit.**
+- **Engine/Web Actions run #363:** success — 400 tests passed in 20.88s; disposable Docker sandbox image built; Docker-backed generated-harness integration test passed; Python compileall, six Termux shell syntax checks and Web build passed. https://github.com/somildholakia/UnAi/actions/runs/41994458856
+- **Brain Worker Actions run #46:** success — Worker typecheck, D1 migration smoke test and browser JS syntax passed. https://github.com/somildholakia/UnAi/actions/runs/41994458829
+- **PR #28:** open, mergeable and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Docker sandbox verification
+
+The Engine CI workflow now builds `unai-python-test:latest` from `apps/engine/Dockerfile.sandbox` before the test suite. A new generated-harness integration test creates a real `IsolatedPythonTestRunner` backed by `DockerSandbox` and validates a variadic target using the production disposable container path. The container uses the existing `--network=none`, read-only root filesystem, dropped capabilities, no-new-privileges, one CPU and 1 GB memory limits; only the filtered temporary workspace is mounted. The test reports sandboxed evidence and passed on run #363.
+
+### Next incomplete roadmap task
+
+M4 next: add coverage-guided and mutation-based verification only with explicit resource/sandbox policies. Do not start Android installation until remaining software roadmap items are complete. No specialist weights are claimed trained and no physical-device results are claimed.

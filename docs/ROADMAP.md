@@ -68,7 +68,7 @@
 - [x] Add bounded `typing.final` identity-marker support with strict import binding, decorator-order and built-in shadow checks; add positional-only, `*args` and `**kwargs` signature binding for functions, methods and instance constructors with JSON-only argument containers, fixed generated invocation and explicit rejection for unsafe shrink/probe combinations.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
 
-**M4 decorator/signature expansion validation (2026-11-05):** validated on `8ae33e2fa3d1257a9053428cf4602df632a23b5b`; Engine/Web run #361 passed 399 tests plus compileall, six shell syntax checks and Vite production build; Brain Worker run #44 passed typecheck, D1 migration smoke test and browser JavaScript syntax. See `docs/CHECKPOINT.md` and `docs/VERIFICATION.md` for supported invocation rules and limits.
+**M4 decorator/signature expansion validation (2026-11-05):** validated on `38c2b0b697f334d754ebf8fd573a4e7b6da0da09`; Engine/Web run #363 passed 400 tests in 20.88s, built the disposable Docker sandbox image and exercised a generated harness through `DockerSandbox`, plus compileall, six shell syntax checks and Vite production build. Brain Worker run #46 passed typecheck, D1 migration smoke test and browser JavaScript syntax. See `docs/CHECKPOINT.md` and `docs/VERIFICATION.md` for supported invocation rules and limits.
 
 ## M5 — Specialist training
 - [x] Build consent/license/verification-gated corpus preparation with sanitized deduplication, hashed repository groups and deterministic repository-disjoint specialist train/eval splits.
