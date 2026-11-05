@@ -47,10 +47,10 @@ Read these in order before extending unAI:
 - Continue on `feat/m4-instance-methods-m5-specialists`; do not merge PR #28 or modify `main` without explicit instruction.
 - First-party collection is now available through `python -m training.collect_synthetic`. Its deterministic output is suitable for pipeline smoke tests and bootstrap experiments, not as real-world performance evidence.
 - Run the documented collect → audit → prepare commands in `training/README.md`. Default collection is 720 synthetic examples across all three specialists; raw/prepared data is git-ignored.
-- New synthetic provenance carries source type, generator/version, rights basis and declared output license. New public imports require HTTPS source and license URLs plus an immutable revision. Do not ingest private chats or repositories without explicit authorization.
+- New synthetic provenance carries source type, generator/version, rights basis and declared output license. New public imports require HTTPS source and license URLs plus a content-addressed immutable revision (full commit SHA or SHA-256 digest). Do not ingest private chats or repositories without explicit authorization.
 - The audit remains metadata-only and bounded; it now reports source types in aggregate. Preparation still performs credential redaction, exact deduplication, deterministic repository-disjoint splits and manifest hashing.
-- CI must be checked for the newest pushed commit before declaring this increment validated. The generator's self-check is not independent code verification.
-- No adapters have been trained or released. Do not claim model-quality gains or Android metrics until the matched evaluation and physical-device release gates pass.
+- Validated branch HEAD: `77f5261fd4ea5f93f39e7d929a3b2886191a2104`; Engine/Web run #420 passed 456 tests, Docker sandbox build, compileall, six Termux shell syntax checks and Web build; Brain Worker run #103 passed typecheck, D1 migration validation and browser JavaScript syntax. The generator's self-check is not independent code verification.
+- No adapters have been trained or released; this checkpoint completes collection, validation, filtering and preparation infrastructure, not model training. Do not claim model-quality gains or Android metrics until the matched evaluation and physical-device release gates pass.
 
 ## Publisher trust-bundle mode
 
