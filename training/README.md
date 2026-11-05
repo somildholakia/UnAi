@@ -8,6 +8,33 @@ M5 has a reproducible training and evaluation workflow for three separate LoRA/Q
 
 These are separate adapter roles, not three claims of autonomous capability. Training is offline and requires a compatible model, a suitable machine and a curated dataset. The 6 GB Android profile is an inference/release target, not a training device. No adapter weights are currently committed or claimed trained.
 
+## 0. Create a first-party bootstrap corpus (no third-party dataset wait)
+
+The repository includes a deterministic synthetic collector so development and training-pipeline smoke tests can start immediately without downloading third-party data:
+
+```bash
+python -m training.collect_synthetic \
+  --output data/raw/unai-synthetic.jsonl \
+  --groups 20 \
+  --examples-per-group 12 \
+  --seed 20261105 \
+  --license CC0-1.0
+
+python -m training.audit_corpus --input data/raw/unai-synthetic.jsonl
+
+python -m training.prepare_corpus \
+  --input data/raw/unai-synthetic.jsonl \
+  --output-dir data/specialists \
+  --seed 20261105 \
+  --eval-fraction 0.2
+```
+
+The default creates 720 deterministic records (240 per specialist) across 20 project groups per role. Each generated answer is checked against a role-specific deterministic contract before the JSONL file is written. The adjacent `.manifest.json` records the generator version, seed, counts, output digest and limitations. Generated data is kept local and `data/raw/`, `data/specialists/`, `artifacts/` and `reports/` are git-ignored.
+
+These examples are explicitly marked `source_type: synthetic`, carry generator/version/rights-basis provenance, and use the selected output license (default `CC0-1.0`). Change `--license` only when you intend to use that license for the generated corpus. Synthetic verification validates the generator's own response contracts; it is not a real codebase test, real user trajectory or evidence of model capability. Treat this as a bootstrap corpus for testing the pipeline and initial experiments, not a substitute for diverse, independently verified tasks.
+
+For public datasets, do not treat public visibility as permission to train. Every record marked `source_type: public` must include an HTTPS `source_url`, immutable `source_revision`, HTTPS `license_url`, named license, explicit consent/permission metadata and a repository/project grouping key. The audit reports source types in aggregate only. Data from local projects requires explicit authorization; do not ingest private chats or repositories by default.
+
 ## 1. Collect eligible trajectories
 
 Each raw JSONL record must include:
@@ -35,7 +62,7 @@ Each raw JSONL record must include:
 }
 ```
 
-Only the three named specialist values are accepted. Messages must be valid user/assistant conversation turns and end with an assistant response. A trajectory is rejected unless the outcome and every independent verification check passed, explicit consent is true, a license is named, and a repository/project grouping key exists.
+Only the three named specialist values are accepted. Messages must be valid user/assistant conversation turns and end with an assistant response. A trajectory is rejected unless the outcome and every verification check passed, explicit consent is true, a license is named, and a repository/project grouping key exists. New public-source records must also pin their HTTPS source, immutable revision and HTTPS license evidence; first-party synthetic records must identify their generator, version and rights basis. Legacy records without a source_type remain readable for compatibility, but new collection flows should always declare it.
 
 Never add private conversations, private repositories, credentials, or third-party data without explicit permission and compatible rights. Automated redaction covers common secret formats only; it is not a privacy guarantee. Inspect the prepared examples before training.
 
