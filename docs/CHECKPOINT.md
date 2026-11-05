@@ -32,6 +32,8 @@
 **Sandbox regression assertion:** `e6af02a48fa03ace04627b9910c39f6c2bd57233`
 **Engine/Web Actions run #372:** success — [433 tests passed in 17.19s](https://github.com/somildholakia/UnAi/actions/runs/42006411694); the job built `unai-python-test:latest`, ran the real Docker-backed coverage integration test, passed Python compileall, all six Termux shell syntax checks and the Web production build.
 **Brain Worker Actions run #55:** success — [Worker checks](https://github.com/somildholakia/UnAi/actions/runs/42006411841), including typecheck, D1 migration validation and browser JavaScript syntax.
+**Latest branch-head Engine/Web validation:** run #378 on docs-only branch HEAD `8318d190b7403a6eac77773fa64bb1f9199e1838` also passed — [433 tests in 23.74s](https://github.com/somildholakia/UnAi/actions/runs/42007140164), Docker sandbox build, compileall, six Termux shell syntax checks and Web production build.
+**Latest Brain Worker validation:** run #61 passed — [Worker checks](https://github.com/somildholakia/UnAi/actions/runs/42007140229).
 **Integration PR #28:** open, unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
 
 ### Delivered
