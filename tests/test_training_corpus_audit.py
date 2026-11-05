@@ -107,7 +107,7 @@ def test_audit_drains_oversized_lines_in_bounded_chunks_and_hashes_all_bytes(tmp
 
     monkeypatch.setattr(corpus, "_MAX_LINE_BYTES", 32)
     source = tmp_path / "long-line.jsonl"
-    payload = b"x" * 100 + b"\\n"
+    payload = b"x" * 100 + b"\n"
     source.write_bytes(payload)
 
     report = audit(source)
