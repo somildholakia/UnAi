@@ -18,11 +18,14 @@ def test_public_source_requires_immutable_revision_and_https_license_evidence() 
         {
             "source_type": "public",
             "source_url": "https://example.org/datasets/trajectories",
-            "source_revision": "0123456789abcdef",
+            "source_revision": "0123456789abcdef0123456789abcdef01234567",
             "license_url": "https://example.org/datasets/LICENSE",
         }
     )
     assert _provenance(row) is not None
+
+    mutable_revision = dict(row, source_revision="main")
+    assert _provenance(mutable_revision) is None
 
     no_revision = dict(row)
     no_revision.pop("source_revision")
