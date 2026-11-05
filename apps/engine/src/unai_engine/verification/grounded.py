@@ -50,15 +50,15 @@ from unai_engine.verification.transparency import (
 
 _MAX_SHRINK_CANDIDATES = 24
 _MAX_SHRINK_ROUNDS = 6
-_MAX_NESTED_SHRINK_DEPTH = 4
-_MAX_NESTED_SHRINK_NODES = 128
+_MAX_NESTED_SHRINK_DEPTH = 8
+_MAX_NESTED_SHRINK_NODES = 256
 _MAX_NESTED_CANDIDATES_PER_ARGUMENT = 12
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated only when a configured Ed25519 reviewer key signs the exact source/artifact/input/expectation assertion.",
     "Trusted reviewer identities and publisher identities are local operator configuration; publisher signatures authenticate a trusted issuer's exact artifact revision, while reviewer signatures approve a test assertion. Neither proves logical correctness.",
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
-    "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
+    "Nested shrinking is deterministic and bounded to depth 8, 256 visited JSON nodes and 12 candidates per argument; it preserves JSON value types, changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections. Each oracle case still has a 10 KB per-value input cap, and request-wide candidate execution remains capped at 24 candidates and 6 Docker rounds.",
     "The external side-effect fixture is an opt-in 16 MiB ephemeral Docker tmpfs with noexec/nosuid/nodev, no network, and bounded before/after manifests; it is not access to host files, databases, queues or remote services.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
     "Grounded targets include undecorated module-level functions and supported methods on top-level or one-level nested classes; nested namespace classes must be undecorated and have no bases/metaclass keywords, and all other decorators remain unsupported.",

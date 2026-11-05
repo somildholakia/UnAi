@@ -1,7 +1,7 @@
 # Development checkpoint
 
-**Checkpoint:** M2 incremental SQLite graph persistence and conservative static call/instantiation edges delivered; schema migration and regression coverage verified by CI (311 tests)
-**Date:** 2026-11-03
+**Checkpoint:** M4 recursive property-oracle shrinking extended to eight nested JSON container levels and a 256-node traversal ceiling; regression tests added; hosted verification for this continuation is pending.
+**Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
 **M4 grounded-verification implementation PR:** https://github.com/somildholakia/UnAi/pull/2 (merged)

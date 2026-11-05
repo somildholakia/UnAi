@@ -3256,3 +3256,102 @@ def test_publisher_transparency_checkpoint_rejects_rollback(tmp_path: Path) -> N
 
     assert len(runner.calls) == calls_before_rollback
     assert verifier.transparency_checkpoint_store.latest(head.log_id)["tree_size"] == 2
+
+
+def test_recursive_shrinker_supports_eight_nested_containers_but_not_nine() -> None:
+    from unai_engine.verification.grounded import (
+        _argument_measure,
+        _nested_argument_shrink_candidates,
+    )
+
+    def nested(levels: int) -> dict | int:
+        value: dict | int = 11
+        for _ in range(levels):
+            value = {"child": value}
+        return value
+
+    def leaf(value: dict | int, levels: int) -> int:
+        current = value
+        for _ in range(levels):
+            assert isinstance(current, dict)
+            current = current["child"]
+        assert type(current) is int
+        return current
+
+    depth_eight = nested(8)
+    eight_candidates = _nested_argument_shrink_candidates(depth_eight)
+    assert eight_candidates
+    assert any(leaf(candidate, 8) != 11 for candidate in eight_candidates)
+    assert all(
+        _argument_measure(candidate) < _argument_measure(depth_eight)
+        for candidate in eight_candidates
+    )
+
+    depth_nine = nested(9)
+    nine_candidates = _nested_argument_shrink_candidates(depth_nine)
+    # A candidate may remove a containing key, but the value beyond the depth
+    # boundary must never be changed while its full path remains present.
+    for candidate in nine_candidates:
+        try:
+            candidate_leaf = leaf(candidate, 9)
+        except (AssertionError, KeyError, TypeError):
+            continue
+        assert candidate_leaf == 11
+
+
+def test_recursive_shrinker_enforces_hard_visited_node_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    import unai_engine.verification.grounded as grounded
+
+    monkeypatch.setattr(grounded, "_MAX_NESTED_SHRINK_NODES", 9)
+    monkeypatch.setattr(grounded, "_MAX_NESTED_CANDIDATES_PER_ARGUMENT", 100)
+    original = grounded._direct_value_shrink_candidates
+    visited = 0
+
+    def tracked(value: object) -> list[object]:
+        nonlocal visited
+        visited += 1
+        return original(value)
+
+    monkeypatch.setattr(grounded, "_direct_value_shrink_candidates", tracked)
+    value = {f"item-{index:03d}": index + 10 for index in range(80)}
+    candidates = grounded._nested_argument_shrink_candidates(value)
+
+    assert visited == 9
+    assert len(candidates) <= 100
+    assert all(
+        grounded._argument_measure(candidate) < grounded._argument_measure(value)
+        for candidate in candidates
+    )
+
+
+def test_recursive_shrinker_is_deterministic_non_mutating_and_type_safe() -> None:
+    from unai_engine.verification.grounded import (
+        _argument_measure,
+        _direct_value_shrink_candidates,
+        _nested_argument_shrink_candidates,
+    )
+
+    original = {
+        "payload": {
+            "values": [-9, 2.5, True, None],
+            "label": "unicode-λ-🙂-value",
+        }
+    }
+    before = json.loads(json.dumps(original, ensure_ascii=False))
+
+    first = _nested_argument_shrink_candidates(original)
+    second = _nested_argument_shrink_candidates(original)
+
+    assert first == second
+    assert original == before
+    assert 0 < len(first) <= 12
+    assert all(
+        _argument_measure(candidate) < _argument_measure(original)
+        for candidate in first
+    )
+    assert _direct_value_shrink_candidates(True) == []
+    assert _direct_value_shrink_candidates(None) == []
+    assert all(type(item) is int for item in _direct_value_shrink_candidates(-9))
+    assert all(type(item) is float for item in _direct_value_shrink_candidates(2.5))
+    assert all(type(item) is str for item in _direct_value_shrink_candidates("abc"))
+
