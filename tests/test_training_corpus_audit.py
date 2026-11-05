@@ -86,19 +86,12 @@ def test_audit_counts_duplicates_without_leaking_source_content(tmp_path):
 
 
 def test_audit_fails_closed_for_oversized_input(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    from pathlib import Path
+    import training.audit_corpus as corpus_audit
 
     source = tmp_path / "oversized.jsonl"
-    source.write_text("", encoding="utf-8")
-    original_stat = Path.stat
+    source.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(corpus_audit, "_MAX_INPUT_BYTES", 1)
 
-    def fake_stat(path, *args, **kwargs):
-        if path == source:
-            return SimpleNamespace(st_size=2 * 1024 * 1024 * 1024 + 1)
-        return original_stat(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "stat", fake_stat)
     try:
         audit(source)
     except ValueError as exc:
