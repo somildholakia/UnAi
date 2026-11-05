@@ -37,7 +37,7 @@ def _read_bounded_jsonl_line(handle, digest):
 
     # Once a record is known to be too large, drain it in bounded chunks without
     # retaining its contents. Every byte is still included in the source digest.
-    while oversized and chunk and not chunk.endswith(b"\\n"):
+    while oversized and chunk and not chunk.endswith(b"\n"):
         chunk = handle.readline(_MAX_LINE_BYTES + 1)
         if not chunk:
             break
