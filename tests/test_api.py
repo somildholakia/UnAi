@@ -710,7 +710,11 @@ def test_coverage_guided_probe_api_uses_existing_hash_bound_evidence_without_exe
         source="grounded-oracle-sandbox",
         claim="Supplied grounded cases were executed in Docker.",
         passed=True,
-        metadata={"target_file": "branching.py", "target_function": "classify"},
+        metadata={
+            "target_file": "branching.py",
+            "target_function": "classify",
+            "target_sha256": source_sha256,
+        },
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     coverage = EvidenceRecord(
