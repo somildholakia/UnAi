@@ -17,15 +17,37 @@ Work like a careful senior engineer:
 
 The current prototype does not yet expose repository-editing or command-execution tools to the model. Do not pretend otherwise."""
 
+SPECIALIST_PROMPTS = {
+    "next_action": """You are the unAI next-action specialist. Select the single most useful next step from the evidence available.
+Return a concise recommendation with: action, rationale, required_permissions, expected_evidence, and risks.
+Never treat a missing approval as granted. Prefer read-only inspection before edits. Never claim an action has executed.""",
+    "planner": """You are the unAI planning specialist. Produce a bounded, reviewable plan with objective, ordered steps, acceptance checks, assumptions, unknowns, and required permissions.
+Do not grant permissions or imply that tools have run. Keep each step independently verifiable.""",
+    "verifier": """You are the unAI verification specialist. Assess only supplied execution evidence and explicitly supplied acceptance criteria.
+Distinguish passed, failed, and unavailable checks. Identify regressions, missing evidence, stale source hashes, and unresolved risks.
+Never infer a pass from model confidence or an absent failure message.""",
+}
+
+
+class SpecialistUnavailable(RuntimeError):
+    """A specialist adapter is not configured; no base-model fallback is allowed."""
+
+
 
 class AgentOrchestrator:
     def __init__(
         self,
         provider: OpenAICompatibleProvider,
         context_search: Callable[[str, int], list[dict[str, Any]]] | None = None,
+        specialist_models: dict[str, str] | None = None,
     ) -> None:
         self.provider = provider
         self.context_search = context_search
+        self.specialist_models = {
+            name: model.strip()
+            for name, model in (specialist_models or {}).items()
+            if name in SPECIALIST_PROMPTS and isinstance(model, str) and model.strip()
+        }
 
     def _memory_context(self, query: str) -> str:
         if self.context_search is None:
@@ -58,3 +80,31 @@ class AgentOrchestrator:
         messages.extend(history[-20:])
         messages.append({"role": "user", "content": message})
         return await self.provider.complete(messages)
+
+    async def specialist_chat(
+        self,
+        specialist: str,
+        message: str,
+        history: list[dict[str, str]],
+    ) -> tuple[str, str]:
+        """Invoke one explicitly configured specialist model; never fall back to the base model."""
+        if specialist not in SPECIALIST_PROMPTS:
+            raise ValueError("Unsupported specialist role.")
+        selected_model = self.specialist_models.get(specialist)
+        if not selected_model:
+            raise SpecialistUnavailable(
+                f"The {specialist} specialist is not configured. Set its UNAI_SPECIALIST_*_MODEL value."
+            )
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT + "\n\n" + SPECIALIST_PROMPTS[specialist],
+            }
+        ]
+        memory = self._memory_context(message)
+        if memory:
+            messages.append({"role": "system", "content": memory})
+        messages.extend(history[-20:])
+        messages.append({"role": "user", "content": message})
+        answer = await self.provider.complete(messages, model_override=selected_model)
+        return answer, selected_model

@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/somildholakia/UnAi/blob/main/training/schemas/benchmark-result.schema.json",
+  "title": "unAI held-out benchmark result",
+  "description": "One independently verified result for one system on one frozen task case. Emit three rows per matched case: base, adapter and tool_augmented.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "suite_id",
+    "case_id",
+    "case_contract",
+    "case_sha256",
+    "specialist",
+    "system",
+    "model_id",
+    "base_model",
+    "latency_ms",
+    "tokens",
+    "verification",
+    "provenance"
+  ],
+  "properties": {
+    "schema": {
+      "const": "unai.benchmark-result.v1"
+    },
+    "suite_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "case_sha256": {
+      "type": "string",
+      "pattern": "^[a-fA-F0-9]{64}$"
+    },
+    "specialist": {
+      "enum": [
+        "next_action",
+        "planner",
+        "verifier"
+      ]
+    },
+    "system": {
+      "enum": [
+        "base",
+        "adapter",
+        "tool_augmented"
+      ]
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "base_model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "latency_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "checks",
+        "evidence_id",
+        "verifier"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "passed",
+            "failed"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "passed"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "passed": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "verifier": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consented",
+        "source",
+        "license"
+      ],
+      "properties": {
+        "consented": {
+          "const": true
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      }
+    },
+    "tool_trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tools",
+        "evidence_ids"
+      ],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "evidence_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    },
+    "case_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt",
+        "acceptance_criteria"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50000
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "system": {
+            "const": "tool_augmented"
+          }
+        },
+        "required": [
+          "system"
+        ]
+      },
+      "then": {
+        "required": [
+          "tool_trace"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "tool_trace"
+          ]
+        }
+      }
+    }
+  ]
+}

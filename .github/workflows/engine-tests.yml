@@ -1,22 +1,28 @@
-name: Engine tests
+name: Engine and web tests
 
 on:
   push:
     branches: [main]
     paths:
       - "apps/engine/**"
+      - "apps/web/**"
+      - "scripts/**"
       - "training/**"
       - "tests/**"
+      - "README.md"
       - ".github/workflows/engine-tests.yml"
   pull_request:
     paths:
       - "apps/engine/**"
+      - "apps/web/**"
+      - "scripts/**"
       - "training/**"
       - "tests/**"
+      - "README.md"
       - ".github/workflows/engine-tests.yml"
 
 jobs:
-  test:
+  engine:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,9 +34,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e "./apps/engine[dev,mcp]"
+      - name: Build disposable Docker sandbox image
+        run: docker build -f apps/engine/Dockerfile.sandbox -t unai-python-test:latest .
       - name: Run tests
         env:
           PYTHONPATH: apps/engine/src:.
         run: pytest -q tests
       - name: Compile Python sources
         run: python -m compileall -q apps/engine/src training
+      - name: Validate Termux shell scripts
+        run: bash -n scripts/termux-install.sh scripts/termux-start.sh scripts/termux-doctor.sh scripts/termux-supervise.sh scripts/termux-service.sh scripts/termux-control.sh
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm install --no-audit --no-fund
+      - name: Build web UI
+        working-directory: apps/web
+        run: npm run build

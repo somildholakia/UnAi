@@ -13,6 +13,21 @@ SECRET_PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
     re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b"),
+    # Provider-specific credentials that are often pasted without a key name.
+    re.compile(r"(?i)\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
+    re.compile(r"(?i)\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b"),
+    re.compile(r"(?i)\bwhsec_[A-Za-z0-9]{16,}\b"),
+    re.compile(r"\b(?:npm_[A-Za-z0-9]{20,}|npm-[A-Za-z0-9]{20,})\b"),
+    re.compile(r"\bhf_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{16,}\b"),
+    re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]{20,}={0,2}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"\b[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{25,}\b"),
+    # Connection strings and PEM private-key blocks are redacted as whole secrets.
+    re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?):\/\/[^/\s:@]+:[^/\s@]{8,}@[^/\s]+"),
+    re.compile(r"(?im)-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\s\S]{20,}?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"),
+    re.compile(r"(?i)[?&](?:sig|signature)=[^&\s]{16,}"),
 ]
 
 def sanitise(text: str) -> tuple[str, int]:

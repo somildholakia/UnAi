@@ -6,8 +6,10 @@ intentionally not exposed by this server.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 from collections.abc import Callable
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -21,6 +23,28 @@ from unai_engine.models import (
 load_dotenv()
 
 
+def _is_loopback_host(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        normalized = host.casefold().rstrip(".")
+        return normalized == "localhost" or normalized.endswith(".localhost")
+
+
+def _validate_engine_endpoint(engine_url: str, engine_api_token: str) -> None:
+    parsed = urlsplit(engine_url)
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("UNAI_ENGINE_API_URL contains an invalid port.") from exc
+    if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+        or parsed.username is not None or parsed.password is not None
+        or parsed.query or parsed.fragment):
+        raise ValueError("UNAI_ENGINE_API_URL must be a clean HTTP(S) endpoint.")
+    if not _is_loopback_host(parsed.hostname) and (parsed.scheme != "https" or not engine_api_token):
+        raise ValueError("A remote Engine endpoint requires HTTPS and UNAI_ENGINE_API_TOKEN.")
+
+
 class TaskMCPBridge:
     """Small read-only facade over the typed Engine HTTP client."""
 
@@ -32,7 +56,8 @@ class TaskMCPBridge:
         allow_workspace_read: bool = False,
         client_factory: Callable[..., EngineClient] = EngineClient,
     ) -> None:
-        self.engine_url = engine_url
+        _validate_engine_endpoint(engine_url, engine_api_token)
+        self.engine_url = engine_url.rstrip("/")
         self.engine_api_token = engine_api_token
         self.workspace = workspace.strip()
         self.allow_workspace_read = allow_workspace_read

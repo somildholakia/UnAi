@@ -38,27 +38,43 @@ from unai_engine.verification.attestations import (
     canonical_attestation_message,
     verify_ed25519_attestation,
 )
+from unai_engine.verification.coverage import (
+    CoveragePlanningError,
+    analyze_coverage,
+    build_coverage_plan,
+    unavailable_coverage,
+)
 from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.proof import summarize_proof
+from unai_engine.verification.transparency import (
+    SignedTreeHead,
+    TransparencyCheckpointStore,
+    build_transparency_witness_statement,
+    verify_publisher_manifest_inclusion,
+)
 
 
 _MAX_SHRINK_CANDIDATES = 24
 _MAX_SHRINK_ROUNDS = 6
-_MAX_NESTED_SHRINK_DEPTH = 4
-_MAX_NESTED_SHRINK_NODES = 128
+_MAX_NESTED_SHRINK_DEPTH = 8
+_MAX_NESTED_SHRINK_NODES = 256
 _MAX_NESTED_CANDIDATES_PER_ARGUMENT = 12
+_MUTATION_EVIDENCE_SOURCE = "grounded-mutation-sandbox"
+_MUTATION_SUMMARY_SOURCE = "grounded-mutation-summary"
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated only when a configured Ed25519 reviewer key signs the exact source/artifact/input/expectation assertion.",
     "Trusted reviewer identities and publisher identities are local operator configuration; publisher signatures authenticate a trusted issuer's exact artifact revision, while reviewer signatures approve a test assertion. Neither proves logical correctness.",
     "Counterexample shrinking is opt-in through a fixed property-oracle contract, limited to finite integer/float, string, list and string-keyed mapping arguments, 24 candidate executions and 6 isolated Docker rounds per request; it greedily accumulates reductions across arguments and reports the smallest observed failure, not a globally minimal input.",
-    "Nested shrinking is deterministic and bounded to depth 4, 128 visited JSON nodes and 12 candidates per argument; it changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections.",
+    "Nested shrinking is deterministic and bounded to depth 8, 256 visited JSON nodes and 12 candidates per argument; it preserves JSON value types, changes one nested value or removes one contiguous collection chunk per candidate, and does not reorder collections. Each oracle case still has a 10 KB per-value input cap, and request-wide candidate execution remains capped at 24 candidates and 6 Docker rounds.",
+    "The external side-effect fixture is an opt-in 16 MiB ephemeral Docker tmpfs with noexec/nosuid/nodev, no network, and bounded before/after manifests; it is not access to host files, databases, queues or remote services.",
     "A passing set of supplied cases does not prove general correctness or completeness of the task acceptance criteria.",
-    "Grounded targets include undecorated module-level functions and explicitly decorated top-level-class @staticmethod/@classmethod methods; ordinary instance methods, nested classes and all other decorators remain unsupported.",
+    "Grounded targets include undecorated module-level functions and supported methods on top-level or one-level nested classes; nested namespace classes must be undecorated and have no bases/metaclass keywords, and all other decorators remain unsupported.",
     "A workspace specification artifact can be SHA-256-pinned, but that proves content integrity only, not publisher identity, authorship, authority or correctness.",
     "Return-value oracles require JSON-compatible results; an explicit raises_exception property may require only one of the fixed allowlisted built-in exception types, never an arbitrary caller-supplied class name.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
     "Execution traces retain hashes and redacted bounded previews, not a complete deterministic replay of process state.",
+    "Coverage is measured only from line events and supported if/while/for arms observed while the supplied oracle cases run; it does not prove unexecuted behavior, infer expected outputs, or establish completeness.",
 ]
 
 
@@ -322,20 +338,149 @@ def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
     return numeric_magnitude, len(encoded.encode("utf-8")), encoded
 
 
-def _decorator_name(decorator: ast.expr) -> str | None:
-    return decorator.id if isinstance(decorator, ast.Name) else None
+def _typing_final_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """Return only unambiguous module aliases for typing.final.
+
+    We accept direct module-scope imports only. Any second binding (including a
+    local parameter/store with the same name) makes that alias ambiguous.
+    """
+    final_imports: list[str] = []
+    typing_imports: list[str] = []
+    final_import_lines: dict[str, list[int]] = {}
+    typing_import_lines: dict[str, list[int]] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Import):
+            for item in statement.names:
+                if item.name == "typing":
+                    bound = item.asname or "typing"
+                    typing_imports.append(bound)
+                    typing_import_lines.setdefault(bound, []).append(statement.lineno)
+        elif isinstance(statement, ast.ImportFrom) and statement.level == 0 and statement.module == "typing":
+            for item in statement.names:
+                if item.name == "final":
+                    bound = item.asname or "final"
+                    final_imports.append(bound)
+                    final_import_lines.setdefault(bound, []).append(statement.lineno)
+
+    def binding_count(name: str) -> int:
+        count = 0
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name:
+                count += 1
+            elif isinstance(node, ast.arg) and node.arg == name:
+                count += 1
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+                count += 1
+            elif isinstance(node, ast.alias):
+                bound = node.asname or node.name.split(".")[0]
+                if bound == name:
+                    count += 1
+            elif isinstance(node, ast.ExceptHandler) and node.name == name:
+                count += 1
+            elif isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+                count += 1
+        return count
+
+    unique_final = {
+        name for name in final_imports
+        if final_imports.count(name) == 1 and binding_count(name) == 1
+    }
+    unique_typing = {
+        name for name in typing_imports
+        if typing_imports.count(name) == 1 and binding_count(name) == 1
+    }
+
+    # Imported aliases are accepted only when their sole runtime use is the
+    # direct typing.final decorator itself. This prevents a source module from
+    # passing the module/function object elsewhere for mutation or rebinding.
+    allowed_final_references: set[int] = set()
+    allowed_typing_references: set[int] = set()
+    for node in ast.walk(tree):
+        decorators = getattr(node, "decorator_list", ())
+        for decorator in decorators:
+            if isinstance(decorator, ast.Name) and decorator.id in unique_final:
+                allowed_final_references.add(id(decorator))
+            elif (
+                isinstance(decorator, ast.Attribute)
+                and decorator.attr == "final"
+                and isinstance(decorator.value, ast.Name)
+                and decorator.value.id in unique_typing
+            ):
+                allowed_typing_references.add(id(decorator.value))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load):
+            continue
+        if node.id in unique_final and id(node) not in allowed_final_references:
+            unique_final.discard(node.id)
+        if node.id in unique_typing and id(node) not in allowed_typing_references:
+            unique_typing.discard(node.id)
+    for node in ast.walk(tree):
+        for decorator in getattr(node, "decorator_list", ()):
+            if (
+                isinstance(decorator, ast.Name)
+                and decorator.id in unique_final
+                and final_import_lines[decorator.id][0] >= decorator.lineno
+            ):
+                unique_final.discard(decorator.id)
+            elif (
+                isinstance(decorator, ast.Attribute)
+                and decorator.attr == "final"
+                and isinstance(decorator.value, ast.Name)
+                and decorator.value.id in unique_typing
+                and typing_import_lines[decorator.value.id][0] >= decorator.lineno
+            ):
+                unique_typing.discard(decorator.value.id)
+    return unique_final, unique_typing
 
 
-def _target_function(
-    source: str, symbol_name: str
-) -> ast.FunctionDef | ast.AsyncFunctionDef:
+def _is_typing_final_decorator(
+    decorator: ast.expr, final_names: set[str], typing_names: set[str]
+) -> bool:
+    if isinstance(decorator, ast.Name):
+        return decorator.id in final_names
+    return (
+        isinstance(decorator, ast.Attribute)
+        and decorator.attr == "final"
+        and isinstance(decorator.value, ast.Name)
+        and decorator.value.id in typing_names
+    )
+
+
+def _has_only_typing_final(
+    decorators: list[ast.expr], final_names: set[str], typing_names: set[str]
+) -> bool:
+    return not decorators or (
+        len(decorators) == 1
+        and _is_typing_final_decorator(decorators[0], final_names, typing_names)
+    )
+
+
+def _is_unshadowed_builtin_name(tree: ast.Module, name: str) -> bool:
+    """A builtin decorator name is safe only when the module cannot shadow it."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name:
+            return False
+        if isinstance(node, ast.arg) and node.arg == name:
+            return False
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+            return False
+        if isinstance(node, ast.alias):
+            bound = node.asname or node.name.split(".")[0]
+            if bound == name:
+                return False
+        if isinstance(node, ast.ExceptHandler) and node.name == name:
+            return False
+        if isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+            return False
+    return True
+
+
+def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
+    """Resolve targets with only statically proven identity markers and call forms."""
     parts = symbol_name.split(".")
-    if (
-        len(parts) not in {1, 2}
-        or any(not part.isidentifier() for part in parts)
-    ):
+    if len(parts) not in {1, 2, 3} or any(not part.isidentifier() for part in parts):
         raise GroundedVerificationError(
-            "Use a module-level function name or one ClassName.method name."
+            "Use a module-level function, ClassName.method or Outer.Inner.method."
         )
     try:
         tree = ast.parse(source)
@@ -343,6 +488,7 @@ def _target_function(
         raise GroundedVerificationError(
             f"Target Python source does not parse at line {exc.lineno}.", 409
         ) from exc
+    final_names, typing_names = _typing_final_bindings(tree)
 
     if len(parts) == 1:
         matches = [
@@ -359,26 +505,47 @@ def _target_function(
                 f"Function name is ambiguous: {symbol_name}.", 409
             )
         function = matches[0]
-        if function.decorator_list:
+        if not _has_only_typing_final(function.decorator_list, final_names, typing_names):
             raise GroundedVerificationError(
-                "Decorated functions are not supported at module level."
+                "Decorated functions are not supported at module level unless they use an unambiguously imported typing.final identity decorator."
             )
+        invocation_kind = "module_function"
+        owner_name = None
+        constructor = None
     else:
-        owner_name, method_name = parts
-        classes = [
-            node for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == owner_name
-        ]
-        if len(classes) != 1:
-            if not classes:
+        owner_path, method_name = parts[:-1], parts[-1]
+        owner = None
+        namespace_body = tree.body
+        for depth, owner_component in enumerate(owner_path):
+            classes = [
+                node for node in namespace_body
+                if isinstance(node, ast.ClassDef) and node.name == owner_component
+            ]
+            if len(classes) != 1:
+                if not classes:
+                    scope = "Top-level" if depth == 0 else "Nested"
+                    raise GroundedVerificationError(
+                        f"{scope} class not found: {'.'.join(owner_path[:depth + 1])}.",
+                        404,
+                    )
                 raise GroundedVerificationError(
-                    f"Top-level class not found: {owner_name}.", 404
+                    f"Class name is ambiguous: {'.'.join(owner_path[:depth + 1])}.",
+                    409,
                 )
-            raise GroundedVerificationError(
-                f"Class name is ambiguous: {owner_name}.", 409
-            )
+            owner = classes[0]
+            if not _has_only_typing_final(owner.decorator_list, final_names, typing_names):
+                raise GroundedVerificationError(
+                    "Class targets accept only an unambiguously imported typing.final identity marker."
+                )
+            if len(owner_path) > 1 and (owner.bases or owner.keywords):
+                raise GroundedVerificationError(
+                    "Nested-class targets require undecorated namespace classes without bases or metaclass keywords."
+                )
+            namespace_body = owner.body
+
+        assert owner is not None
         methods = [
-            node for node in classes[0].body
+            node for node in owner.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == method_name
         ]
@@ -391,43 +558,215 @@ def _target_function(
                 f"Class method name is ambiguous: {symbol_name}.", 409
             )
         function = methods[0]
-        decorators = [_decorator_name(item) for item in function.decorator_list]
-        if decorators not in ([ "staticmethod" ], [ "classmethod" ]):
+        decorators = function.decorator_list
+        if not decorators or (
+            len(decorators) == 1
+            and _is_typing_final_decorator(decorators[0], final_names, typing_names)
+        ):
+            invocation_kind = "instance_method"
+            if owner.bases or owner.keywords:
+                raise GroundedVerificationError(
+                    "Instance-method targets require a class without bases or metaclass keywords."
+                )
+            if any(
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__new__"
+                for node in owner.body
+            ):
+                raise GroundedVerificationError(
+                    "Instance-method fixtures do not support custom __new__ constructors."
+                )
+            constructors = [
+                node for node in owner.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__init__"
+            ]
+            if len(constructors) > 1:
+                raise GroundedVerificationError(
+                    "Instance-method fixture class has an ambiguous __init__ constructor."
+                )
+            constructor = constructors[0] if constructors else None
+            if constructor is not None:
+                first_constructor_parameter = (
+                    constructor.args.posonlyargs[0].arg
+                    if constructor.args.posonlyargs
+                    else constructor.args.args[0].arg
+                    if constructor.args.args
+                    else None
+                )
+                if (
+                    isinstance(constructor, ast.AsyncFunctionDef)
+                    or first_constructor_parameter != "self"
+                    or not _has_only_typing_final(
+                        constructor.decorator_list, final_names, typing_names
+                    )
+                ):
+                    raise GroundedVerificationError(
+                        "Instance fixture __init__ must be a synchronous, undecorated method (or marked only with typing.final) with self first."
+                    )
+            first_method_parameter = (
+                function.args.posonlyargs[0].arg
+                if function.args.posonlyargs
+                else function.args.args[0].arg
+                if function.args.args
+                else None
+            )
+            if first_method_parameter != "self":
+                raise GroundedVerificationError(
+                    "An ordinary instance method must declare self as its first parameter."
+                )
+        elif (
+            len(decorators) == 1
+            and isinstance(decorators[0], ast.Name)
+            and decorators[0].id == "staticmethod"
+            and _is_unshadowed_builtin_name(tree, "staticmethod")
+        ):
+            invocation_kind = "staticmethod"
+            constructor = None
+        elif (
+            len(decorators) == 1
+            and isinstance(decorators[0], ast.Name)
+            and decorators[0].id == "classmethod"
+            and _is_unshadowed_builtin_name(tree, "classmethod")
+        ):
+            invocation_kind = "classmethod"
+            constructor = None
+        elif (
+            len(decorators) == 2
+            and isinstance(decorators[0], ast.Name)
+            and decorators[0].id in {"staticmethod", "classmethod"}
+            and _is_unshadowed_builtin_name(tree, decorators[0].id)
+            and _is_typing_final_decorator(decorators[1], final_names, typing_names)
+        ):
+            invocation_kind = (
+                "staticmethod" if decorators[0].id == "staticmethod" else "classmethod"
+            )
+            constructor = None
+        else:
             raise GroundedVerificationError(
-                "Only explicitly decorated @staticmethod and @classmethod targets are supported; "
-                "ordinary instance methods and other decorators are rejected."
+                "Only explicitly decorated @staticmethod/@classmethod methods, undecorated instance methods, and the safe typing.final marker are supported."
             )
 
-    if function.args.posonlyargs or function.args.vararg or function.args.kwarg:
-        raise GroundedVerificationError(
-            "Positional-only, *args and **kwargs signatures are not supported."
-        )
-    return function
+        owner_name = ".".join(owner_path)
+
+    return {
+        "function": function,
+        "invocation_kind": invocation_kind,
+        "owner_name": owner_name,
+        "constructor": constructor,
+    }
 
 
-def _signature(
-    function: ast.FunctionDef | ast.AsyncFunctionDef,
+def _target_function(
+    source: str, symbol_name: str
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """Compatibility wrapper returning only the selected function AST."""
+    return _target_descriptor(source, symbol_name)["function"]
+
+
+def _signature_plan(
+    function: ast.FunctionDef | ast.AsyncFunctionDef | None,
     *,
     drop_first_parameter: bool = False,
-) -> tuple[set[str], set[str]]:
-    positional = list(function.args.args)
-    if drop_first_parameter:
-        if not positional:
-            raise GroundedVerificationError(
-                "A classmethod must declare its bound class parameter."
-            )
-        positional = positional[1:]
-    defaults_start = len(positional) - len(function.args.defaults)
-    required = {
-        arg.arg for index, arg in enumerate(positional)
+) -> dict[str, Any]:
+    """Describe Python's supported binding slots without evaluating defaults."""
+    if function is None:
+        return {
+            "posonly": [],
+            "poskw": [],
+            "kwonly": [],
+            "required_posonly": [],
+            "required_poskw": [],
+            "required_kwonly": [],
+            "vararg": None,
+            "varkw": None,
+        }
+    posonly = list(function.args.posonlyargs)
+    poskw = list(function.args.args)
+    all_positional = posonly + poskw
+    defaults_start = len(all_positional) - len(function.args.defaults)
+    required_names = {
+        parameter.arg
+        for index, parameter in enumerate(all_positional)
         if index < defaults_start
     }
-    allowed = {arg.arg for arg in positional}
-    for arg, default in zip(function.args.kwonlyargs, function.args.kw_defaults):
-        allowed.add(arg.arg)
-        if default is None:
-            required.add(arg.arg)
-    return allowed, required
+    if drop_first_parameter:
+        if not all_positional:
+            raise GroundedVerificationError(
+                "A bound method or constructor must declare its bound first parameter."
+            )
+        first = all_positional[0]
+        if posonly and posonly[0] is first:
+            posonly = posonly[1:]
+        else:
+            poskw = poskw[1:]
+        required_names.discard(first.arg)
+    required_kwonly = [
+        parameter.arg
+        for parameter, default in zip(function.args.kwonlyargs, function.args.kw_defaults)
+        if default is None
+    ]
+    return {
+        "posonly": [parameter.arg for parameter in posonly],
+        "poskw": [parameter.arg for parameter in poskw],
+        "kwonly": [parameter.arg for parameter in function.args.kwonlyargs],
+        "required_posonly": [item.arg for item in posonly if item.arg in required_names],
+        "required_poskw": [item.arg for item in poskw if item.arg in required_names],
+        "required_kwonly": required_kwonly,
+        "vararg": function.args.vararg.arg if function.args.vararg else None,
+        "varkw": function.args.kwarg.arg if function.args.kwarg else None,
+    }
+
+
+def _validate_signature_values(values: dict[str, Any], plan: dict[str, Any], label: str) -> None:
+    if not isinstance(values, dict) or any(not isinstance(key, str) for key in values):
+        raise GroundedVerificationError(f"{label} must be a JSON object with string keys.")
+    declared = set(plan["posonly"] + plan["poskw"] + plan["kwonly"])
+    vararg_name = plan["vararg"]
+    varkw_name = plan["varkw"]
+    allowed = declared | {name for name in (vararg_name, varkw_name) if name}
+    unknown = set(values) - allowed
+    if unknown:
+        qualifier = " constructor" if "constructor arguments" in label else ""
+        raise GroundedVerificationError(
+            f"{label} contains unknown{qualifier} parameters: {', '.join(sorted(unknown))}."
+        )
+    varargs = values.get(vararg_name, []) if vararg_name else []
+    if type(varargs) is not list:
+        raise GroundedVerificationError(
+            f"{label} variadic parameter {vararg_name} must be a JSON list."
+        )
+    extra_keywords = values.get(varkw_name, {}) if varkw_name else {}
+    if type(extra_keywords) is not dict or any(type(key) is not str for key in extra_keywords):
+        raise GroundedVerificationError(
+            f"{label} variadic keyword parameter {varkw_name} must be a JSON object with string keys."
+        )
+    supplied_posonly = [name for name in plan["posonly"] if name in values]
+    if supplied_posonly != plan["posonly"][:len(supplied_posonly)]:
+        raise GroundedVerificationError(
+            f"{label} cannot omit an earlier positional-only default while supplying a later positional-only parameter."
+        )
+    explicit_keywords = (set(plan["poskw"]) | set(plan["kwonly"])) & set(values)
+    collisions = explicit_keywords & set(extra_keywords)
+    if collisions:
+        raise GroundedVerificationError(
+            f"{label} contains duplicate explicit and variadic keyword parameters: {', '.join(sorted(collisions))}."
+        )
+    required = set(plan["required_posonly"] + plan["required_poskw"] + plan["required_kwonly"])
+    extra_bound_names = set(extra_keywords) & (set(plan["poskw"]) | set(plan["kwonly"]))
+    missing = required - set(values) - extra_bound_names
+    if missing:
+        qualifier = " constructor" if "constructor arguments" in label else ""
+        raise GroundedVerificationError(
+            f"{label} is missing required{qualifier} parameters: {', '.join(sorted(missing))}."
+        )
+    if vararg_name and varargs:
+        missing_positional = set(plan["posonly"] + plan["poskw"]) - set(values)
+        if missing_positional:
+            raise GroundedVerificationError(
+                f"{label} must explicitly supply every positional parameter when {vararg_name} contains values."
+            )
+
 
 
 def _candidate_index(
@@ -456,15 +795,22 @@ def _candidate_index(
 def _validate_cases(
     snapshot: TaskEvidenceSnapshot,
     request: GroundedTestApprovalRequest,
-    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    target: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    is_classmethod = (
-        "." in request.symbol_name
-        and len(function.decorator_list) == 1
-        and _decorator_name(function.decorator_list[0]) == "classmethod"
+    function = target["function"]
+    invocation_kind = target["invocation_kind"]
+    is_bound_method = invocation_kind in {"classmethod", "instance_method"}
+    target_signature_plan = _signature_plan(
+        function, drop_first_parameter=is_bound_method
     )
-    allowed, required = _signature(
-        function, drop_first_parameter=is_classmethod
+    constructor_signature_plan = (
+        _signature_plan(target.get("constructor"), drop_first_parameter=True)
+        if invocation_kind == "instance_method" and target.get("constructor") is not None
+        else _signature_plan(None)
+    )
+    target_is_variadic = bool(target_signature_plan["vararg"] or target_signature_plan["varkw"])
+    constructor_is_variadic = bool(
+        constructor_signature_plan["vararg"] or constructor_signature_plan["varkw"]
     )
     candidates = _candidate_index(
         snapshot, request.file_path, request.symbol_name, request.source_sha256
@@ -557,16 +903,38 @@ def _validate_cases(
                 raise GroundedVerificationError(
                     f"Property oracle case {case.case_id} can set replay_count only for output_stable_across_replays."
                 )
-        arguments = dict(case.arguments)
-        unknown = set(arguments) - allowed
-        missing = required - set(arguments)
-        if unknown:
-            raise GroundedVerificationError(
-                f"Oracle case {case.case_id} contains unknown parameters: {', '.join(sorted(unknown))}."
+        if invocation_kind == "instance_method":
+            instance_arguments = dict(case.instance_arguments or {})
+            _validate_signature_values(
+                instance_arguments, constructor_signature_plan,
+                f"Oracle case {case.case_id} constructor arguments",
             )
-        if missing:
+        else:
+            if case.instance_arguments is not None:
+                raise GroundedVerificationError(
+                    f"Oracle case {case.case_id} may supply instance_arguments only for an ordinary instance-method target."
+                )
+            instance_arguments = {}
+
+        arguments = dict(case.arguments)
+        _validate_signature_values(
+            arguments, target_signature_plan, f"Oracle case {case.case_id} arguments"
+        )
+        if case.probe_candidate_id and (target_is_variadic or constructor_is_variadic):
             raise GroundedVerificationError(
-                f"Oracle case {case.case_id} is missing required parameters: {', '.join(sorted(missing))}."
+                f"Oracle case {case.case_id} cannot bind a probe candidate to a variadic target signature."
+            )
+        if (
+            case.oracle_property is not None
+            and case.oracle_property.kind not in {
+                "output_stable_across_replays",
+                "workspace_filesystem_unchanged",
+                "external_fixture_filesystem_unchanged",
+            }
+            and (target_is_variadic or constructor_is_variadic)
+        ):
+            raise GroundedVerificationError(
+                f"Oracle case {case.case_id} cannot enable shrinking for a variadic target or constructor signature."
             )
 
         if case.probe_candidate_id:
@@ -586,6 +954,9 @@ def _validate_cases(
                 )
 
         arguments_json = _json_text(arguments, f"Arguments for case {case.case_id}")
+        instance_arguments_json = _json_text(
+            instance_arguments, f"Instance constructor arguments for case {case.case_id}"
+        )
         expected_json = (
             _json_text(case.expected_output, f"Expected output for case {case.case_id}")
             if case.oracle_property is None
@@ -599,11 +970,12 @@ def _validate_cases(
         arguments_bytes = len(arguments_json.encode("utf-8"))
         expected_bytes = len(expected_json.encode("utf-8"))
         property_bytes = len(property_json.encode("utf-8"))
-        if max(arguments_bytes, expected_bytes, property_bytes) > 10_000:
+        instance_argument_bytes = len(instance_arguments_json.encode("utf-8"))
+        if max(arguments_bytes, expected_bytes, property_bytes, instance_argument_bytes) > 10_000:
             raise GroundedVerificationError(
                 f"Oracle case {case.case_id} exceeds the 10 KB per-value limit."
             )
-        total_payload_bytes += arguments_bytes + expected_bytes + property_bytes
+        total_payload_bytes += arguments_bytes + expected_bytes + property_bytes + instance_argument_bytes
         if total_payload_bytes > 200_000:
             raise GroundedVerificationError(
                 "Grounded oracle payload exceeds the 200 KB aggregate limit."
@@ -612,6 +984,18 @@ def _validate_cases(
             {
                 "case_id": case.case_id,
                 "arguments": arguments,
+                "instance_arguments": instance_arguments if invocation_kind == "instance_method" else None,
+                "instance_arguments_sha256": (
+                    _digest(instance_arguments, "Instance constructor arguments")
+                    if invocation_kind == "instance_method"
+                    else None
+                ),
+                "_unai_signature": target_signature_plan,
+                "_unai_constructor_signature": (
+                    constructor_signature_plan
+                    if invocation_kind == "instance_method"
+                    else None
+                ),
                 **(
                     {"expected_output": case.expected_output}
                     if case.oracle_property is None
@@ -656,7 +1040,9 @@ def _generated_pytest(
     target_sha256: str,
     *,
     is_async: bool = False,
+    invocation_kind: str = "module_function",
     replay_trace_path: str | None = None,
+    coverage_trace_path: str | None = None,
 ) -> str:
     payload = _json_text(cases, "Oracle cases")
     target_hash_literal = repr(target_sha256)
@@ -674,24 +1060,76 @@ def _generated_pytest(
         ):
             raise GroundedVerificationError("Replay trace path must be a generated workspace JSON file.")
         replay_trace_literal = repr(replay_trace_path)
-    invocation = (
-        "asyncio.run(_FUNCTION(**case['arguments']))"
-        if is_async
-        else "_FUNCTION(**case['arguments'])"
-    )
+    coverage_trace_literal = "None"
+    if coverage_trace_path is not None:
+        coverage_relative = PurePosixPath(coverage_trace_path)
+        if (
+            coverage_relative.is_absolute()
+            or coverage_relative.as_posix() != coverage_trace_path
+            or len(coverage_relative.parts) != 2
+            or coverage_relative.parts[0] != "unai_generated_tests"
+            or coverage_relative.suffix != ".json"
+            or not coverage_relative.name.endswith(".coverage.json")
+            or any(part in {"", ".", ".."} for part in coverage_relative.parts)
+        ):
+            raise GroundedVerificationError(
+                "Coverage trace path must be a generated workspace JSON file."
+            )
+        coverage_trace_literal = repr(coverage_trace_path)
+    if is_async:
+        invocation = (
+            "_coverage_async_invoke(case)"
+            if coverage_trace_path is not None
+            else "asyncio.run(_invoke_case(case))"
+        )
+        replay_invocation = (
+            "_coverage_async_invoke(case, copy.deepcopy(case['arguments']))"
+            if coverage_trace_path is not None
+            else "asyncio.run(_invoke_case(case, copy.deepcopy(case['arguments'])))"
+        )
+    else:
+        invocation = (
+            "_coverage_invoke(case)"
+            if coverage_trace_path is not None
+            else "_invoke_case(case)"
+        )
+        replay_invocation = (
+            "_coverage_invoke(case, copy.deepcopy(case['arguments']))"
+            if coverage_trace_path is not None
+            else "_invoke_case(case, copy.deepcopy(case['arguments']))"
+        )
     # Embed a JSON string as a Python string literal; never interpolate caller text
     # as executable Python source.
     payload_literal = repr(payload)
     file_literal = repr(file_path)
     symbol_literal = repr(symbol_name)
     if "." in symbol_name:
-        owner_name, method_name = symbol_name.split(".", 1)
-        target_resolution = (
-            f"_OWNER = {owner_name!r}\n"
-            f"_METHOD = {method_name!r}\n"
-            "_CLASS = getattr(_MODULE, _OWNER, None)\n"
-            "_FUNCTION = getattr(_CLASS, _METHOD, None)\n"
-        )
+        owner_path = symbol_name.split(".")[:-1]
+        method_name = symbol_name.split(".")[-1]
+        if len(owner_path) == 1:
+            owner_resolution = (
+                f"_OWNER = {owner_path[0]!r}\n"
+                "_CLASS = getattr(_MODULE, _OWNER, None)\n"
+            )
+        else:
+            owner_resolution = (
+                f"_OWNER_PATH = {tuple(owner_path)!r}\n"
+                "_CLASS = _MODULE\n"
+                "for _OWNER_COMPONENT in _OWNER_PATH:\n"
+                "    _CLASS = getattr(_CLASS, _OWNER_COMPONENT, None)\n"
+            )
+        if invocation_kind == "instance_method":
+            target_resolution = (
+                owner_resolution
+                + f"_METHOD = {method_name!r}\n"
+                + "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None\n"
+            )
+        else:
+            target_resolution = (
+                owner_resolution
+                + f"_METHOD = {method_name!r}\n"
+                + "_FUNCTION = getattr(_CLASS, _METHOD, None)\n"
+            )
     else:
         target_resolution = "_FUNCTION = getattr(_MODULE, _SYMBOL, None)\n"
     return f'''"""Generated by unAI from explicit, supplied oracle cases. Do not edit."""
@@ -740,6 +1178,32 @@ if _REPLAY_TRACE_PATH is not None:
     except OSError:
         _REPLAY_TRACE_DIRECTORY_FD = None
 _REPLAY_TRACE_RECORDS = []
+_COVERAGE_TRACE_RELATIVE_PATH = {coverage_trace_literal}
+_COVERAGE_TRACE_PATH = (
+    (_ROOT / _COVERAGE_TRACE_RELATIVE_PATH).resolve()
+    if _COVERAGE_TRACE_RELATIVE_PATH is not None
+    else None
+)
+if _COVERAGE_TRACE_PATH is not None and not _COVERAGE_TRACE_PATH.is_relative_to(
+    (_ROOT / "unai_generated_tests").resolve()
+):
+    raise RuntimeError("Coverage trace path escaped the generated-test directory.")
+_COVERAGE_TRACE_DIRECTORY_FD = None
+if _COVERAGE_TRACE_PATH is not None:
+    _COVERAGE_TRACE_DIRECTORY = _ROOT / "unai_generated_tests"
+    try:
+        if not _COVERAGE_TRACE_DIRECTORY.is_symlink():
+            _COVERAGE_TRACE_DIRECTORY_FD = os.open(
+                _COVERAGE_TRACE_DIRECTORY,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+    except OSError:
+        _COVERAGE_TRACE_DIRECTORY_FD = None
+_COVERAGE_LINES = set()
+_COVERAGE_CASE_LINES = {{}}
+_COVERAGE_CURRENT_LINES = None
 _ALLOWED_EXCEPTIONS = {{
     "ValueError": ValueError,
     "TypeError": TypeError,
@@ -759,6 +1223,7 @@ if not _TARGET.is_relative_to(_ROOT) or not _TARGET.is_file():
     raise RuntimeError("Grounded test target is missing or outside the staged workspace.")
 if hashlib.sha256(_TARGET.read_bytes()).hexdigest() != _EXPECTED_TARGET_SHA256:
     raise RuntimeError("Grounded test target changed after its verified source snapshot.")
+_TARGET_SOURCE_PATH = str(_TARGET)
 for _case in _CASES:
     _oracle_path = _case.get("oracle_artifact_path")
     if not _oracle_path:
@@ -779,6 +1244,104 @@ _SPEC.loader.exec_module(_MODULE)
 {target_resolution}
 if not callable(_FUNCTION):
     raise RuntimeError("Grounded test target is not callable.")
+_TARGET_CODE = getattr(getattr(_FUNCTION, "__func__", _FUNCTION), "__code__", None)
+if _TARGET_CODE is None:
+    raise RuntimeError("Grounded test target has no executable code object.")
+
+
+def _invoke_with_signature(function, values, plan, bound=None):
+    """Invoke only from the validated, server-derived signature plan."""
+    positional_names = plan["posonly"] + plan["poskw"]
+    vararg_name = plan["vararg"]
+    varkw_name = plan["varkw"]
+    varargs = values.get(vararg_name, []) if vararg_name else []
+    extra_keywords = values.get(varkw_name, {{}}) if varkw_name else {{}}
+    if varargs:
+        positional = [values[name] for name in positional_names] + list(varargs)
+        keywords = {{
+            name: values[name]
+            for name in plan["kwonly"]
+            if name in values
+        }}
+    else:
+        positional = [values[name] for name in plan["posonly"] if name in values]
+        keywords = {{
+            name: values[name]
+            for name in plan["poskw"] + plan["kwonly"]
+            if name in values
+        }}
+    for name, value in extra_keywords.items():
+        if name in keywords:
+            raise TypeError("A keyword argument was supplied more than once.")
+        keywords[name] = value
+    if bound is not None:
+        positional.insert(0, bound)
+    return function(*positional, **keywords)
+
+
+def _invoke_case(case, arguments=None):
+    values = case["arguments"] if arguments is None else arguments
+    if _CASE_INVOCATION_KIND == "instance_method":
+        instance_values = copy.deepcopy(case["instance_arguments"] or {{}})
+        instance = _invoke_with_signature(
+            _CLASS, instance_values, case["_unai_constructor_signature"]
+        )
+        return _invoke_with_signature(
+            _FUNCTION, values, case["_unai_signature"], bound=instance
+        )
+    return _invoke_with_signature(_FUNCTION, values, case["_unai_signature"])
+
+
+def _coverage_trace(frame, event, arg):
+    if event == "line" and frame.f_code is _TARGET_CODE:
+        if _COVERAGE_CURRENT_LINES is not None:
+            _COVERAGE_CURRENT_LINES.add(frame.f_lineno)
+            _COVERAGE_LINES.add(frame.f_lineno)
+    return _coverage_trace
+
+
+def _record_case_coverage(case, lines):
+    existing = set(_COVERAGE_CASE_LINES.get(case["case_id"], []))
+    _COVERAGE_CASE_LINES[case["case_id"]] = sorted(existing | lines)
+
+
+def _coverage_invoke(case, arguments=None):
+    global _COVERAGE_CURRENT_LINES
+    if _COVERAGE_TRACE_PATH is None:
+        return _invoke_case(case, arguments)
+    _COVERAGE_CURRENT_LINES = set()
+    previous = sys.gettrace()
+    sys.settrace(_coverage_trace)
+    try:
+        return _invoke_case(case, arguments)
+    finally:
+        sys.settrace(previous)
+        current = _COVERAGE_CURRENT_LINES or set()
+        _COVERAGE_CURRENT_LINES = None
+        _record_case_coverage(case, current)
+        # Persist after each measured invocation so interpreter shutdown cannot
+        # discard the only trace if the sandbox is interrupted.
+        _write_coverage_trace_file()
+
+
+def _coverage_async_invoke(case, arguments=None):
+    global _COVERAGE_CURRENT_LINES
+    if _COVERAGE_TRACE_PATH is None:
+        return asyncio.run(_invoke_case(case, arguments))
+    _COVERAGE_CURRENT_LINES = set()
+    previous = sys.gettrace()
+    sys.settrace(_coverage_trace)
+    try:
+        return asyncio.run(_invoke_case(case, arguments))
+    finally:
+        sys.settrace(previous)
+        current = _COVERAGE_CURRENT_LINES or set()
+        _COVERAGE_CURRENT_LINES = None
+        _record_case_coverage(case, current)
+        _write_coverage_trace_file()
+
+
+_CASE_INVOCATION_KIND = {invocation_kind!r}
 
 
 def _strict_equal(actual, expected):
@@ -852,9 +1415,28 @@ _FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES = {{
 }}
 
 
-def _workspace_filesystem_snapshot():
-    """Hash a bounded manifest of the disposable workspace without following symlinks."""
+def _workspace_filesystem_snapshot(root_path=None):
+    """Hash a bounded filesystem root without following symlinks."""
     global _FILESYSTEM_AUDIT_REQUEST_BYTES
+    audit_root = _ROOT
+    if root_path is not None:
+        candidate_root = Path(root_path)
+        try:
+            if candidate_root.is_symlink() or not candidate_root.is_dir():
+                return None, 0, "fixture_unavailable"
+            audit_root = candidate_root.resolve(strict=True)
+            workspace_root = _ROOT.resolve(strict=True)
+            if (
+                audit_root == workspace_root
+                or audit_root.is_relative_to(workspace_root)
+                or workspace_root.is_relative_to(audit_root)
+            ):
+                return None, 0, "fixture_root_unsafe"
+        except OSError:
+            return None, 0, "fixture_unavailable"
+    excluded_directories = (
+        _FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES if root_path is None else set()
+    )
     manifest = {{}}
     snapshot_bytes = 0
     partial_file_bytes = 0
@@ -875,16 +1457,16 @@ def _workspace_filesystem_snapshot():
         return True
 
     try:
-        for current, dirs, files in os.walk(_ROOT, topdown=True, followlinks=False):
+        for current, dirs, files in os.walk(audit_root, topdown=True, followlinks=False):
             current_path = Path(current)
             dirs.sort()
             files.sort()
             for name in list(dirs):
-                if name in _FILESYSTEM_AUDIT_EXCLUDED_DIRECTORIES:
+                if name in excluded_directories:
                     dirs.remove(name)
                     continue
                 candidate = current_path / name
-                relative_path = candidate.relative_to(_ROOT).as_posix()
+                relative_path = candidate.relative_to(audit_root).as_posix()
                 info = candidate.lstat()
                 if stat.S_ISLNK(info.st_mode):
                     target = os.readlink(candidate)
@@ -909,7 +1491,7 @@ def _workspace_filesystem_snapshot():
 
             for name in files:
                 candidate = current_path / name
-                relative_path = candidate.relative_to(_ROOT).as_posix()
+                relative_path = candidate.relative_to(audit_root).as_posix()
                 info = candidate.lstat()
                 if stat.S_ISLNK(info.st_mode):
                     target = os.readlink(candidate)
@@ -1033,8 +1615,49 @@ def _write_replay_trace_file():
             os.close(descriptor)
 
 
+def _write_coverage_trace_file():
+    if _COVERAGE_TRACE_PATH is None:
+        return
+    payload = {{
+        "schema": "unai.coverage-trace.v1",
+        "target_file": _FILE_PATH,
+        "target_sha256": _EXPECTED_TARGET_SHA256,
+        "executed_lines": sorted(_COVERAGE_LINES),
+        "case_lines": _COVERAGE_CASE_LINES,
+    }}
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    if len(encoded.encode("utf-8")) > 262_144:
+        return
+    if _COVERAGE_TRACE_DIRECTORY_FD is None:
+        return
+    descriptor = None
+    try:
+        descriptor = os.open(
+            _COVERAGE_TRACE_PATH.name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_TRUNC
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=_COVERAGE_TRACE_DIRECTORY_FD,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            descriptor = None
+            handle.write(encoded)
+    except OSError:
+        # Coverage failure must not change the oracle result.
+        return
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 if _REPLAY_TRACE_PATH is not None:
     atexit.register(_write_replay_trace_file)
+if _COVERAGE_TRACE_PATH is not None:
+    atexit.register(_write_coverage_trace_file)
 
 
 def _property_holds(actual, arguments, property_spec):
@@ -1078,13 +1701,28 @@ def test_grounded_oracle_case(case):
     property_spec = case.get("oracle_property")
     if (
         property_spec is not None
-        and property_spec["kind"] == "workspace_filesystem_unchanged"
+        and property_spec["kind"] in {
+            "workspace_filesystem_unchanged",
+            "external_fixture_filesystem_unchanged",
+        }
     ):
-        before_manifest, before_bytes, before_reason = _workspace_filesystem_snapshot()
+        audit_kind = property_spec["kind"]
+        audit_root = None
+        if audit_kind == "external_fixture_filesystem_unchanged":
+            audit_root = os.environ.get("UNAI_SIDE_EFFECTS_ROOT")
+            if not audit_root:
+                _record_replay_trace({{
+                    "case_id": case["case_id"],
+                    "kind": audit_kind,
+                    "status": "unavailable",
+                    "reason_code": "fixture_unavailable",
+                }})
+                return
+        before_manifest, before_bytes, before_reason = _workspace_filesystem_snapshot(audit_root)
         if before_manifest is None:
             _record_replay_trace({{
                 "case_id": case["case_id"],
-                "kind": "workspace_filesystem_unchanged",
+                "kind": audit_kind,
                 "status": "unavailable",
                 "reason_code": before_reason,
             }})
@@ -1096,11 +1734,11 @@ def test_grounded_oracle_case(case):
         except Exception as exc:
             invocation_exception = exc
 
-        after_manifest, after_bytes, after_reason = _workspace_filesystem_snapshot()
+        after_manifest, after_bytes, after_reason = _workspace_filesystem_snapshot(audit_root)
         if after_manifest is None:
             _record_replay_trace({{
                 "case_id": case["case_id"],
-                "kind": "workspace_filesystem_unchanged",
+                "kind": audit_kind,
                 "status": "unavailable",
                 "reason_code": after_reason,
             }})
@@ -1112,7 +1750,7 @@ def test_grounded_oracle_case(case):
         unchanged = filesystem_delta["changed_entry_count"] == 0
         audit_record = {{
             "case_id": case["case_id"],
-            "kind": "workspace_filesystem_unchanged",
+            "kind": audit_kind,
             "status": "complete",
             "unchanged": unchanged,
             "before_sha256": filesystem_delta["before_sha256"],
@@ -1130,12 +1768,20 @@ def test_grounded_oracle_case(case):
                 "actual_type": (
                     type(invocation_exception).__name__
                     if invocation_exception is not None
-                    else "WorkspaceMutation"
+                    else (
+                        "ExternalFixtureMutation"
+                        if audit_kind == "external_fixture_filesystem_unchanged"
+                        else "WorkspaceMutation"
+                    )
                 ),
                 "actual_summary": (
-                    "The target changed the disposable workspace filesystem."
+                    (
+                        "The target changed the managed external side-effect fixture."
+                        if audit_kind == "external_fixture_filesystem_unchanged"
+                        else "The target changed the disposable workspace filesystem."
+                    )
                     if invocation_exception is None
-                    else "The target raised an exception during the workspace filesystem audit."
+                    else "The target raised an exception during the filesystem audit."
                 ),
                 "actual_sha256": filesystem_delta["after_sha256"],
                 "exception_message_sha256": (
@@ -1175,7 +1821,7 @@ def test_grounded_oracle_case(case):
         replay_count = property_spec["replay_count"]
         for replay_index in range(replay_count):
             try:
-                actual = {invocation.replace("case['arguments']", "copy.deepcopy(case['arguments'])")}
+                actual = {replay_invocation}
             except Exception as exc:
                 stable = False
                 frame = _target_exception_frame(exc)
@@ -1301,12 +1947,157 @@ class GroundedTestVerifier:
         test_runner: IsolatedPythonTestRunner,
         trusted_oracle_public_keys: dict[str, str] | None = None,
         trusted_oracle_publisher_keys: dict[str, dict[str, Any]] | None = None,
+        trusted_oracle_transparency_log_keys: dict[str, dict[str, Any]] | None = None,
+        trusted_oracle_transparency_witness_keys: dict[str, dict[str, Any]] | None = None,
+        oracle_transparency_required: bool = False,
+        oracle_transparency_min_witnesses: int = 0,
+        transparency_checkpoint_store: TransparencyCheckpointStore | None = None,
     ) -> None:
         self.ledger = ledger
         self.patch_manager = patch_manager
         self.test_runner = test_runner
         self.trusted_oracle_public_keys = dict(trusted_oracle_public_keys or {})
         self.trusted_oracle_publisher_keys = dict(trusted_oracle_publisher_keys or {})
+        self.trusted_oracle_transparency_log_keys = dict(trusted_oracle_transparency_log_keys or {})
+        self.trusted_oracle_transparency_witness_keys = dict(trusted_oracle_transparency_witness_keys or {})
+        self.oracle_transparency_required = bool(oracle_transparency_required)
+        self.oracle_transparency_min_witnesses = int(oracle_transparency_min_witnesses)
+        self.transparency_checkpoint_store = transparency_checkpoint_store
+
+    def _verify_publisher_transparency(
+        self, publisher: GroundedOraclePublisherAttestation,
+        statement: dict[str, Any], case_id: str,
+    ) -> dict[str, Any] | None:
+        proof = publisher.transparency
+        if proof is None:
+            if self.oracle_transparency_required:
+                raise GroundedVerificationError(
+                    f"Publisher oracle case {case_id} requires a transparency inclusion proof.", 403
+                )
+            return None
+
+        head = SignedTreeHead(
+            log_id=proof.tree_head.log_id,
+            key_id=proof.tree_head.key_id,
+            timestamp=proof.tree_head.timestamp,
+            tree_size=proof.tree_head.tree_size,
+            root_hash=proof.tree_head.root_hash,
+            signature_b64=proof.tree_head.signature_b64,
+        )
+        log_entry = self.trusted_oracle_transparency_log_keys.get(head.key_id)
+        if log_entry is None:
+            raise GroundedVerificationError(
+                f"Transparency log key {head.key_id!r} is not operator-trusted.", 403
+            )
+        if log_entry.get("log_id") != head.log_id:
+            raise GroundedVerificationError(
+                f"Transparency log identity does not match key {head.key_id!r}.", 403
+            )
+        if log_entry.get("revoked", False):
+            raise GroundedVerificationError(
+                f"Transparency log key {head.key_id!r} has been revoked.", 403
+            )
+        try:
+            observed_at = datetime.fromtimestamp(head.timestamp, timezone.utc)
+        except (OverflowError, OSError, ValueError) as exc:
+            raise GroundedVerificationError("Transparency tree-head timestamp is outside the supported range.", 403) from exc
+        not_before = log_entry.get("not_before")
+        not_after = log_entry.get("not_after")
+        if not_before is not None and observed_at < not_before:
+            raise GroundedVerificationError("Transparency log key was not valid at the tree-head timestamp.", 403)
+        if not_after is not None and observed_at > not_after:
+            raise GroundedVerificationError("Transparency log key was outside its validity window at the tree-head timestamp.", 403)
+
+        log_keys = {head.key_id: log_entry["public_key_b64"]}
+        if not verify_publisher_manifest_inclusion(
+            statement=statement,
+            head=head,
+            leaf_index=proof.leaf_index,
+            inclusion_proof=proof.inclusion_proof,
+            trusted_log_keys=log_keys,
+        ):
+            raise GroundedVerificationError(
+                f"Publisher manifest inclusion proof or signed tree head is invalid for oracle case {case_id}.", 403
+            )
+
+        witness_statement = build_transparency_witness_statement(head)
+        accepted_witness_ids: set[str] = set()
+        witness_provenance: list[dict[str, Any]] = []
+        for witness in proof.witnesses:
+            witness_entry = self.trusted_oracle_transparency_witness_keys.get(witness.key_id)
+            if witness_entry is None:
+                raise GroundedVerificationError(
+                    f"Transparency witness key {witness.key_id!r} is not operator-trusted.", 403
+                )
+            if witness_entry.get("revoked", False):
+                raise GroundedVerificationError(
+                    f"Transparency witness key {witness.key_id!r} has been revoked.", 403
+                )
+            if not_before := witness_entry.get("not_before"):
+                if observed_at < not_before:
+                    raise GroundedVerificationError(
+                        f"Transparency witness key {witness.key_id!r} was not yet valid at the tree-head timestamp.", 403
+                    )
+            if not_after := witness_entry.get("not_after"):
+                if observed_at > not_after:
+                    raise GroundedVerificationError(
+                        f"Transparency witness key {witness.key_id!r} was outside its validity window at the tree-head timestamp.", 403
+                    )
+            if not verify_ed25519_attestation(
+                public_key_b64=witness_entry["public_key_b64"],
+                signature_b64=witness.signature_b64,
+                message=canonical_attestation_message(witness_statement),
+            ):
+                raise GroundedVerificationError(
+                    f"Transparency witness signature is invalid for key {witness.key_id!r}.", 403
+                )
+            witness_id = witness_entry["witness_id"]
+            accepted_witness_ids.add(witness_id)
+            witness_provenance.append({
+                "key_id": witness.key_id,
+                "witness_id": witness_id,
+                "signature_b64": witness.signature_b64,
+                "statement_sha256": attestation_statement_sha256(witness_statement),
+            })
+
+        required_witnesses = max(
+            self.oracle_transparency_min_witnesses,
+            1 if self.oracle_transparency_required else 0,
+        )
+        if len(accepted_witness_ids) < required_witnesses:
+            raise GroundedVerificationError(
+                f"Transparency witness quorum not met: {len(accepted_witness_ids)} distinct witnesses; {required_witnesses} required.",
+                403,
+            )
+
+        if self.transparency_checkpoint_store is None:
+            raise GroundedVerificationError(
+                "Transparency checkpoint storage is not configured; refusing publisher transparency evidence.", 503
+            )
+        try:
+            checkpoint_added = self.transparency_checkpoint_store.accept(
+                head, log_keys, proof.consistency_proof
+            )
+        except ValueError as exc:
+            raise GroundedVerificationError(f"Transparency checkpoint rejected: {exc}", 409) from exc
+
+        return {
+            "verified": True,
+            "schema": "unai.publisher-transparency-proof.v1",
+            "log_id": head.log_id,
+            "log_key_id": head.key_id,
+            "tree_size": head.tree_size,
+            "tree_head_timestamp": head.timestamp,
+            "root_hash": head.root_hash.lower(),
+            "tree_head_signature_b64": head.signature_b64,
+            "leaf_index": proof.leaf_index,
+            "inclusion_proof": list(proof.inclusion_proof),
+            "consistency_proof": list(proof.consistency_proof),
+            "witnesses": witness_provenance,
+            "distinct_witness_count": len(accepted_witness_ids),
+            "required_witness_count": required_witnesses,
+            "checkpoint_newly_accepted": checkpoint_added,
+        }
 
     def _shrink_property_counterexamples(
         self,
@@ -1543,6 +2334,7 @@ class GroundedTestVerifier:
                     candidate_cases,
                     source_sha256,
                     is_async=is_async,
+                    invocation_kind=target_invocation_kind,
                 )
 
                 # Each round must use the same implementation and specification
@@ -1799,8 +2591,18 @@ class GroundedTestVerifier:
                 "The source changed since the oracle request was prepared. Read the file and probes again.",
                 409,
             )
-        function = _target_function(source_snapshot.content, request.symbol_name)
-        normalized = _validate_cases(snapshot, request, function)
+        target = _target_descriptor(source_snapshot.content, request.symbol_name)
+        function = target["function"]
+        target_invocation_kind = target["invocation_kind"]
+        normalized = _validate_cases(snapshot, request, target)
+        coverage_plan = None
+        if request.measure_coverage:
+            try:
+                coverage_plan = build_coverage_plan(source_snapshot.content, function)
+            except CoveragePlanningError as exc:
+                raise GroundedVerificationError(
+                    f"Coverage analysis could not represent the target: {exc}"
+                ) from exc
 
         # A supplied workspace document hash pins the exact bytes used as the
         # specification reference. It does not authenticate the document author.
@@ -1888,6 +2690,9 @@ class GroundedTestVerifier:
                     f"Publisher signature for oracle case {case['case_id']} is invalid.",
                     403,
                 )
+            transparency_provenance = self._verify_publisher_transparency(
+                publisher, statement, case["case_id"]
+            )
             case["oracle_publisher_attestation_provenance"] = {
                 "verified": True,
                 "algorithm": "Ed25519",
@@ -1901,6 +2706,8 @@ class GroundedTestVerifier:
                 "key_not_before": not_before.isoformat() if not_before is not None else None,
                 "key_not_after": not_after.isoformat() if not_after is not None else None,
                 "statement_sha256": attestation_statement_sha256(statement),
+                "trust_bundle": trusted_entry.get("_trust_bundle"),
+                "transparency": transparency_provenance,
             }
             publisher_signatures[case["case_id"]] = publisher.signature_b64
             # Signatures remain in append-only evidence, not generated pytest input.
@@ -1937,6 +2744,7 @@ class GroundedTestVerifier:
                 arguments_sha256=case["arguments_sha256"],
                 expected_output_sha256=case["expected_sha256"],
                 oracle_property_sha256=case["oracle_property_sha256"],
+                instance_arguments_sha256=case.get("instance_arguments_sha256"),
             )
             message = canonical_attestation_message(statement)
             if not verify_ed25519_attestation(
@@ -1982,6 +2790,7 @@ class GroundedTestVerifier:
                     "symbol_name": request.symbol_name,
                     "source_sha256": source_snapshot.sha256,
                     "arguments_sha256": case["arguments_sha256"],
+                    "instance_arguments_sha256": case.get("instance_arguments_sha256"),
                     "expected_sha256": case["expected_sha256"],
                     "oracle_property_sha256": case["oracle_property_sha256"],
                     "oracle_property": case["oracle_property"],
@@ -1991,7 +2800,14 @@ class GroundedTestVerifier:
                     "oracle_artifact_sha256": case["oracle_artifact_sha256"],
                     "oracle_artifact_size_bytes": case.get("oracle_artifact_size_bytes"),
                     "oracle_artifact_integrity": (
-                        "trusted-ed25519-publisher-and-reviewer"
+                        "trusted-ed25519-publisher-transparency-and-reviewer"
+                        if case["oracle_publisher_attestation_provenance"]
+                        and case["oracle_publisher_attestation_provenance"].get("transparency")
+                        and case["oracle_attestation_provenance"]
+                        else "trusted-ed25519-publisher-transparency"
+                        if case["oracle_publisher_attestation_provenance"]
+                        and case["oracle_publisher_attestation_provenance"].get("transparency")
+                        else "trusted-ed25519-publisher-and-reviewer"
                         if case["oracle_publisher_attestation_provenance"] and case["oracle_attestation_provenance"]
                         else "trusted-ed25519-publisher-signature"
                         if case["oracle_publisher_attestation_provenance"]
@@ -2015,14 +2831,6 @@ class GroundedTestVerifier:
             oracle_events.append(event)
 
         is_async = isinstance(function, ast.AsyncFunctionDef)
-        target_invocation_kind = "module_function"
-        if "." in request.symbol_name:
-            target_invocation_kind = (
-                "classmethod"
-                if len(function.decorator_list) == 1
-                and _decorator_name(function.decorator_list[0]) == "classmethod"
-                else "staticmethod"
-            )
         generated_path = f"unai_generated_tests/test_oracle_{uuid4().hex}.py"
         trace_case_ids = [
             case["case_id"]
@@ -2031,6 +2839,7 @@ class GroundedTestVerifier:
             and case["oracle_property"].get("kind") in {
                 "output_stable_across_replays",
                 "workspace_filesystem_unchanged",
+                "external_fixture_filesystem_unchanged",
             }
         ]
         filesystem_case_ids = [
@@ -2039,16 +2848,41 @@ class GroundedTestVerifier:
             if case.get("oracle_property")
             and case["oracle_property"].get("kind") == "workspace_filesystem_unchanged"
         ]
+        external_fixture_case_ids = [
+            case["case_id"]
+            for case in normalized
+            if case.get("oracle_property")
+            and case["oracle_property"].get("kind") == "external_fixture_filesystem_unchanged"
+        ]
         replay_trace_relative_path = (
             generated_path[:-3] + ".replay.json" if trace_case_ids else None
         )
+        coverage_trace_relative_path = (
+            generated_path[:-3] + ".coverage.json"
+            if coverage_plan is not None
+            else None
+        )
+        # Transparency and reviewer signatures are durable evidence, never test input.
+        execution_cases = [
+            {
+                key: value
+                for key, value in case.items()
+                if key not in {
+                    "oracle_attestation_provenance",
+                    "oracle_publisher_attestation_provenance",
+                }
+            }
+            for case in normalized
+        ]
         generated_content = _generated_pytest(
             request.file_path,
             request.symbol_name,
-            normalized,
+            execution_cases,
             source_snapshot.sha256,
             is_async=is_async,
+            invocation_kind=target_invocation_kind,
             replay_trace_path=replay_trace_relative_path,
+            coverage_trace_path=coverage_trace_relative_path,
         )
         run_metadata = {
             "target_file": request.file_path,
@@ -2062,7 +2896,11 @@ class GroundedTestVerifier:
             "oracle_case_ids": [case["case_id"] for case in normalized],
             "trace_case_ids": trace_case_ids,
             "filesystem_case_ids": filesystem_case_ids,
+            "external_fixture_case_ids": external_fixture_case_ids,
             "replay_trace_relative_path": replay_trace_relative_path,
+            "coverage_requested": coverage_plan is not None,
+            "coverage_trace_relative_path": coverage_trace_relative_path,
+            "coverage_case_ids": [case["case_id"] for case in normalized],
             "oracle_references": [
                 {
                     "case_id": case["case_id"],
@@ -2373,7 +3211,11 @@ class GroundedTestVerifier:
         shrinkable_case_ids = {
             case_id for case_id in counterexample_case_ids
             if case_by_id[case_id]["oracle_property"].get("kind")
-            not in {"output_stable_across_replays", "workspace_filesystem_unchanged"}
+            not in {
+                "output_stable_across_replays",
+                "workspace_filesystem_unchanged",
+                "external_fixture_filesystem_unchanged",
+            }
         }
         shrinking_results: list[GroundedShrinkResult] = []
         if (
@@ -2419,6 +3261,12 @@ class GroundedTestVerifier:
             "stderr_preview": execution.stderr_preview,
             "replay_trace_records": execution.evidence.metadata.get("replay_trace_records", []),
             "replay_trace_status": execution.evidence.metadata.get("replay_trace_status"),
+            "coverage_trace_status": execution.evidence.metadata.get("coverage_trace_status"),
+            "coverage_trace_sha256": (
+                execution.evidence.metadata.get("coverage_trace", {}).get("trace_sha256")
+                if isinstance(execution.evidence.metadata.get("coverage_trace"), dict)
+                else None
+            ),
             "target_sha256": source_snapshot.sha256,
             "generated_test_sha256": run_metadata["generated_test_sha256"],
             "case_ids": [case["case_id"] for case in normalized],
@@ -2440,6 +3288,70 @@ class GroundedTestVerifier:
         )
         self.ledger.append_evidence(trace_evidence)
 
+        coverage_result = None
+        coverage_evidence = None
+        if coverage_plan is not None:
+            coverage_trace_status = execution.evidence.metadata.get(
+                "coverage_trace_status"
+            )
+            coverage_trace = execution.evidence.metadata.get("coverage_trace")
+            trace_sha256 = (
+                coverage_trace.get("trace_sha256")
+                if isinstance(coverage_trace, dict)
+                else None
+            )
+            if (
+                coverage_trace_status == "complete"
+                and isinstance(coverage_trace, dict)
+                and coverage_trace.get("target_file") == request.file_path
+                and str(coverage_trace.get("target_sha256", "")).lower()
+                == source_snapshot.sha256.lower()
+                and isinstance(trace_sha256, str)
+                and re.fullmatch(r"[a-fA-F0-9]{64}", trace_sha256) is not None
+            ):
+                coverage_result = analyze_coverage(
+                    coverage_plan,
+                    coverage_trace.get("executed_lines", []),
+                    coverage_trace.get("case_lines"),
+                    target_file=request.file_path,
+                    symbol_name=request.symbol_name,
+                    source_sha256=source_snapshot.sha256,
+                    trace_sha256=trace_sha256.lower(),
+                )
+            else:
+                coverage_result = unavailable_coverage(
+                    target_file=request.file_path,
+                    symbol_name=request.symbol_name,
+                    source_sha256=source_snapshot.sha256,
+                    reason=(
+                        "Coverage trace was not available "
+                        f"({coverage_trace_status or 'missing'})."
+                    ),
+                )
+            coverage_evidence = EvidenceRecord(
+                evidence_id=uuid4().hex,
+                task_id=task_id,
+                kind="coverage",
+                source="grounded-coverage",
+                claim=(
+                    f"Coverage measurement {coverage_result.status}: "
+                    f"{coverage_result.executed_line_count}/"
+                    f"{coverage_result.coverable_line_count} target line(s), "
+                    f"{coverage_result.observed_branch_arms}/"
+                    f"{coverage_result.supported_branch_arms} supported branch arm(s)."
+                ),
+                passed=None,
+                artifact_ref=f"coverage:{task_id}:{execution.evidence.evidence_id}",
+                metadata={
+                    "schema": "unai.coverage.v1",
+                    "execution_evidence_id": execution.evidence.evidence_id,
+                    "generated_test_sha256": run_metadata["generated_test_sha256"],
+                    **coverage_result.model_dump(mode="json"),
+                },
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.ledger.append_evidence(coverage_evidence)
+
         passed_cases: int | None = None
         if execution.status == "passed":
             passed_cases = len(normalized)
@@ -2459,6 +3371,8 @@ class GroundedTestVerifier:
             execution_evidence=execution.evidence,
             trace_evidence=trace_evidence,
             oracle_evidence=oracle_events,
+            coverage=coverage_result,
+            coverage_evidence=coverage_evidence,
             limitations=list(_LIMITATIONS),
         )
 
@@ -2486,6 +3400,18 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     shrink_events = [
         item for item in events
         if item.kind == "shrink" and item.source == "grounded-property-shrinker"
+    ]
+    mutation_summaries = [
+        item for item in events
+        if item.kind == "mutation" and item.source == _MUTATION_SUMMARY_SOURCE
+    ]
+    mutation_runs = [
+        item for item in events
+        if item.kind == "execution" and item.source == _MUTATION_EVIDENCE_SOURCE
+    ]
+    coverage_summaries = [
+        item for item in events
+        if item.kind == "coverage" and item.source == "grounded-coverage"
     ]
     probes = [
         item for item in events
@@ -2601,6 +3527,47 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         risks.append(
             "Counterexamples are tied to the source hash recorded at execution time; later edits require fresh reruns."
         )
+    if mutation_summaries:
+        latest_mutation = mutation_summaries[-1]
+        survived = int(latest_mutation.metadata.get("mutants_survived", 0) or 0)
+        if survived:
+            risks.append(
+                f"The latest mutation run left {survived} mutant(s) alive; the supplied oracle cases do not distinguish those source changes."
+            )
+        elif latest_mutation.metadata.get("status") == "unavailable":
+            risks.append(
+                "The latest mutation run did not complete within its baseline and sandbox limits, so test strength remains unknown."
+            )
+    else:
+        risks.append(
+            "No mutation-based test-strength run is recorded; passing oracle cases may not distinguish small source changes."
+        )
+    if coverage_summaries:
+        latest_coverage = coverage_summaries[-1]
+        if latest_coverage.metadata.get("status") == "unavailable":
+            risks.append(
+                "The latest coverage measurement was unavailable, so line and branch coverage of the supplied oracle cases remains unknown."
+            )
+        else:
+            missing_lines = int(
+                latest_coverage.metadata.get("missing_line_count", 0) or 0
+            )
+            supported_arms = int(
+                latest_coverage.metadata.get("supported_branch_arms", 0) or 0
+            )
+            observed_arms = int(
+                latest_coverage.metadata.get("observed_branch_arms", 0) or 0
+            )
+            if missing_lines or supported_arms > observed_arms:
+                risks.append(
+                    f"The latest coverage run left {missing_lines} target line(s) and "
+                    f"{max(0, supported_arms - observed_arms)} supported branch arm(s) "
+                    "unobserved by the supplied oracle cases."
+                )
+    else:
+        risks.append(
+            "No coverage measurement is recorded; line and branch coverage of the supplied oracle cases remains unknown."
+        )
     if not any(item.passed is True for item in grounded_runs):
         risks.append("No passing grounded-oracle execution is currently recorded.")
     risks.extend(
@@ -2624,6 +3591,19 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
             if item.metadata.get("status") == "smaller_failure_observed"
         ),
         unverified_probe_candidate_count=unverified_count,
+        mutation_run_count=len(mutation_summaries),
+        latest_mutation_summary=(
+            mutation_summaries[-1] if mutation_summaries else None
+        ),
+        mutation_evidence=sorted(
+            mutation_runs + mutation_summaries,
+            key=lambda item: (item.created_at, item.evidence_id),
+        )[-60:],
+        coverage_run_count=len(coverage_summaries),
+        latest_coverage_summary=(
+            coverage_summaries[-1] if coverage_summaries else None
+        ),
+        coverage_evidence=coverage_summaries[-60:],
         counterexamples=counterexamples,
         oracle_evidence=oracle_events[-100:],
         shrink_evidence=shrink_events[-100:],

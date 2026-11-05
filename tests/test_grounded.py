@@ -5,6 +5,8 @@ import base64
 import hashlib
 import json
 import math
+import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -21,6 +23,9 @@ from unai_engine.models import (
     EvidenceRecord,
     GroundedOracleAttestation,
     GroundedOraclePublisherAttestation,
+    GroundedOracleTransparencyProof,
+    GroundedOracleTransparencyTreeHead,
+    GroundedOracleTransparencyWitness,
     GroundedOracleCase,
     GroundedPropertyOracle,
     GroundedTestApprovalRequest,
@@ -28,7 +33,7 @@ from unai_engine.models import (
     TaskTestRunResponse,
 )
 from unai_engine.runtime.patches import PatchManager
-from unai_engine.runtime.sandbox import ExecutionResult
+from unai_engine.runtime.sandbox import DockerSandbox, ExecutionResult
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, WorkspaceStagingError
 from unai_engine.verification.attestations import (
     build_oracle_attestation_statement,
@@ -38,10 +43,23 @@ from unai_engine.verification.attestations import (
 from unai_engine.verification.grounded import (
     GroundedTestVerifier,
     GroundedVerificationError,
+    _generated_pytest,
+    _signature_plan,
+    _target_descriptor,
+    _validate_signature_values,
     build_proof_bundle,
 )
 from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.probes import BoundaryProbeGenerator
+from unai_engine.verification.transparency import (
+    SignedTreeHead,
+    TransparencyCheckpointStore,
+    build_transparency_witness_statement,
+    leaf_hash,
+    node_hash,
+    publisher_manifest_leaf,
+    sign_tree_head_message,
+)
 
 
 class FakeGroundedRunner:
@@ -320,6 +338,35 @@ def test_trusted_publisher_signature_authenticates_exact_specification_artifact(
     bundle = build_proof_bundle(saved)
     assert not any("lack a valid signature from an operator-configured trusted publisher key" in risk for risk in bundle.unresolved_risks)
     assert any("lack a valid signature from an operator-configured trusted reviewer key" in risk for risk in bundle.unresolved_risks)
+
+
+
+def test_signed_trust_bundle_provenance_is_preserved_in_grounded_evidence(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Clamp requirement\\nValues below 10 return zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, trust_entry, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    trust_entry["_trust_bundle"] = {
+        "schema": "unai.publisher-trust-bundle.v1",
+        "sequence": 42,
+        "root_key_id": "offline-root-2026",
+        "payload_sha256": "a" * 64,
+        "publisher_count": 1,
+        "minimum_sequence": 42,
+        "rollback_floor_enforced": True,
+    }
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": trust_entry}
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    provenance = result.oracle_evidence[0].metadata["oracle_publisher_attestation"]["trust_bundle"]
+    assert provenance["schema"] == "unai.publisher-trust-bundle.v1"
+    assert provenance["sequence"] == 42
+    assert provenance["root_key_id"] == "offline-root-2026"
+    assert provenance["rollback_floor_enforced"] is True
 
 
 def test_publisher_attestation_rejects_untrusted_issuer_or_domain_before_execution(tmp_path: Path) -> None:
@@ -1026,7 +1073,7 @@ def test_async_grounded_function_uses_asyncio_run_in_generated_harness(tmp_path:
     generated = runner.calls[0]["content"]
     ast.parse(generated)
     assert "import asyncio\nimport atexit\nimport copy\nimport hashlib\nimport importlib.util" in generated
-    assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
+    assert "asyncio.run(_invoke_case(case))" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
 
@@ -1073,8 +1120,145 @@ def test_staticmethod_grounded_target_uses_explicit_class_binding(tmp_path: Path
     assert "_METHOD = 'add'" in generated
     assert "_CLASS = getattr(_MODULE, _OWNER, None)" in generated
     assert "_FUNCTION = getattr(_CLASS, _METHOD, None)" in generated
-    assert "_FUNCTION(**case['arguments'])" in generated
+    assert "_invoke_case(case)" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is False
+
+
+def test_nested_instance_method_runs_with_explicit_fixture_in_generated_harness(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = (
+        "class Namespace:\n"
+        "    class Counter:\n"
+        "        def __init__(self, start):\n"
+        "            self.value = start\n"
+        "        def add(self, amount):\n"
+        "            return self.value + amount\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Namespace.Counter.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="nested-counter-add",
+                arguments={"amount": 5},
+                instance_arguments={"start": 7},
+                expected_output=12,
+                oracle_kind="user",
+                oracle_reference="User supplied nested Counter.add result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated_call = runner.calls[0]
+    assert "_OWNER_PATH = ('Namespace', 'Counter')" in generated_call["content"]
+    staged_root = tmp_path / "nested-instance-harness"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert result.oracle_evidence[0].metadata["instance_arguments_sha256"]
+
+
+def test_nested_staticmethod_runs_through_explicit_namespace_path(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = (
+        "class Namespace:\n"
+        "    class Math:\n"
+        "        @staticmethod\n"
+        "        def add(value, offset=2):\n"
+        "            return value + offset\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Namespace.Math.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="nested-static-add",
+                arguments={"value": 8},
+                expected_output=10,
+                oracle_kind="user",
+                oracle_reference="User supplied nested static method result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated_call = runner.calls[0]
+    staged_root = tmp_path / "nested-static-harness"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_nested_class_inheritance_is_rejected_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = (
+        "class Namespace:\n"
+        "    class Base:\n"
+        "        pass\n"
+        "    class Counter(Base):\n"
+        "        def read(self, value):\n"
+        "            return value\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Namespace.Counter.read",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="nested-inheritance-rejected",
+                arguments={"value": 1},
+                instance_arguments={},
+                expected_output=1,
+                oracle_kind="user",
+                oracle_reference="User supplied nested class fixture check",
+            )
+        ],
+    )
+
+    with pytest.raises(
+        GroundedVerificationError,
+        match="Nested-class targets require undecorated namespace classes without bases or metaclass keywords",
+    ):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
 
 
 def test_async_classmethod_uses_bound_cls_and_asyncio_run(tmp_path: Path) -> None:
@@ -1108,7 +1292,7 @@ def test_async_classmethod_uses_bound_cls_and_asyncio_run(tmp_path: Path) -> Non
     assert result.status == "passed"
     generated = runner.calls[0]["content"]
     ast.parse(generated)
-    assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
+    assert "asyncio.run(_invoke_case(case))" in generated
     assert "_OWNER = 'AsyncCalculator'" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
@@ -1117,14 +1301,9 @@ def test_async_classmethod_uses_bound_cls_and_asyncio_run(tmp_path: Path) -> Non
     "source,symbol_name,error",
     [
         (
-            "class Calculator:" + chr(10) + "    def add(self, value):" + chr(10) + "        return value" + chr(10),
-            "Calculator.add",
-            "Only explicitly decorated @staticmethod and @classmethod",
-        ),
-        (
             "class Calculator:" + chr(10) + "    @property" + chr(10) + "    def add(self):" + chr(10) + "        return 1" + chr(10),
             "Calculator.add",
-            "Only explicitly decorated @staticmethod and @classmethod",
+            "Only explicitly decorated @staticmethod/@classmethod",
         ),
         (
             "def marker(fn):" + chr(10) + "    return fn" + chr(10) + "@marker" + chr(10) + "def add(value):" + chr(10) + "    return value" + chr(10),
@@ -1191,6 +1370,237 @@ def test_classmethod_bound_parameter_is_not_exposed_as_oracle_argument(tmp_path:
         verifier.run(task_id, request, workspace_root)
 
     assert runner.calls == []
+
+
+
+def test_instance_method_uses_explicit_json_constructor_fixture(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class Counter:\n"
+        "    def __init__(self, start, step=1):\n"
+        "        self.value = start\n"
+        "        self.step = step\n"
+        "    def advance(self, amount=1):\n"
+        "        self.value += amount * self.step\n"
+        "        return self.value\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Counter.advance",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="counter-advance",
+                arguments={"amount": 3},
+                instance_arguments={"start": 10, "step": 2},
+                expected_output=16,
+                oracle_kind="user",
+                oracle_reference="User supplied Counter.advance result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None" in generated
+    assert "_invoke_case(case)" in generated
+    assert "_invoke_with_signature(" in generated
+    assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
+    fixture_hash = result.oracle_evidence[0].metadata["instance_arguments_sha256"]
+    assert fixture_hash == hashlib.sha256(
+        json.dumps(
+            {"start": 10, "step": 2},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    saved = ledger.get_snapshot(task_id)
+    assert saved is not None
+    assert any(item.kind == "oracle" for item in saved.evidence)
+
+
+def test_async_instance_method_uses_fresh_constructor_fixture(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class AsyncCounter:\n"
+        "    def __init__(self, start):\n"
+        "        self.value = start\n"
+        "    async def advance(self, amount):\n"
+        "        return self.value + amount\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="AsyncCounter.advance",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="async-instance",
+                arguments={"amount": 5},
+                instance_arguments={"start": 7},
+                expected_output=12,
+                oracle_kind="user",
+                oracle_reference="User supplied async instance-method result",
+            )
+        ],
+    )
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    generated = runner.calls[0]["content"]
+    ast.parse(generated)
+    assert "asyncio.run(_invoke_case(case))" in generated
+    assert "_invoke_with_signature(" in generated
+    assert runner.calls[0]["metadata"]["target_is_async"] is True
+    assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
+
+
+@pytest.mark.parametrize(
+    "source,instance_arguments,error",
+    [
+        (
+            "class Counter:\n    def __init__(self, start):\n        self.start = start\n"
+            "    def read(self, amount):\n        return self.start + amount\n",
+            {},
+            "missing required constructor parameters: start",
+        ),
+        (
+            "class Counter:\n    def __init__(self):\n        pass\n"
+            "    def read(self, amount):\n        return amount\n",
+            {"unexpected": 1},
+            "unknown constructor parameters: unexpected",
+        ),
+        (
+            "class Base:\n    pass\nclass Counter(Base):\n"
+            "    def read(self, amount):\n        return amount\n",
+            {},
+            "without bases or metaclass keywords",
+        ),
+        (
+            "class Counter:\n    def __new__(cls):\n        return object.__new__(cls)\n"
+            "    def read(self, amount):\n        return amount\n",
+            {},
+            "custom __new__",
+        ),
+        (
+            "class Counter:\n    async def __init__(self):\n        pass\n"
+            "    def read(self, amount):\n        return amount\n",
+            {},
+            "synchronous, undecorated method",
+        ),
+    ],
+)
+def test_instance_method_rejects_unsafe_or_invalid_fixture_construction(
+    tmp_path: Path, source: str, instance_arguments: dict, error: str
+) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Counter.read",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="bad-instance-fixture",
+                arguments={"amount": 1},
+                instance_arguments=instance_arguments,
+                expected_output=1,
+                oracle_kind="user",
+                oracle_reference="User supplied instance fixture check",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match=error):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_instance_fixture_is_rejected_for_static_method_targets(tmp_path: Path) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(
+        "class Calculator:\n"
+        "    @staticmethod\n"
+        "    def add(value):\n"
+        "        return value + 1\n",
+        encoding="utf-8",
+    )
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="Calculator.add",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="static-fixture-rejected",
+                arguments={"value": 1},
+                instance_arguments={},
+                expected_output=2,
+                oracle_kind="user",
+                oracle_reference="User supplied static method fixture check",
+            )
+        ],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="only for an ordinary instance-method"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_instance_fixture_hash_is_covered_by_reviewer_attestation_statement() -> None:
+    statement = build_oracle_attestation_statement(
+        key_id="reviewer-release",
+        issued_at=datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc),
+        task_id="task-1",
+        workspace="demo",
+        file_path="service.py",
+        symbol_name="Counter.advance",
+        source_sha256="a" * 64,
+        case_id="counter-case",
+        oracle_kind="specification",
+        oracle_reference="product-spec.md#counter",
+        oracle_artifact_path="product-spec.md",
+        oracle_artifact_sha256="b" * 64,
+        arguments_sha256="c" * 64,
+        expected_output_sha256="d" * 64,
+        oracle_property_sha256=None,
+        instance_arguments_sha256="e" * 64,
+    )
+    assert statement["instance_arguments_sha256"] == "e" * 64
+
+    legacy_statement = build_oracle_attestation_statement(
+        key_id="reviewer-release",
+        issued_at=datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc),
+        task_id="task-1",
+        workspace="demo",
+        file_path="service.py",
+        symbol_name="clamp",
+        source_sha256="a" * 64,
+        case_id="clamp-case",
+        oracle_kind="specification",
+        oracle_reference="product-spec.md#clamp",
+        oracle_artifact_path="product-spec.md",
+        oracle_artifact_sha256="b" * 64,
+        arguments_sha256="c" * 64,
+        expected_output_sha256="d" * 64,
+        oracle_property_sha256=None,
+    )
+    assert "instance_arguments_sha256" not in legacy_statement
 
 
 def test_decorated_async_function_remains_rejected(tmp_path: Path) -> None:
@@ -1586,6 +1996,128 @@ def _execute_filesystem_audit_harness(
     assert record["status"] == "complete"
     assert "side-effect.txt" not in json.dumps(record)
     return completed, record, staged_root
+
+
+def _execute_external_fixture_harness(
+    tmp_path: Path,
+    *,
+    source: str,
+    fixture_mounted: bool = True,
+):
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = _property_request(
+        fresh,
+        property_kind="external_fixture_filesystem_unchanged",
+    )
+    result = verifier.run(task_id, request, workspace_root)
+    assert result.status == "passed"
+
+    generated_call = runner.calls[0]
+    staged_root = tmp_path / "external-fixture-audit-workspace"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / generated_call["path"]
+    generated_test.parent.mkdir(parents=True, exist_ok=True)
+    generated_test.write_text(generated_call["content"], encoding="utf-8")
+    fixture_root = tmp_path / "managed-external-side-effects"
+    fixture_root.mkdir()
+    environment = dict(os.environ)
+    if fixture_mounted:
+        environment["UNAI_SIDE_EFFECTS_ROOT"] = str(fixture_root)
+    else:
+        environment.pop("UNAI_SIDE_EFFECTS_ROOT", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+        env=environment,
+    )
+    trace_path = staged_root / generated_call["metadata"]["replay_trace_relative_path"]
+    assert trace_path.is_file()
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    record = trace["records"][0]
+    return completed, record, fixture_root
+
+
+def test_external_side_effect_fixture_audit_passes_without_mutation(tmp_path: Path) -> None:
+    completed, record, fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source=(
+            "def clamp(value):\n"
+            "    return value\n"
+        ),
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["status"] == "complete"
+    assert record["unchanged"] is True
+    assert record["changed_entry_count"] == 0
+    assert record["before_sha256"] == record["after_sha256"]
+    assert list(fixture_root.iterdir()) == []
+
+
+def test_external_side_effect_fixture_audit_detects_managed_mount_writes(tmp_path: Path) -> None:
+    completed, record, fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source=(
+            "import os\n"
+            "from pathlib import Path\n"
+            "def clamp(value):\n"
+            "    root = Path(os.environ['UNAI_SIDE_EFFECTS_ROOT'])\n"
+            "    (root / 'outbox.json').write_text(str(value), encoding='utf-8')\n"
+            "    return value\n"
+        ),
+    )
+
+    assert completed.returncode != 0
+    assert "UNAI_COUNTEREXAMPLE:" in completed.stdout + completed.stderr
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["unchanged"] is False
+    assert record["changed_entry_count"] >= 1
+    assert record["before_sha256"] != record["after_sha256"]
+    assert (fixture_root / "outbox.json").is_file()
+    assert "outbox.json" not in json.dumps(record)
+
+
+def test_external_fixture_audit_does_not_ignore_python_cache_named_directories(tmp_path: Path) -> None:
+    completed, record, fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source=(
+            "import os\n"
+            "from pathlib import Path\n"
+            "def clamp(value):\n"
+            "    cache = Path(os.environ['UNAI_SIDE_EFFECTS_ROOT']) / '__pycache__'\n"
+            "    cache.mkdir()\n"
+            "    (cache / 'side-effect.pyc').write_bytes(b'payload')\n"
+            "    return value\n"
+        ),
+    )
+
+    assert completed.returncode != 0
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["unchanged"] is False
+    assert record["changed_entry_count"] >= 2
+    assert (fixture_root / "__pycache__" / "side-effect.pyc").is_file()
+
+
+def test_external_side_effect_fixture_is_unavailable_without_explicit_mount(tmp_path: Path) -> None:
+    completed, record, _fixture_root = _execute_external_fixture_harness(
+        tmp_path,
+        source="def clamp(value):\n    return value\n",
+        fixture_mounted=False,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert record["kind"] == "external_fixture_filesystem_unchanged"
+    assert record["status"] == "unavailable"
+    assert record["reason_code"] == "fixture_unavailable"
 
 
 def test_workspace_filesystem_unchanged_passes_without_mutation(tmp_path: Path) -> None:
@@ -2511,3 +3043,750 @@ def test_property_counterexample_shrinks_list_arguments_in_bounded_sandbox_round
     )
     assert evidence.metadata["status"] == "smaller_failure_observed"
     assert evidence.metadata["attempts"] <= 24
+
+
+
+def _transparency_root(leaves: list[bytes]) -> bytes:
+    if len(leaves) == 1:
+        return leaf_hash(leaves[0])
+    split = 1 << ((len(leaves) - 1).bit_length() - 1)
+    return node_hash(_transparency_root(leaves[:split]), _transparency_root(leaves[split:]))
+
+
+def _publisher_transparency_request(task_id: str, snapshot, spec_content: str):
+    request, publisher_trust, _signature = _publisher_signed_request(
+        task_id, snapshot, spec_content=spec_content
+    )
+    publisher = request.cases[0].oracle_publisher_attestation
+    statement = build_publisher_artifact_statement(
+        key_id=publisher.key_id,
+        issuer=publisher.issuer,
+        issued_at=publisher.issued_at,
+        artifact_uri=publisher.artifact_uri,
+        artifact_revision=publisher.artifact_revision,
+        artifact_sha256=hashlib.sha256(spec_content.encode("utf-8")).hexdigest(),
+    )
+    manifest = publisher_manifest_leaf(statement)
+    leaves = [b"prior-log-entry", manifest]
+    root = _transparency_root(leaves)
+    log_private = Ed25519PrivateKey.generate()
+    log_public = base64.b64encode(
+        log_private.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    ).decode("ascii")
+    timestamp = int(datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc).timestamp())
+    message = sign_tree_head_message(
+        log_id="acme-transparency",
+        key_id="acme-log-key-2026",
+        timestamp=timestamp,
+        tree_size=2,
+        root_hash=root.hex(),
+    )
+    head = SignedTreeHead(
+        log_id="acme-transparency",
+        key_id="acme-log-key-2026",
+        timestamp=timestamp,
+        tree_size=2,
+        root_hash=root.hex(),
+        signature_b64=base64.b64encode(log_private.sign(message)).decode("ascii"),
+    )
+    witness_private = Ed25519PrivateKey.generate()
+    witness_public = base64.b64encode(
+        witness_private.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    ).decode("ascii")
+    witness_signature = base64.b64encode(
+        witness_private.sign(canonical_attestation_message(build_transparency_witness_statement(head)))
+    ).decode("ascii")
+    publisher.transparency = GroundedOracleTransparencyProof(
+        tree_head=GroundedOracleTransparencyTreeHead(
+            log_id=head.log_id,
+            key_id=head.key_id,
+            timestamp=head.timestamp,
+            tree_size=head.tree_size,
+            root_hash=head.root_hash,
+            signature_b64=head.signature_b64,
+        ),
+        leaf_index=1,
+        inclusion_proof=[leaf_hash(leaves[0]).hex()],
+        witnesses=[
+            GroundedOracleTransparencyWitness(
+                key_id="acme-witness-key-2026",
+                signature_b64=witness_signature,
+            )
+        ],
+    )
+    return request, publisher_trust, {
+        "acme-log-key-2026": {
+            "public_key_b64": log_public,
+            "log_id": "acme-transparency",
+        }
+    }, {
+        "acme-witness-key-2026": {
+            "public_key_b64": witness_public,
+            "witness_id": "independent-witness-a",
+        }
+    }, head, log_private, witness_private
+
+
+def _configure_transparency_verifier(verifier, publisher_trust, log_keys, witness_keys, tmp_path):
+    verifier.trusted_oracle_publisher_keys = {"acme-specs-2026": publisher_trust}
+    verifier.trusted_oracle_transparency_log_keys = log_keys
+    verifier.trusted_oracle_transparency_witness_keys = witness_keys
+    verifier.oracle_transparency_required = True
+    verifier.oracle_transparency_min_witnesses = 1
+    verifier.transparency_checkpoint_store = TransparencyCheckpointStore(
+        tmp_path / "publisher-transparency.sqlite3"
+    )
+
+
+def test_publisher_oracle_requires_and_records_verified_transparency(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Trusted release\\nThe lower clamp boundary is zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, publisher_trust, log_keys, witness_keys, head, _log_private, _witness_private = _publisher_transparency_request(
+        task_id, snapshot, spec_content
+    )
+    _configure_transparency_verifier(verifier, publisher_trust, log_keys, witness_keys, tmp_path)
+
+    result = verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    metadata = result.oracle_evidence[0].metadata
+    assert metadata["oracle_artifact_integrity"] == "trusted-ed25519-publisher-transparency"
+    provenance = metadata["oracle_publisher_attestation"]["transparency"]
+    assert provenance["verified"] is True
+    assert provenance["log_id"] == head.log_id
+    assert provenance["tree_size"] == head.tree_size
+    assert provenance["distinct_witness_count"] == 1
+    assert provenance["checkpoint_newly_accepted"] is True
+    assert verifier.transparency_checkpoint_store.latest(head.log_id)["root_hash"] == head.root_hash
+    assert head.signature_b64 not in runner.calls[0]["content"]
+
+
+def test_publisher_transparency_rejects_tampered_inclusion_before_execution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Trusted release\\nThe lower clamp boundary is zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, publisher_trust, log_keys, witness_keys, _head, _log_private, _witness_private = _publisher_transparency_request(
+        task_id, snapshot, spec_content
+    )
+    _configure_transparency_verifier(verifier, publisher_trust, log_keys, witness_keys, tmp_path)
+    request.cases[0].oracle_publisher_attestation.transparency.inclusion_proof[0] = "00" * 32
+
+    with pytest.raises(GroundedVerificationError, match="inclusion proof or signed tree head is invalid"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_publisher_transparency_rejects_cross_log_key_substitution(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Trusted release\\nThe lower clamp boundary is zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, publisher_trust, log_keys, witness_keys, _head, _log_private, _witness_private = _publisher_transparency_request(
+        task_id, snapshot, spec_content
+    )
+    log_keys["acme-log-key-2026"]["log_id"] = "attacker-log"
+    _configure_transparency_verifier(verifier, publisher_trust, log_keys, witness_keys, tmp_path)
+
+    with pytest.raises(GroundedVerificationError, match="identity does not match"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert runner.calls == []
+
+
+def test_publisher_transparency_checkpoint_rejects_rollback(tmp_path: Path) -> None:
+    task_id, workspace_root, _target, _source, _ledger, snapshot, _probes, runner, verifier = _setup(tmp_path)
+    spec_content = "# Trusted release\\nThe lower clamp boundary is zero.\\n"
+    (workspace_root / "demo" / "product-spec.md").write_text(spec_content, encoding="utf-8")
+    request, publisher_trust, log_keys, witness_keys, head, log_private, witness_private = _publisher_transparency_request(
+        task_id, snapshot, spec_content
+    )
+    _configure_transparency_verifier(verifier, publisher_trust, log_keys, witness_keys, tmp_path)
+    verifier.run(task_id, request, workspace_root)
+    assert verifier.transparency_checkpoint_store.latest(head.log_id)["tree_size"] == 2
+    calls_before_rollback = len(runner.calls)
+
+    publisher = request.cases[0].oracle_publisher_attestation
+    statement = build_publisher_artifact_statement(
+        key_id=publisher.key_id,
+        issuer=publisher.issuer,
+        issued_at=publisher.issued_at,
+        artifact_uri=publisher.artifact_uri,
+        artifact_revision=publisher.artifact_revision,
+        artifact_sha256=hashlib.sha256(spec_content.encode("utf-8")).hexdigest(),
+    )
+    older_root = leaf_hash(publisher_manifest_leaf(statement))
+    older_timestamp = head.timestamp - 10
+    older_message = sign_tree_head_message(
+        log_id=head.log_id,
+        key_id=head.key_id,
+        timestamp=older_timestamp,
+        tree_size=1,
+        root_hash=older_root.hex(),
+    )
+    older_head = SignedTreeHead(
+        log_id=head.log_id,
+        key_id=head.key_id,
+        timestamp=older_timestamp,
+        tree_size=1,
+        root_hash=older_root.hex(),
+        signature_b64=base64.b64encode(log_private.sign(older_message)).decode("ascii"),
+    )
+    older_witness_signature = base64.b64encode(
+        witness_private.sign(canonical_attestation_message(build_transparency_witness_statement(older_head)))
+    ).decode("ascii")
+    publisher.transparency = GroundedOracleTransparencyProof(
+        tree_head=GroundedOracleTransparencyTreeHead(
+            log_id=older_head.log_id,
+            key_id=older_head.key_id,
+            timestamp=older_head.timestamp,
+            tree_size=older_head.tree_size,
+            root_hash=older_head.root_hash,
+            signature_b64=older_head.signature_b64,
+        ),
+        leaf_index=0,
+        inclusion_proof=[],
+        witnesses=[GroundedOracleTransparencyWitness(
+            key_id="acme-witness-key-2026",
+            signature_b64=older_witness_signature,
+        )],
+    )
+
+    with pytest.raises(GroundedVerificationError, match="checkpoint rejected: Tree-head rollback detected"):
+        verifier.run(task_id, request, workspace_root)
+
+    assert len(runner.calls) == calls_before_rollback
+    assert verifier.transparency_checkpoint_store.latest(head.log_id)["tree_size"] == 2
+
+
+def test_recursive_shrinker_supports_eight_nested_containers_but_not_nine() -> None:
+    from unai_engine.verification.grounded import (
+        _argument_measure,
+        _nested_argument_shrink_candidates,
+    )
+
+    def nested(levels: int) -> dict | int:
+        value: dict | int = 11
+        for _ in range(levels):
+            value = {"child": value}
+        return value
+
+    def leaf_if_present(value: dict | int, levels: int) -> int | None:
+        current = value
+        for _ in range(levels):
+            if not isinstance(current, dict) or "child" not in current:
+                return None
+            current = current["child"]
+        return current if type(current) is int else None
+
+    depth_eight = nested(8)
+    eight_candidates = _nested_argument_shrink_candidates(depth_eight)
+    assert eight_candidates
+    assert any(
+        (reduced := leaf_if_present(candidate, 8)) is not None and reduced != 11
+        for candidate in eight_candidates
+    )
+    assert all(
+        _argument_measure(candidate) < _argument_measure(depth_eight)
+        for candidate in eight_candidates
+    )
+
+    depth_nine = nested(9)
+    nine_candidates = _nested_argument_shrink_candidates(depth_nine)
+    # A candidate may remove a containing key, but the value beyond the depth
+    # boundary must never be changed while its full path remains present.
+    for candidate in nine_candidates:
+        candidate_leaf = leaf_if_present(candidate, 9)
+        if candidate_leaf is not None:
+            assert candidate_leaf == 11
+
+
+def test_recursive_shrinker_enforces_hard_visited_node_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    import unai_engine.verification.grounded as grounded
+
+    monkeypatch.setattr(grounded, "_MAX_NESTED_SHRINK_NODES", 9)
+    monkeypatch.setattr(grounded, "_MAX_NESTED_CANDIDATES_PER_ARGUMENT", 100)
+    original = grounded._direct_value_shrink_candidates
+    visited = 0
+
+    def tracked(value: object) -> list[object]:
+        nonlocal visited
+        visited += 1
+        return original(value)
+
+    monkeypatch.setattr(grounded, "_direct_value_shrink_candidates", tracked)
+    value = {f"item-{index:03d}": index + 10 for index in range(80)}
+    candidates = grounded._nested_argument_shrink_candidates(value)
+
+    assert visited == 9
+    assert len(candidates) <= 100
+    assert all(
+        grounded._argument_measure(candidate) < grounded._argument_measure(value)
+        for candidate in candidates
+    )
+
+
+def test_recursive_shrinker_is_deterministic_non_mutating_and_type_safe() -> None:
+    from unai_engine.verification.grounded import (
+        _argument_measure,
+        _direct_value_shrink_candidates,
+        _nested_argument_shrink_candidates,
+    )
+
+    original = {
+        "payload": {
+            "values": [-9, 2.5, True, None],
+            "label": "unicode-λ-🙂-value",
+        }
+    }
+    before = json.loads(json.dumps(original, ensure_ascii=False))
+
+    first = _nested_argument_shrink_candidates(original)
+    second = _nested_argument_shrink_candidates(original)
+
+    assert first == second
+    assert original == before
+    assert 0 < len(first) <= 12
+    assert all(
+        _argument_measure(candidate) < _argument_measure(original)
+        for candidate in first
+    )
+    assert _direct_value_shrink_candidates(True) == []
+    assert _direct_value_shrink_candidates(None) == []
+    assert all(type(item) is int for item in _direct_value_shrink_candidates(-9))
+    assert all(type(item) is float for item in _direct_value_shrink_candidates(2.5))
+    assert all(type(item) is str for item in _direct_value_shrink_candidates("abc"))
+
+
+
+def _execute_generated_signature_harness(
+    tmp_path: Path, source: str, generated_content: str
+) -> subprocess.CompletedProcess[str]:
+    """Execute a captured fixed harness in an isolated temporary test workspace."""
+    staged_root = tmp_path / "generated-signature-workspace"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / "unai_generated_tests" / "test_signature.py"
+    generated_test.parent.mkdir(parents=True)
+    generated_test.write_text(generated_content, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_typing_final_identity_decorator_supports_safe_import_aliases() -> None:
+    source = (
+        "import typing as t\n"
+        "@t.final\n"
+        "def module_target(value):\n"
+        "    return value\n"
+        "@t.final\n"
+        "class Calculator:\n"
+        "    @staticmethod\n"
+        "    @t.final\n"
+        "    def static_target(value):\n"
+        "        return value\n"
+        "    @classmethod\n"
+        "    @t.final\n"
+        "    def class_target(cls, value):\n"
+        "        return value\n"
+    )
+    module = _target_descriptor(source, "module_target")
+    static = _target_descriptor(source, "Calculator.static_target")
+    class_method = _target_descriptor(source, "Calculator.class_target")
+    assert module["invocation_kind"] == "module_function"
+    assert static["invocation_kind"] == "staticmethod"
+    assert class_method["invocation_kind"] == "classmethod"
+
+
+@pytest.mark.parametrize(
+    "source,symbol",
+    [
+        (
+            "from typing import final as mark\n"
+            "def shadow(mark):\n"
+            "    return mark\n"
+            "@mark\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+        (
+            "from typing import final as mark\n"
+            "mark = lambda fn: fn\n"
+            "@mark\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+        (
+            "import typing as t\n"
+            "@t.final()\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+        (
+            "import typing as t\n"
+            "class Calculator:\n"
+            "    @t.final\n"
+            "    @staticmethod\n"
+            "    def target(value):\n"
+            "        return value\n",
+            "Calculator.target",
+        ),
+        (
+            "@mark\n"
+            "def target(value):\n"
+            "    return value\n"
+            "from typing import final as mark\n",
+            "target",
+        ),
+        (
+            "staticmethod = lambda fn: fn\n"
+            "class Calculator:\n"
+            "    @staticmethod\n"
+            "    def target(value):\n"
+            "        return value\n",
+            "Calculator.target",
+        ),
+        (
+            "def decorator(fn):\n"
+            "    return fn\n"
+            "@decorator\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+    ],
+)
+def test_ambiguous_or_unsafe_decorators_are_rejected(
+    source: str, symbol: str
+) -> None:
+    with pytest.raises(GroundedVerificationError):
+        _target_descriptor(source, symbol)
+
+
+def test_variadic_signature_validation_rejects_bad_containers_collisions_and_holes() -> None:
+    function = ast.parse(
+        "def target(first=1, second=2, /, value=3, *items, mode='x', **extras):\n"
+        "    return first, second, value, items, mode, extras\n"
+    ).body[0]
+    plan = _signature_plan(function)
+    _validate_signature_values(
+        {
+            "first": 1,
+            "second": 2,
+            "value": 3,
+            "items": [4, 5],
+            "mode": "safe",
+            "extras": {"first": 99},
+        },
+        plan,
+        "case",
+    )
+    for bad_values in (
+        {"second": 2},
+        {"first": 1, "second": 2, "items": True},
+        {"first": 1, "second": 2, "extras": []},
+        {"first": 1, "second": 2, "mode": "safe", "extras": {"mode": "unsafe"}},
+    ):
+        with pytest.raises(GroundedVerificationError):
+            _validate_signature_values(bad_values, plan, "case")
+
+
+def test_variadic_module_function_generated_harness_preserves_python_binding(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "from typing import final as mark\n"
+        "@mark\n"
+        "def collect(first, /, second=2, *items, mode='default', **extras):\n"
+        "    return [first, second, list(items), mode, extras]\n"
+    )
+    descriptor = _target_descriptor(source, "collect")
+    plan = _signature_plan(descriptor["function"])
+    cases = [
+        {
+            "case_id": "variadic",
+            "arguments": {
+                "first": 1,
+                "second": 2,
+                "items": [3, 4],
+                "mode": "safe",
+                "extras": {"first": 99, "tag": "ok"},
+            },
+            "expected_output": [1, 2, [3, 4], "safe", {"first": 99, "tag": "ok"}],
+            "oracle_property": None,
+            "oracle_artifact_path": None,
+            "oracle_artifact_sha256": None,
+            "_unai_signature": plan,
+            "_unai_constructor_signature": None,
+        }
+    ]
+    generated = _generated_pytest(
+        "service.py", "collect", cases, hashlib.sha256(source.encode()).hexdigest()
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_variadic_instance_constructor_and_method_generated_harness(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "class Counter:\n"
+        "    def __init__(self, start, /, *offsets, scale=1, **labels):\n"
+        "        self.value = start + sum(offsets) * scale\n"
+        "        self.labels = labels\n"
+        "    def total(self, /, factor=2, *items, label='x', **options):\n"
+        "        return [self.value + sum(items) * factor, label, options]\n"
+    )
+    descriptor = _target_descriptor(source, "Counter.total")
+    target_plan = _signature_plan(descriptor["function"], drop_first_parameter=True)
+    constructor_plan = _signature_plan(descriptor["constructor"], drop_first_parameter=True)
+    instance_arguments = {
+        "start": 10,
+        "offsets": [2, 3],
+        "scale": 2,
+        "labels": {"source": "fixture"},
+    }
+    arguments = {
+        "factor": 2,
+        "items": [4, 5],
+        "label": "counted",
+        "options": {"note": "fresh"},
+    }
+    _validate_signature_values(instance_arguments, constructor_plan, "fixture")
+    _validate_signature_values(arguments, target_plan, "arguments")
+    case = {
+        "case_id": "instance-variadic",
+        "arguments": arguments,
+        "instance_arguments": instance_arguments,
+        "expected_output": [38, "counted", {"note": "fresh"}],
+        "oracle_property": None,
+        "oracle_artifact_path": None,
+        "oracle_artifact_sha256": None,
+        "_unai_signature": target_plan,
+        "_unai_constructor_signature": constructor_plan,
+    }
+    generated = _generated_pytest(
+        "service.py",
+        "Counter.total",
+        [case],
+        hashlib.sha256(source.encode()).hexdigest(),
+        invocation_kind="instance_method",
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_variadic_probe_and_shrinking_are_rejected_before_runner_execution(
+    tmp_path: Path,
+) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = "def total(value, *items):\n    return value + sum(items)\n"
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="total",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="variadic-shrink",
+                arguments={"value": 1, "items": [2]},
+                oracle_property=GroundedPropertyOracle(kind="output_not_empty"),
+                oracle_kind="user",
+                oracle_reference="User-supplied property for a variadic function",
+            )
+        ],
+    )
+    with pytest.raises(GroundedVerificationError, match="cannot enable shrinking"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+
+def test_positional_only_default_hole_is_rejected_before_runner_execution(
+    tmp_path: Path,
+) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = "def target(first=1, second=2, /):\n    return first + second\n"
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="target",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="positional-only-hole",
+                arguments={"second": 3},
+                expected_output=4,
+                oracle_kind="user",
+                oracle_reference="User supplied positional-only binding test",
+            )
+        ],
+    )
+    with pytest.raises(GroundedVerificationError, match="positional-only default"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+
+def test_typing_final_async_module_function_runs_in_generated_harness(tmp_path: Path) -> None:
+    source = (
+        "from typing import final as marker\n"
+        "@marker\n"
+        "async def async_total(value, /, *, offset=1):\n"
+        "    return value + offset\n"
+    )
+    descriptor = _target_descriptor(source, "async_total")
+    case = {
+        "case_id": "typing-final-async",
+        "arguments": {"value": 4, "offset": 3},
+        "expected_output": 7,
+        "oracle_property": None,
+        "oracle_artifact_path": None,
+        "oracle_artifact_sha256": None,
+        "_unai_signature": _signature_plan(descriptor["function"]),
+        "_unai_constructor_signature": None,
+    }
+    generated = _generated_pytest(
+        "service.py",
+        "async_total",
+        [case],
+        hashlib.sha256(source.encode()).hexdigest(),
+        is_async=True,
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.parametrize(
+    "symbol,expected,drop_first",
+    [
+        (
+            "Calculator.static_total",
+            [16, {"start": 99, "tag": "static"}],
+            False,
+        ),
+        (
+            "Calculator.class_total",
+            ["Calculator", 16, {"start": 99, "tag": "class"}],
+            True,
+        ),
+    ],
+)
+def test_static_and_classmethod_variadic_generated_harnesses(
+    tmp_path: Path, symbol: str, expected: list, drop_first: bool
+) -> None:
+    source = (
+        "import typing as typing_alias\n"
+        "@typing_alias.final\n"
+        "class Calculator:\n"
+        "    @staticmethod\n"
+        "    def static_total(start, /, *items, scale=1, **extra):\n"
+        "        return [start + sum(items) * scale, extra]\n"
+        "    @classmethod\n"
+        "    def class_total(cls, start, /, *items, scale=1, **extra):\n"
+        "        return [cls.__name__, start + sum(items) * scale, extra]\n"
+    )
+    descriptor = _target_descriptor(source, symbol)
+    plan = _signature_plan(descriptor["function"], drop_first_parameter=drop_first)
+    suffix = "static" if not drop_first else "class"
+    case = {
+        "case_id": "variadic-" + suffix,
+        "arguments": {
+            "start": 2,
+            "items": [3, 4],
+            "scale": 2,
+            "extra": {"start": 99, "tag": suffix},
+        },
+        "expected_output": expected,
+        "oracle_property": None,
+        "oracle_artifact_path": None,
+        "oracle_artifact_sha256": None,
+        "_unai_signature": plan,
+        "_unai_constructor_signature": None,
+    }
+    generated = _generated_pytest(
+        "service.py",
+        symbol,
+        [case],
+        hashlib.sha256(source.encode()).hexdigest(),
+        invocation_kind=descriptor["invocation_kind"],
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_variadic_generated_harness_executes_in_disposable_docker_sandbox(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is unavailable; the CI engine job builds the sandbox image.")
+    image_check = subprocess.run(
+        ["docker", "image", "inspect", "unai-python-test:latest"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if image_check.returncode != 0:
+        pytest.skip("unai-python-test:latest is not built; the CI engine job builds it.")
+
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, _fake_runner, fake_verifier = _setup(tmp_path)
+    source = (
+        "from typing import final as marker\n"
+        "@marker\n"
+        "def total(value, /, *items, mode='default', **extra):\n"
+        "    return [value + sum(items), mode, extra]\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = fake_verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="total",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="docker-variadic-generated",
+                arguments={
+                    "value": 2,
+                    "items": [3, 4],
+                    "mode": "isolated",
+                    "extra": {"value": 99, "ok": True},
+                },
+                expected_output=[9, "isolated", {"value": 99, "ok": True}],
+                oracle_kind="user",
+                oracle_reference="User supplied disposable Docker variadic invocation result",
+            )
+        ],
+    )
+    docker_runner = IsolatedPythonTestRunner(
+        ledger, DockerSandbox(timeout_seconds=45)
+    )
+    docker_verifier = GroundedTestVerifier(
+        ledger, fake_verifier.patch_manager, docker_runner
+    )
+
+    result = docker_verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    assert result.execution_evidence is not None
+    assert result.execution_evidence.metadata["sandboxed"] is True
+    assert result.execution_evidence.metadata["command"] == "python -m pytest -q"

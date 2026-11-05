@@ -22,7 +22,8 @@ unAI investigates whether compact models can deliver stronger coding outcomes wh
 
 The task workflow is available through \`POST /api/tasks/inspect\`: it requires explicit \`workspace_read\`, compiles a typed contract, builds a bounded Python graph, ranks candidate symbols and records parse/discovery evidence in SQLite. Retrieve the snapshot through \`GET /api/tasks/{task_id}/evidence\`. To execute tests, the task must also explicitly approve \`run_tests\`, then the caller must separately POST \`{"confirm":"run-python-tests"}\` to \`/api/tasks/{task_id}/run-tests\`. The runner exposes only \`python -m pytest -q\`, stages a filtered temporary copy, and runs it in Docker with networking disabled. Build the pytest image described in \`apps/engine/SANDBOX.md\`. Missing Docker or pytest dependencies are reported as unavailable, never as a passing test. After inspection, read a source file through \`GET /api/tasks/{task_id}/files/{file_path}\` to obtain its content and base SHA-256. Submit one-file replacements to \`POST /api/tasks/{task_id}/patch-proposals\`; the proposal stores a diff and leaves the workspace untouched. Apply only with a separate \`POST /api/tasks/{task_id}/patch-proposals/{proposal_id}/apply\` request carrying \`{"confirm":"apply-patch"}\`. The live file hash is checked again before replacement. Refresh Python parse-quality evidence after a change with \`POST /api/tasks/{task_id}/quality-check\`; the proof summary treats pre-patch quality results as stale. For a selected Python function, \`POST /api/tasks/{task_id}/probes\` generates bounded, unverified boundary-input candidates from simple branch conditions. It does not execute candidates or invent expected outputs. Retrieve an evidence-sequence summary through \`GET /api/tasks/{task_id}/proof\`: it reports whether a patch is pending, awaiting tests, failed/unavailable, or has a passing test run newer than the latest applied patch. This is not a semantic correctness certificate. Configure the ledger with \`UNAI_EVIDENCE_DB_PATH\`.
 
-The Engine API has an installation-wide bearer-token gate. Configure \`UNAI_API_TOKEN\` with a random secret of at least 32 characters for non-loopback access; send it as \`Authorization: Bearer <token>\`. With the token unset, the API accepts loopback clients only and rejects non-loopback peers. This is a shared installation credential, not per-user identity, tenant isolation, or rate limiting; keep public deployment disabled until those controls and a deployment threat model are reviewed.
+The Engine API supports scoped, revocable bearer credentials in addition to its local-first perimeter. The installation administrator issues tokens with `POST /api/auth/tokens` and revokes them with `POST /api/auth/tokens/{token_id}/revoke`; the plaintext token is returned once, while SQLite stores only its SHA-256 hash. Token expiry is capped at 365 days. Scopes include `chat:use`, `tasks:read`, `tasks:write`, `workspace:read`, `workspace:write`, `workspace:execute`, `brain:read`, and `brain:write`. Give each isolated user a unique tenant ID; tokens deliberately share data only when they are issued for the same tenant. Workspace files, Brain Markdown/index, evidence ledger and code-graph cache are stored in separate per-tenant directories/databases. Requests are rate-limited per token and source IP. The legacy `UNAI_API_TOKEN` remains an installation administrator credential for the reserved `default` tenant and token management. With it unset, loopback clients retain local administrator access, while non-loopback clients must present a valid scoped token. Never expose the Engine publicly until its host-level network controls, secrets and deployment threat model are reviewed. See [security and tenant isolation](docs/SECURITY.md) for the API setup and migration details.
+
 
 ### Read-only task MCP bridge
 
@@ -39,9 +40,9 @@ UNAI_MCP_ALLOW_WORKSPACE_READ=true
 
 The model cannot choose another workspace or supply its own permission grant. Keep the Engine API token in the MCP host's server-side environment, never in a browser bundle or prompt. The grant applies to the configured workspace for every client able to invoke this MCP server; use a separate local process/configuration for a different workspace. Patch application and test execution remain separate, explicit host actions through the Engine API.
 
-## M4 grounded verification — early prototype
+## M4 grounded verification — source-hash-bound evidence
 
-AST-generated boundary candidates remain unverified until a caller supplies explicit expected outputs and an oracle reference. The grounded workflow checks the source SHA-256, validates the function signature and probe origin, generates a fixed pytest harness and runs it only in the existing disposable Docker staging copy.
+AST-generated boundary candidates remain unverified until a caller supplies explicit expected outputs and an oracle reference. The grounded workflow checks the source SHA-256, validates the function signature and probe origin, generates a fixed pytest harness and runs it only in the existing disposable Docker staging copy. Supported targets include synchronous/async module functions and static, class and ordinary instance methods on bounded top-level or one-level nested classes. Signature binding includes positional-only, positional-or-keyword, keyword-only, `*args` and `**kwargs`; the `typing.final` identity marker is narrowly supported. Instance cases use JSON-only constructor fixtures whose hashes are bound into evidence and reviewer attestations.
 
 - Generate unverified candidates: \`POST /api/tasks/{task_id}/probes\`.
 - Supply user/specification cases and the exact \`run-grounded-oracle-tests\` confirmation: \`POST /api/tasks/{task_id}/grounded-tests\`.
@@ -49,9 +50,15 @@ AST-generated boundary candidates remain unverified until a caller supplies expl
 
 A mismatching return value is recorded as a counterexample against the supplied oracle and the exact source hash. Execution records include output fingerprints and bounded redacted previews. The proof bundle preserves unresolved risks. Oracle references are not independently authenticated, and passing cases are not a proof of general correctness. See [verification notes](docs/VERIFICATION.md) for the schema, constraints and limitations.
 
+Optional `measure_coverage: true` on the grounded-test request adds a bounded statement-line and supported branch-arm report from those same supplied cases. It binds the trace to the target source hash, adds append-only coverage evidence and exposes uncovered lines/arms as proof-bundle risks. A missing trace never changes the oracle verdict. This is case-coverage measurement, not automatic input generation or coverage-guided fuzzing.
+
+The read-only `POST /api/tasks/{task_id}/coverage-guided-probes` endpoint can then rank existing unverified AST probes against measured uncovered if/else arms. It requires the exact probe and coverage evidence IDs plus the same target source hash; its bounded static evaluator never imports/runs the target, invents oracle outputs, or marks a candidate verified. Suggestions still require caller-supplied expected outputs and a separately approved grounded run.
+
+The bounded mutation endpoint `POST /api/tasks/{task_id}/mutation-tests` measures whether those oracle cases detect small source changes. It requires the exact `run-grounded-mutation-tests` confirmation, runs a passing grounded baseline first, then executes at most eight deterministic single-token mutants in the same disposable Docker staging copy. Per-mutant and summary evidence are append-only. A high mutation score is evidence about those specific test cases and mutants, not coverage or proof of correctness.
+
 ## Repository code graph — Python AST prototype
 
-The indexing subsystem now includes a bounded Python AST graph for files, classes, functions, methods, internal imports, and heuristic test-to-source links. Graph entries point to line ranges instead of storing source bodies. It skips generated/hidden directories, symlinks, and oversized files; it reports parse errors and truncation. This first version is Python-only and does not yet persist or incrementally refresh the graph. See docs/CODE_GRAPH.md.
+The indexing subsystem includes a bounded Python AST graph for files, classes, functions, methods, imports, heuristic test-to-source links, and conservative static call/instantiation relationships. Symbol ranges carry SHA-256 fingerprints of the exact source bytes parsed. After an approved task inspection, `GET /api/tasks/{task_id}/context` returns small excerpts only for symbols discovered by that task; the current file hash must still match the inspection hash or the request fails closed with HTTP 409. Excerpts have strict line/character budgets and never become a general arbitrary-path reader. The graph remains Python-only and uses an incremental SQLite cache configured by `UNAI_CODE_GRAPH_DB_PATH` (default `.data/code-graph.sqlite3`). Each refresh hashes every eligible Python source snapshot, reuses cached AST records only when the exact SHA-256 matches, reparses changed/new files, removes deleted files and derives repository-wide import/test/call relationships. A complete graph generation is published in one WAL-backed SQLite transaction with an optimistic generation check; a failed refresh leaves the previous snapshot intact. The database stores source fingerprints, bounded symbol/call-site metadata and relationships, never source bodies. Static `calls` and `instantiates` edges are emitted only for unambiguous local/direct-import targets; dynamic, shadowed and unresolved calls are not guessed. This is source-level navigation, not a complete runtime call graph or semantic model. See docs/CODE_GRAPH.md.
 
 ## unAI Brain — Obsidian-style memory
 
@@ -62,13 +69,23 @@ The Brain is a portable Markdown knowledge graph. It supports YAML frontmatter, 
 - Browser graph explorer: apps/brain-web
 - Design, local setup, remote access and privacy: docs/BRAIN.md
 
-The Cloudflare Worker is a deployment scaffold, not a deployed service. It is public-read if BRAIN_READ_TOKEN is unset; configure it to protect note reads, and configure BRAIN_WRITE_TOKEN separately for note creation. Cloudflare's Free plan has daily request, CPU, D1 read/write and storage limits; see docs/BRAIN.md. A model does not gain access merely because a website exists: connect the API through the remote MCP bridge or an explicit HTTP tool.
+The Cloudflare Worker is a deployment scaffold, not a deployed service. Every /api route requires an authenticated bearer token; unset read credentials do not make notes public. Configure BRAIN_ADMIN_TOKEN before deployment, apply migration 0002_tenant_tokens.sql, and use the administrator secret from a trusted terminal to issue expiring, revocable, tenant-scoped brain:read/brain:write tokens. Legacy BRAIN_READ_TOKEN and BRAIN_WRITE_TOKEN are limited to the reserved default tenant. The Worker rate-limits by token and source IP. Restrict BRAIN_ALLOWED_ORIGIN before production. Cloudflare's Free plan has daily request, CPU, D1 read/write and storage limits; see docs/BRAIN.md. A model does not gain access merely because a website exists: connect the API through the HTTPS-only remote MCP bridge or an explicit HTTP tool.
 
 ## Training and fine-tuning
 
-The training directory contains a provenance/consent/verification-gated data preparation pipeline, LoRA/QLoRA supervised fine-tuning, and a second-stage DPO preference harness. Train on suitable GPU hardware, then evaluate and export an adapter for a compatible local runtime. The phone is an inference target, not a training machine. No training run or adapter is claimed complete.
+The training directory contains the M5 specialist pipeline for next-action, planner and verifier adapters. It includes a deterministic first-party synthetic data collector, metadata-only preflight, bounded JSONL validation, credential redaction, deduplication, repository-disjoint splits, reproducible manifests, separate LoRA/QLoRA trainers, matched held-out evaluation and a physical-device release gate. Start with `python -m training.collect_synthetic --output data/raw/unai-synthetic.jsonl`, then audit and prepare as documented in training/README.md. Synthetic examples bootstrap the pipeline; they are not real repository trajectories or proof of model quality. No adapter weights have been trained or released. Train on suitable GPU hardware; the 6 GB phone is an inference target, not a training machine.
 
-Read training/README.md before preparing data. Never train on private conversations or repositories without explicit permission and compatible licenses.
+Public data imports must include explicit compatible rights, HTTPS source/license evidence and an immutable revision. Never ingest private conversations or repositories without explicit permission.
+
+Quick-start synthetic dataset flow (720 examples by default):
+
+```bash
+python -m training.collect_synthetic --output data/raw/unai-synthetic.jsonl
+python -m training.audit_corpus --input data/raw/unai-synthetic.jsonl
+python -m training.prepare_corpus --input data/raw/unai-synthetic.jsonl --output-dir data/specialists
+```
+
+The generated corpus is local, declared CC0-1.0 by default, and marked synthetic in every record. It is for pipeline bootstrapping—not a real-world coding benchmark.
 
 ## Mobile acceptance targets — unverified
 
@@ -82,24 +99,49 @@ Read training/README.md before preparing data. Never train on private conversati
 
 These are targets, not results. See docs/MOBILE_PROFILE.md.
 
-## Run locally
+## Install and test locally
 
-    cd apps/engine
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -e '.[dev,mcp]'
-    cp .env.example .env
-    uvicorn unai_engine.main:app --host 127.0.0.1 --port 8000
+The fastest first test is Android/Termux. It installs a local CPU inference runtime, downloads a compact GGUF coding model, then starts the model server, Engine and Web UI in one tmux session:
 
-Start a compatible local model server separately. Then index your Markdown vault:
+```bash
+pkg update -y && pkg install -y git
+git clone --branch feat/m4-instance-methods-m5-specialists --single-branch https://github.com/somildholakia/UnAi.git
+cd UnAi
+bash scripts/termux-install.sh
+bash scripts/termux-start.sh
+bash scripts/termux-doctor.sh --smoke-chat
+```
 
-    curl -X POST http://127.0.0.1:8000/api/brain/index
+The doctor checks all three local services and can send a short inference request directly to the local model. Each service has bounded automatic restart after a non-zero crash exit and a rotated log under `$HOME/.local/state/unai`. Use `bash scripts/termux-control.sh status` to inspect services or `bash scripts/termux-control.sh recover` to safely respawn only dead/missing service panes. This works while the Termux/tmux session remains alive, not after Android kills the entire app process. Open `http://127.0.0.1:5173` on the same device. The first install compiles `llama.cpp` and downloads approximately 1.12 GB of Qwen2.5-Coder 1.5B Q4_K_M weights. Keep the initial 2K context; mobile memory and thermal performance must still be measured. See [the local install guide](docs/LOCAL_INSTALL.md).
 
-Run the web UI in apps/web with npm install && npm run dev.
+For desktop setup, point the Engine at any local OpenAI-compatible model server using `UNAI_MODEL_BASE_URL` and `UNAI_MODEL_NAME`. The default preset expects a llama.cpp server at `127.0.0.1:8080`. Ollama can also be used by changing those two settings to its local OpenAI-compatible endpoint and a model that is already installed.
+
+Local mode removes hosted model quotas and per-token provider billing. It is not infinite compute: device RAM, storage, battery, thermals and generation speed remain practical limits. No cloud inference fallback is configured. The starter model is an existing open-weight coding model, not a custom unAI model trained by this repository.
+
+### Run the Engine and UI manually
+
+```bash
+cd apps/engine
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+uvicorn unai_engine.main:app --host 127.0.0.1 --port 8000
+```
+
+In another terminal:
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
 
 Tests:
 
-    PYTHONPATH=apps/engine/src pytest -q tests
+```bash
+PYTHONPATH=apps/engine/src pytest -q tests
+```
 
 ## Current research hypothesis
 

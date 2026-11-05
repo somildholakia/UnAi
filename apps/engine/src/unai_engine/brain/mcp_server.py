@@ -36,4 +36,5 @@ def brain_graph(limit: int = 300) -> dict:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    server.run(transport="streamable-http")
+    # The local Brain MCP service is intentionally stdio-only, not an open HTTP server.
+    server.run()

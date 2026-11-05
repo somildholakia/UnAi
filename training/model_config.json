@@ -1,0 +1,38 @@
+{
+  "schema": "unai.training-model-config.v1",
+  "default_model": {
+    "model_id": "Qwen/Qwen3-1.7B",
+    "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+    "revision_url": "https://huggingface.co/Qwen/Qwen3-1.7B/tree/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+    "license": "Apache-2.0",
+    "license_url": "https://huggingface.co/Qwen/Qwen3-1.7B/blob/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e/LICENSE",
+    "parameters": 1700000000,
+    "intended_use": "shared compact base for three separately trained specialist LoRA adapters",
+    "mobile_note": "Quantize the base to GGUF Q4 after training; measure memory, latency and quality on the physical target before release."
+  },
+  "training": {
+    "method": "qlora",
+    "max_length": 2048,
+    "epochs": 2,
+    "learning_rate": 0.0002,
+    "batch_size": 1,
+    "gradient_accumulation": 16,
+    "lora_rank": 16,
+    "seed": 20261105,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ]
+  },
+  "caveats": [
+    "The model card declares Apache-2.0; preserve the exact base revision and license with every adapter.",
+    "A small synthetic corpus is a pipeline smoke-test corpus, not sufficient evidence of model quality.",
+    "A free Colab or Kaggle GPU session is opportunistic and may disconnect; resume from saved Trainer checkpoints.",
+    "No training result or mobile performance is implied by this configuration."
+  ]
+}

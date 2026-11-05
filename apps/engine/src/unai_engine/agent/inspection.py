@@ -68,6 +68,7 @@ def _rank_symbols(graph: dict[str, Any], request: str, limit: int) -> list[Symbo
             kind=node["type"],
             start_line=int(node["start_line"]),
             end_line=int(node["end_line"]),
+            source_sha256=node.get("source_sha256"),
             score=len(matched),
             matched_terms=matched,
         )

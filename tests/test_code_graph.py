@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,8 @@ async def test_graph_indexes_symbols_relative_imports_and_test_links(tmp_path: P
     assert client["type"] == "class"
     assert send["type"] == "method"
     assert send["start_line"] == 4
+    expected_digest = hashlib.sha256((package / "core.py").read_bytes()).hexdigest()
+    assert send["source_sha256"] == expected_digest
     nested = next(node for node in nodes if node.get("qualified_name") == "Client.send.nested")
     assert nested["type"] == "function"
     assert any(

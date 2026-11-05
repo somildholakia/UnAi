@@ -16,5 +16,10 @@ not_found_handling = "single-page-application"
 
 [vars]
 BRAIN_ALLOWED_ORIGIN = "*"
-# Set private read access with: npx wrangler secret put BRAIN_READ_TOKEN
-# Set write access with: npx wrangler secret put BRAIN_WRITE_TOKEN
+# Set the installation administrator secret before enabling the Worker:
+# npx wrangler secret put BRAIN_ADMIN_TOKEN
+# Optional default-tenant compatibility credentials:
+# npx wrangler secret put BRAIN_READ_TOKEN
+# npx wrangler secret put BRAIN_WRITE_TOKEN
+# Set a modest per-token and per-source-IP API limit:
+BRAIN_RATE_LIMIT_PER_MINUTE = "120"

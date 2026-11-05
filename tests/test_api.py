@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import datetime, timezone
 from types import SimpleNamespace
 import hashlib
 
@@ -6,9 +7,11 @@ from fastapi.testclient import TestClient
 
 import unai_engine.main as main_module
 from unai_engine.agent.inspection import TaskInspector
+from unai_engine.agent.orchestrator import AgentOrchestrator
 from unai_engine.main import app
 from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
+from unai_engine.models import EvidenceRecord
 from unai_engine.runtime.patches import PatchManager
 from unai_engine.verification.probes import BoundaryProbeGenerator
 from unai_engine.verification.ledger import EvidenceLedger
@@ -554,3 +557,256 @@ def test_engine_api_preflight_allows_authorization_header(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert "authorization" in response.headers.get("access-control-allow-headers", "").lower()
+
+def test_specialist_chat_endpoint_uses_configured_model_and_returns_role(monkeypatch) -> None:
+    class FakeProvider:
+        async def complete(self, messages, *, model_override=None):
+            assert model_override == "local-next-action-lora"
+            assert "next-action specialist" in messages[0]["content"]
+            return "Inspect the source file first."
+
+    monkeypatch.setattr(
+        main_module,
+        "agent",
+        AgentOrchestrator(FakeProvider(), specialist_models={"next_action": "local-next-action-lora"}),
+    )
+    response = TestClient(app).post(
+        "/api/specialists/next_action/chat",
+        json={"message": "What should happen next?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["specialist"] == "next_action"
+    assert response.json()["model"] == "local-next-action-lora"
+    assert response.json()["message"] == "Inspect the source file first."
+
+
+def test_specialist_chat_endpoint_returns_unavailable_without_base_model_fallback(monkeypatch) -> None:
+    class FakeProvider:
+        async def complete(self, messages, *, model_override=None):
+            raise AssertionError("Unconfigured specialists must not invoke the provider.")
+
+    monkeypatch.setattr(main_module, "agent", AgentOrchestrator(FakeProvider()))
+    response = TestClient(app).post(
+        "/api/specialists/verifier/chat",
+        json={"message": "Verify this patch."},
+    )
+
+    assert response.status_code == 503
+    assert "not configured" in response.json()["detail"]
+
+
+def test_specialist_chat_endpoint_rejects_unknown_role() -> None:
+    response = TestClient(app).post(
+        "/api/specialists/general/chat",
+        json={"message": "Do work."},
+    )
+    assert response.status_code == 422
+
+
+
+def test_task_context_returns_hash_pinned_bounded_symbol_slices(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total bug and add a regression test",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    response = client.get(f"/api/tasks/{task_id}/context?limit=3&context_lines=1")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["task_id"] == task_id
+    assert body["slices"]
+    first = body["slices"][0]
+    assert first["path"] == "service.py"
+    assert first["name"] == "calculate_total"
+    assert "def calculate_total(items):" in first["content"]
+    assert "return sum(items)" in first["content"]
+    assert len(first["sha256"]) == 64
+    assert body["total_characters"] <= 24_000
+
+
+def test_task_context_requires_approved_workspace_read(tmp_path, monkeypatch) -> None:
+    _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total bug",
+            "workspace": "demo",
+            "permissions": [],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    assert client.get(f"/api/tasks/{task_id}/context").status_code == 409
+
+
+def test_task_context_rejects_source_changed_after_inspection(tmp_path, monkeypatch) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Fix calculate_total bug",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    (workspace_root / "demo" / "service.py").write_text(
+        "def calculate_total(items):\n    return len(items)\n",
+        encoding="utf-8",
+    )
+
+    response = client.get(f"/api/tasks/{task_id}/context")
+    assert response.status_code == 409
+    assert "re-inspect" in response.json()["detail"].lower()
+
+
+def test_coverage_guided_probe_api_uses_existing_hash_bound_evidence_without_execution(
+    tmp_path, monkeypatch
+) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    target = workspace_root / "demo" / "branching.py"
+    target.write_text(
+        "def classify(value):\n"
+        "    if value < 0:\n"
+        "        return \"negative\"\n"
+        "    else:\n"
+        "        return \"non-negative\"\n",
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review classify branch coverage",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    generated = client.post(
+        f"/api/tasks/{task_id}/probes",
+        json={"file_path": "branching.py", "symbol_name": "classify", "limit": 10},
+    )
+    assert generated.status_code == 200
+    probe = generated.json()
+    source_sha256 = probe["source_sha256"]
+
+    execution = EvidenceRecord(
+        evidence_id="coverage-guided-execution",
+        task_id=task_id,
+        kind="execution",
+        source="grounded-oracle-sandbox",
+        claim="Supplied grounded cases were executed in Docker.",
+        passed=True,
+        metadata={
+            "target_file": "branching.py",
+            "target_function": "classify",
+            "target_sha256": source_sha256,
+        },
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    coverage = EvidenceRecord(
+        evidence_id="coverage-guided-coverage",
+        task_id=task_id,
+        kind="coverage",
+        source="grounded-coverage",
+        claim="Coverage measured for supplied cases.",
+        passed=None,
+        metadata={
+            "schema": "unai.coverage.v1",
+            "execution_evidence_id": execution.evidence_id,
+            "target_file": "branching.py",
+            "symbol_name": "classify",
+            "source_sha256": source_sha256,
+            "trace_sha256": "a" * 64,
+            "status": "complete",
+            "branches": [{
+                "branch_id": "branch-001",
+                "kind": "if",
+                "line": 2,
+                "condition": "value < 0",
+                "then_observed": True,
+                "else_observed": False,
+            }],
+        },
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    main_module.evidence_ledger.append_evidence(execution)
+    main_module.evidence_ledger.append_evidence(coverage)
+
+    before = main_module.evidence_ledger.get_snapshot(task_id)
+    before_execution_count = sum(item.kind == "execution" for item in before.evidence)
+    response = client.post(
+        f"/api/tasks/{task_id}/coverage-guided-probes",
+        json={
+            "file_path": "branching.py",
+            "symbol_name": "classify",
+            "source_sha256": source_sha256,
+            "probe_evidence_id": probe["evidence"]["evidence_id"],
+            "coverage_evidence_id": coverage.evidence_id,
+            "limit": 10,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "ranked"
+    assert [item["candidate_id"] for item in body["candidates"]] == ["probe-2", "probe-3"]
+    assert all(item["predicted_arm"] == "else" for item in body["candidates"])
+    assert body["evidence"]["passed"] is None
+    assert body["evidence"]["metadata"]["executed"] is False
+    assert body["evidence"]["metadata"]["expected_outputs_inferred"] is False
+    after = main_module.evidence_ledger.get_snapshot(task_id)
+    assert sum(item.kind == "execution" for item in after.evidence) == before_execution_count
+
+
+def test_coverage_guided_probe_api_rejects_stale_or_foreign_evidence(
+    tmp_path, monkeypatch
+) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    target = workspace_root / "demo" / "branching.py"
+    target.write_text(
+        "def classify(value):\n"
+        "    if value < 0:\n"
+        "        return \"negative\"\n"
+        "    else:\n"
+        "        return \"non-negative\"\n",
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review classify branch coverage",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    generated = client.post(
+        f"/api/tasks/{task_id}/probes",
+        json={"file_path": "branching.py", "symbol_name": "classify"},
+    )
+    probe = generated.json()
+    response = client.post(
+        f"/api/tasks/{task_id}/coverage-guided-probes",
+        json={
+            "file_path": "branching.py",
+            "symbol_name": "classify",
+            "source_sha256": "b" * 64,
+            "probe_evidence_id": probe["evidence"]["evidence_id"],
+            "coverage_evidence_id": "missing-coverage",
+        },
+    )
+    assert response.status_code == 409

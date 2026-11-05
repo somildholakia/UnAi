@@ -181,3 +181,34 @@ def test_mcp_bridge_has_no_patch_or_test_execution_methods() -> None:
     assert not hasattr(bridge, "propose_patch")
     assert not hasattr(bridge, "apply_patch")
     assert not hasattr(bridge, "run_tests")
+
+
+@pytest.mark.parametrize(
+    "url,token",
+    [
+        ("http://engine.example.com", "x" * 40),
+        ("https://engine.example.com", ""),
+        ("ftp://engine.example.com", "x" * 40),
+        ("https://user:secret@engine.example.com", "x" * 40),
+        ("https://engine.example.com?token=leak", "x" * 40),
+    ],
+)
+def test_remote_engine_bridge_rejects_insecure_or_ambiguous_endpoints(url, token):
+    with pytest.raises(ValueError):
+        TaskMCPBridge(url, engine_api_token=token)
+
+
+def test_remote_engine_bridge_requires_tls_and_server_side_token():
+    bridge = TaskMCPBridge("https://engine.example.com/api", engine_api_token="server-side-secret")
+    assert bridge.engine_url == "https://engine.example.com/api"
+
+
+def test_loopback_engine_bridge_keeps_local_http_and_tokenless_mode():
+    for url in ("http://127.0.0.1:8000", "http://[::1]:8000", "http://localhost:8000"):
+        bridge = TaskMCPBridge(url)
+        assert bridge.engine_url == url
+
+
+def test_localhost_subdomains_are_recognized_as_loopback_names():
+    bridge = TaskMCPBridge("http://engine.localhost:8000")
+    assert bridge.engine_url == "http://engine.localhost:8000"

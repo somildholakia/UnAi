@@ -24,6 +24,14 @@ from unai_engine.verification.ledger import EvidenceLedger
 
 
 COMMAND = "python -m pytest -q"
+GENERATED_TEST_EVIDENCE_SOURCES = {
+    "grounded-oracle-sandbox",
+    "grounded-oracle-shrink-sandbox",
+    "grounded-mutation-sandbox",
+}
+MUTATION_EVIDENCE_SOURCE = "grounded-mutation-sandbox"
+MAX_SOURCE_OVERRIDES = 2
+MAX_SOURCE_OVERRIDE_BYTES = 300_000
 SKIP_DIRS = {
     ".git", ".venv", "venv", "env", "node_modules", "dist", "build",
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
@@ -151,6 +159,36 @@ def stage_python_workspace(
             total_bytes += copied
 
     return StagedWorkspace(file_count, total_bytes, skipped)
+
+
+def _validate_source_overrides(
+    source_overrides: dict[str, str] | None,
+) -> dict[str, str]:
+    """Validate mutant-source replacements before touching the staging copy."""
+    if source_overrides is None:
+        return {}
+    if not isinstance(source_overrides, dict) or len(source_overrides) > MAX_SOURCE_OVERRIDES:
+        raise WorkspaceStagingError("Source overrides exceed the allowed count.")
+    normalized: dict[str, str] = {}
+    for relative_path, content in source_overrides.items():
+        if not isinstance(relative_path, str) or not isinstance(content, str):
+            raise WorkspaceStagingError("Source overrides must map paths to text content.")
+        relative = PurePosixPath(relative_path)
+        if (
+            relative.is_absolute()
+            or "\\" in relative_path
+            or relative.as_posix() != relative_path
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or not relative.parts
+            or relative.parts[0] == "unai_generated_tests"
+            or relative.suffix.casefold() != ".py"
+        ):
+            raise WorkspaceStagingError("Source override path is outside the allowed boundary.")
+        encoded = content.encode("utf-8")
+        if not encoded or len(encoded) > MAX_SOURCE_OVERRIDE_BYTES:
+            raise WorkspaceStagingError("Source override content is empty or exceeds its size limit.")
+        normalized[relative_path] = content
+    return normalized
 
 
 def _redact_preview(value: str, limit: int = 2_000) -> str:
@@ -291,7 +329,10 @@ def _validated_replay_trace(
                 "stable": computed_stable,
                 "results": results,
             })
-        elif kind == "workspace_filesystem_unchanged":
+        elif kind in {
+            "workspace_filesystem_unchanged",
+            "external_fixture_filesystem_unchanged",
+        }:
             audit_status = record.get("status")
             if audit_status == "unavailable":
                 reason_code = record.get("reason_code")
@@ -303,6 +344,8 @@ def _validated_replay_trace(
                     "unsafe_file_type",
                     "filesystem_read_error",
                     "file_changed_during_snapshot",
+                    "fixture_unavailable",
+                    "fixture_root_unsafe",
                 }
                 if reason_code not in allowed_reasons:
                     return [], "invalid"
@@ -342,7 +385,7 @@ def _validated_replay_trace(
                 return [], "invalid"
             normalized.append({
                 "case_id": record["case_id"],
-                "kind": "workspace_filesystem_unchanged",
+                "kind": kind,
                 "status": "complete",
                 "unchanged": unchanged,
                 "before_sha256": record["before_sha256"].lower(),
@@ -355,6 +398,107 @@ def _validated_replay_trace(
         else:
             return [], "invalid"
     return normalized, "complete" if seen == expected else "partial"
+
+
+def _validated_coverage_trace(
+    workspace: Path,
+    relative_path: str,
+    expected_case_ids: list[str],
+    expected_target_file: str,
+    expected_target_sha256: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """Load only the bounded, hash-only line trace written by the harness."""
+    if not isinstance(relative_path, str):
+        return None, "invalid_path"
+    relative = PurePosixPath(relative_path)
+    if (
+        relative.is_absolute()
+        or relative.as_posix() != relative_path
+        or len(relative.parts) != 2
+        or relative.parts[0] != "unai_generated_tests"
+        or relative.suffix != ".json"
+        or not relative.name.endswith(".coverage.json")
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        return None, "invalid_path"
+    expected = {
+        item for item in expected_case_ids
+        if isinstance(item, str) and item
+    }
+    if not expected or len(expected) > 20:
+        return None, "invalid_case_ids"
+    workspace_root = workspace.resolve()
+    trace_directory = workspace / relative.parts[0]
+    if trace_directory.is_symlink() or not trace_directory.is_dir():
+        return None, "unsafe_directory"
+    try:
+        resolved_directory = trace_directory.resolve(strict=True)
+        if not resolved_directory.is_relative_to(workspace_root):
+            return None, "unsafe_directory"
+        trace_path = trace_directory / relative.parts[1]
+        if trace_path.is_symlink() or not trace_path.is_file():
+            return None, "missing"
+        resolved_trace_path = trace_path.resolve(strict=True)
+        if not resolved_trace_path.is_relative_to(resolved_directory):
+            return None, "unsafe_path"
+        if resolved_trace_path.stat().st_size > 262_144:
+            return None, "oversized"
+        raw = resolved_trace_path.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        return None, "invalid"
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema") != "unai.coverage-trace.v1"
+        or payload.get("target_file") != expected_target_file
+        or not isinstance(payload.get("target_sha256"), str)
+        or payload["target_sha256"].lower() != expected_target_sha256.lower()
+    ):
+        return None, "invalid"
+
+    def normalize_lines(value: Any, limit: int) -> list[int] | None:
+        if not isinstance(value, list) or len(value) > limit:
+            return None
+        normalized: set[int] = set()
+        for item in value:
+            if (
+                not isinstance(item, int)
+                or isinstance(item, bool)
+                or not 1 <= item <= 1_000_000
+            ):
+                return None
+            normalized.add(item)
+        return sorted(normalized)
+
+    executed_lines = normalize_lines(payload.get("executed_lines"), 5_000)
+    if executed_lines is None:
+        return None, "invalid"
+    case_lines = payload.get("case_lines")
+    if not isinstance(case_lines, dict) or len(case_lines) > len(expected):
+        return None, "invalid"
+    normalized_cases: dict[str, list[int]] = {}
+    total_case_lines = 0
+    for case_id, lines in case_lines.items():
+        if case_id not in expected:
+            return None, "invalid"
+        normalized_lines = normalize_lines(lines, 5_000)
+        if normalized_lines is None:
+            return None, "invalid"
+        total_case_lines += len(normalized_lines)
+        if total_case_lines > 20_000:
+            return None, "invalid"
+        normalized_cases[case_id] = normalized_lines
+    trace_sha256 = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema": "unai.coverage-trace.v1",
+        "target_file": expected_target_file,
+        "target_sha256": expected_target_sha256.lower(),
+        "executed_lines": executed_lines,
+        "case_lines": normalized_cases,
+        "trace_sha256": trace_sha256,
+    }, "complete"
 
 
 class IsolatedPythonTestRunner:
@@ -464,6 +608,17 @@ class IsolatedPythonTestRunner:
                             normalized_marker["target_function"] = function_name[:128]
                     markers.append(normalized_marker)
             metadata["counterexample_markers"] = markers
+        if evidence_source == MUTATION_EVIDENCE_SOURCE and status in {"passed", "failed"}:
+            # For a mutant run, a failing pytest suite means the mutant was killed.
+            killed = status == "failed"
+            metadata["mutation_killed"] = killed
+            mutant_id = str(metadata.get("mutant_id", "unknown"))[:32]
+            claim = (
+                f"Mutant {mutant_id} was killed by the grounded oracle suite."
+                if killed
+                else f"Mutant {mutant_id} survived the grounded oracle suite."
+            )
+            passed = killed
         evidence = EvidenceRecord(
             evidence_id=uuid4().hex,
             task_id=snapshot.task_id,
@@ -504,9 +659,10 @@ class IsolatedPythonTestRunner:
         evidence_metadata: dict[str, Any],
         *,
         evidence_source: str = "grounded-oracle-sandbox",
+        source_overrides: dict[str, str] | None = None,
     ) -> TaskTestRunResponse:
         """Run one server-generated oracle test alongside the filtered workspace copy."""
-        if evidence_source not in {"grounded-oracle-sandbox", "grounded-oracle-shrink-sandbox"}:
+        if evidence_source not in GENERATED_TEST_EVIDENCE_SOURCES:
             raise ValueError("Unsupported generated-test evidence source.")
         return self.run(
             task_id,
@@ -514,6 +670,7 @@ class IsolatedPythonTestRunner:
             generated_test=(generated_test_path, generated_test_content),
             evidence_source=evidence_source,
             evidence_metadata=evidence_metadata,
+            source_overrides=source_overrides,
             artifact_ref=f"task:{task_id}/grounded-oracle-tests",
         )
 
@@ -525,8 +682,12 @@ class IsolatedPythonTestRunner:
         generated_test: tuple[str, str] | None = None,
         evidence_source: str = "docker-sandbox",
         evidence_metadata: dict[str, Any] | None = None,
+        source_overrides: dict[str, str] | None = None,
         artifact_ref: str | None = None,
     ) -> TaskTestRunResponse:
+        if source_overrides is not None and evidence_source != MUTATION_EVIDENCE_SOURCE:
+            raise ValueError("Source overrides are allowed only for mutation evidence.")
+        normalized_overrides = _validate_source_overrides(source_overrides)
         snapshot = self.ledger.get_snapshot(task_id)
         if snapshot is None:
             raise KeyError(task_id)
@@ -555,6 +716,35 @@ class IsolatedPythonTestRunner:
                     max_files=self.max_files,
                     max_bytes=self.max_bytes,
                 )
+                effective_evidence_metadata = dict(evidence_metadata or {})
+                if normalized_overrides:
+                    override_hashes: dict[str, str] = {}
+                    for relative_path, override_content in normalized_overrides.items():
+                        override_target = stage_path.joinpath(
+                            *PurePosixPath(relative_path).parts
+                        )
+                        if override_target.is_symlink() or not override_target.is_file():
+                            raise WorkspaceStagingError(
+                                "A mutation source override target is missing or unsafe."
+                            )
+                        resolved_target = override_target.resolve(strict=True)
+                        if not resolved_target.is_relative_to(stage_path.resolve()):
+                            raise WorkspaceStagingError(
+                                "A mutation source override escaped the staging workspace."
+                            )
+                        override_target.write_text(
+                            override_content, encoding="utf-8", newline=""
+                        )
+                        override_hashes[relative_path] = hashlib.sha256(
+                            override_content.encode("utf-8")
+                        ).hexdigest()
+                        staged = StagedWorkspace(
+                            staged.files,
+                            staged.bytes_copied
+                            + len(override_content.encode("utf-8")),
+                            staged.skipped_files,
+                        )
+                    effective_evidence_metadata["source_override_sha256"] = override_hashes
                 if generated_test is not None:
                     relative_text, generated_content = generated_test
                     relative = PurePosixPath(relative_text)
@@ -576,10 +766,29 @@ class IsolatedPythonTestRunner:
                         staged.bytes_copied + len(generated_content.encode("utf-8")),
                         staged.skipped_files,
                     )
-                result = self.sandbox.run(stage_path, COMMAND)
+                external_fixture_case_ids = effective_evidence_metadata.get(
+                    "external_fixture_case_ids", []
+                )
+                if external_fixture_case_ids:
+                    result = self.sandbox.run(
+                        stage_path,
+                        COMMAND,
+                        external_side_effect_fixture=True,
+                    )
+                else:
+                    result = self.sandbox.run(stage_path, COMMAND)
                 stdout = result.stdout or ""
                 stderr = result.stderr or ""
-                effective_evidence_metadata = dict(evidence_metadata or {})
+                external_fixture_case_ids = effective_evidence_metadata.get(
+                    "external_fixture_case_ids", []
+                )
+                if external_fixture_case_ids:
+                    # Missing or invalid trace plumbing must never downgrade a
+                    # requested external audit into an ordinary passing test.
+                    effective_evidence_metadata["external_fixture_audit_status"] = "unavailable"
+                    effective_evidence_metadata["external_fixture_audit_unavailable_case_ids"] = sorted(
+                        set(external_fixture_case_ids)
+                    )
                 replay_trace_relative_path = effective_evidence_metadata.get("replay_trace_relative_path")
                 if replay_trace_relative_path is not None:
                     generated_relative = PurePosixPath(relative_text)
@@ -613,6 +822,47 @@ class IsolatedPythonTestRunner:
                                 for case_id in filesystem_case_ids
                                 if filesystem_records.get(case_id, {}).get("status") != "complete"
                             )
+                        external_fixture_case_ids = effective_evidence_metadata.get(
+                            "external_fixture_case_ids", []
+                        )
+                        if external_fixture_case_ids:
+                            external_fixture_records = {
+                                record["case_id"]: record
+                                for record in replay_records
+                                if record.get("kind") == "external_fixture_filesystem_unchanged"
+                            }
+                            effective_evidence_metadata["external_fixture_audit_status"] = (
+                                "complete"
+                                if set(external_fixture_records) == set(external_fixture_case_ids)
+                                and all(record.get("status") == "complete" for record in external_fixture_records.values())
+                                else "unavailable"
+                            )
+                            effective_evidence_metadata["external_fixture_audit_unavailable_case_ids"] = sorted(
+                                case_id
+                                for case_id in external_fixture_case_ids
+                                if external_fixture_records.get(case_id, {}).get("status") != "complete"
+                            )
+                coverage_trace_relative_path = effective_evidence_metadata.get(
+                    "coverage_trace_relative_path"
+                )
+                if coverage_trace_relative_path is not None and generated_test is not None:
+                    generated_relative = PurePosixPath(relative_text)
+                    expected_trace_path = generated_relative.with_suffix(
+                        ".coverage.json"
+                    ).as_posix()
+                    if coverage_trace_relative_path != expected_trace_path:
+                        effective_evidence_metadata["coverage_trace"] = None
+                        effective_evidence_metadata["coverage_trace_status"] = "invalid_path"
+                    else:
+                        coverage_trace, coverage_status = _validated_coverage_trace(
+                            stage_path,
+                            coverage_trace_relative_path,
+                            effective_evidence_metadata.get("coverage_case_ids", []),
+                            effective_evidence_metadata.get("target_file", ""),
+                            effective_evidence_metadata.get("target_sha256", ""),
+                        )
+                        effective_evidence_metadata["coverage_trace"] = coverage_trace
+                        effective_evidence_metadata["coverage_trace_status"] = coverage_status
                 if result.exit_code != 0 and (
                     "No module named pytest" in stderr
                     or "No module named pytest" in stdout
@@ -649,6 +899,27 @@ class IsolatedPythonTestRunner:
                         stdout=stdout,
                         stderr=stderr,
                         error="workspace_filesystem_audit_unavailable",
+                        sandboxed=True,
+                        evidence_source=evidence_source,
+                        evidence_metadata=effective_evidence_metadata,
+                        artifact_ref=artifact_ref,
+                    )
+                if (
+                    result.exit_code == 0
+                    and not result.timed_out
+                    and effective_evidence_metadata.get("external_fixture_audit_status") == "unavailable"
+                ):
+                    return self._response(
+                        snapshot,
+                        "unavailable",
+                        None,
+                        "External side-effect fixture audit could not be completed within its safe snapshot budget; no verdict is available.",
+                        exit_code=result.exit_code,
+                        timed_out=result.timed_out,
+                        staged=staged,
+                        stdout=stdout,
+                        stderr=stderr,
+                        error="external_fixture_audit_unavailable",
                         sandboxed=True,
                         evidence_source=evidence_source,
                         evidence_metadata=effective_evidence_metadata,

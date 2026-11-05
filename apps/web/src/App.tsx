@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 type Message = { role: 'user' | 'assistant'; content: string };
 type Health = { status: string; provider_configured: boolean; model: string; execution: string };
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 
 const suggestions = [
   { icon: '⌘', title: 'Understand a codebase', description: 'Map architecture, dependencies and risky areas.', prompt: 'Analyze this codebase architecture and identify the most important modules, dependencies, and risks.' },

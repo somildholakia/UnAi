@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
-from pydantic import BaseModel, Field, StringConstraints, field_validator
+from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
 
 
 TaskKind = Literal["bugfix", "feature", "review", "research", "general"]
@@ -16,6 +17,55 @@ TaskPermission = Literal[
     "install_dependencies",
     "destructive_changes",
 ]
+
+
+
+ApiScope = Literal[
+    "chat:use",
+    "tasks:read",
+    "tasks:write",
+    "workspace:read",
+    "workspace:write",
+    "workspace:execute",
+    "brain:read",
+    "brain:write",
+]
+
+
+class ApiTokenCreateRequest(BaseModel):
+    tenant_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    scopes: list[ApiScope] = Field(min_length=1, max_length=8)
+    expires_in_days: int = Field(default=30, ge=1, le=365)
+
+    @field_validator("tenant_id")
+    @classmethod
+    def validate_tenant_id(cls, value: str) -> str:
+        if value == "default" or re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", value) is None:
+            raise ValueError("tenant_id must be a non-reserved lowercase identifier.")
+        return value
+
+    @field_validator("scopes")
+    @classmethod
+    def validate_unique_scopes(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("Token scopes must not contain duplicates.")
+        return value
+
+
+class ApiTokenCreateResponse(BaseModel):
+    token_id: str
+    tenant_id: str
+    label: str
+    token: str
+    scopes: list[ApiScope]
+    created_at: str
+    expires_at: str
+
+
+class ApiTokenRevokeResponse(BaseModel):
+    token_id: str
+    revoked: bool
 
 
 class ChatMessage(BaseModel):
@@ -32,6 +82,20 @@ class ChatResponse(BaseModel):
     message: str
     model: str
     mode: Literal["local-model"] = "local-model"
+
+
+SpecialistRole = Literal["next_action", "planner", "verifier"]
+
+
+class SpecialistChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=50_000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=40)
+
+
+class SpecialistChatResponse(BaseModel):
+    specialist: SpecialistRole
+    message: str
+    model: str
 
 
 class HealthResponse(BaseModel):
@@ -86,6 +150,7 @@ class SymbolReference(BaseModel):
     kind: Literal["function", "method", "class"]
     start_line: int = Field(ge=1)
     end_line: int = Field(ge=1)
+    source_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
     score: int = Field(ge=1)
     matched_terms: list[str] = Field(default_factory=list)
 
@@ -93,7 +158,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace", "shrink"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace", "shrink", "mutation", "coverage"]
     source: str
     claim: str
     passed: bool | None = None
@@ -130,6 +195,26 @@ class WorkspaceFileSnapshot(BaseModel):
     size_bytes: int = Field(ge=0)
     encoding: Literal["utf-8"] = "utf-8"
     content: str
+
+
+class CodeContextSlice(BaseModel):
+    path: str
+    name: str
+    kind: Literal["function", "method", "class"]
+    source_start_line: int = Field(ge=1)
+    source_end_line: int = Field(ge=1)
+    excerpt_start_line: int = Field(ge=1)
+    excerpt_end_line: int = Field(ge=1)
+    sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    content: str
+    truncated: bool = False
+
+
+class TaskCodeContextResponse(BaseModel):
+    task_id: str
+    workspace: str
+    slices: list[CodeContextSlice] = Field(default_factory=list)
+    total_characters: int = Field(ge=0)
 
 
 class PatchProposalRequest(BaseModel):
@@ -220,6 +305,41 @@ class ProbeResponse(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class CoverageGuidedProbeRequest(BaseModel):
+    file_path: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=512)]
+    symbol_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
+    source_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    probe_evidence_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    coverage_evidence_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    limit: int = Field(default=24, ge=1, le=60)
+
+
+class CoverageGuidedProbeCandidate(BaseModel):
+    candidate_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    source_line: int = Field(ge=1)
+    parameter_values: dict[str, Any]
+    branch_id: Annotated[str, StringConstraints(pattern=r"^branch-[0-9]{3}$")]
+    branch_kind: Literal["if"] = "if"
+    predicted_arm: Literal["then", "else", "unknown"]
+    unobserved_arms: list[Literal["then", "else"]] = Field(min_length=1, max_length=2)
+    priority: int = Field(ge=1, le=100)
+    rationale: str = Field(max_length=300)
+    note: str = Field(max_length=300)
+
+
+class CoverageGuidedProbeResponse(BaseModel):
+    task_id: str
+    file_path: str
+    symbol_name: str
+    source_sha256: str
+    status: Literal["ranked", "no_uncovered_candidates"]
+    candidates: list[CoverageGuidedProbeCandidate] = Field(default_factory=list, max_length=60)
+    probe_evidence_id: str
+    coverage_evidence_id: str
+    evidence: EvidenceRecord
+    limitations: list[str] = Field(default_factory=list)
+
+
 class TaskProofResponse(BaseModel):
     task_id: str
     status: Literal[
@@ -264,6 +384,7 @@ class GroundedPropertyOracle(BaseModel):
         "raises_exception",
         "output_stable_across_replays",
         "workspace_filesystem_unchanged",
+        "external_fixture_filesystem_unchanged",
     ]
     replay_count: int = Field(default=1, ge=1, le=4)
     argument_name: Annotated[
@@ -304,6 +425,43 @@ class GroundedOracleAttestation(BaseModel):
         return value
 
 
+class GroundedOracleTransparencyTreeHead(BaseModel):
+    """Operator-pinned log's signed checkpoint envelope."""
+
+    log_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")]
+    key_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
+    timestamp: int = Field(ge=0, le=2**63 - 1)
+    tree_size: int = Field(ge=1, le=2**63 - 1)
+    root_hash: Annotated[str, StringConstraints(pattern=r"^[A-Fa-f0-9]{64}$")]
+    signature_b64: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")]
+
+
+class GroundedOracleTransparencyWitness(BaseModel):
+    """Independent witness signature over one exact signed tree head."""
+
+    key_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
+    signature_b64: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")]
+
+
+class GroundedOracleTransparencyProof(BaseModel):
+    """Bounded inclusion and checkpoint-growth proof supplied with a publisher manifest."""
+
+    tree_head: GroundedOracleTransparencyTreeHead
+    leaf_index: int = Field(ge=0, le=2**63 - 1)
+    inclusion_proof: list[Annotated[str, StringConstraints(pattern=r"^[A-Fa-f0-9]{64}$")]] = Field(max_length=32)
+    consistency_proof: list[Annotated[str, StringConstraints(pattern=r"^[A-Fa-f0-9]{64}$")]] = Field(
+        default_factory=list, max_length=32
+    )
+    witnesses: list[GroundedOracleTransparencyWitness] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def reject_duplicate_witness_keys(self):
+        key_ids = [item.key_id for item in self.witnesses]
+        if len(key_ids) != len(set(key_ids)):
+            raise ValueError("Transparency witness key IDs must be unique.")
+        return self
+
+
 class GroundedOraclePublisherAttestation(BaseModel):
     """External publisher signature over one immutable specification artifact revision."""
 
@@ -323,6 +481,7 @@ class GroundedOraclePublisherAttestation(BaseModel):
     signature_b64: Annotated[
         str, StringConstraints(pattern=r"^[A-Za-z0-9+/]{86}==$")
     ]
+    transparency: GroundedOracleTransparencyProof | None = None
 
     @field_validator("issued_at")
     @classmethod
@@ -362,6 +521,8 @@ class GroundedOraclePublisherAttestation(BaseModel):
 class GroundedOracleCase(BaseModel):
     case_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")]
     arguments: dict[str, Any]
+    # Explicit constructor fixture for the narrowly supported ordinary instance-method path.
+    instance_arguments: dict[str, Any] | None = None
     expected_output: Any = None
     oracle_property: GroundedPropertyOracle | None = None
     oracle_kind: Literal["user", "specification"]
@@ -387,6 +548,47 @@ class GroundedTestApprovalRequest(BaseModel):
     symbol_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
     source_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
     cases: list[GroundedOracleCase] = Field(min_length=1, max_length=20)
+    # Opt-in, bounded line/branch-arm measurement in the same approved run.
+    measure_coverage: bool = False
+
+
+class GroundedMutationApprovalRequest(GroundedTestApprovalRequest):
+    """A separately confirmed, bounded mutation run over a grounded oracle suite."""
+
+    confirm: Literal["run-grounded-mutation-tests"]
+    max_mutants: int = Field(default=6, ge=1, le=8)
+
+
+class GroundedMutantResult(BaseModel):
+    mutant_id: Annotated[str, StringConstraints(pattern=r"^mut-[0-9]{3}$")]
+    description: str = Field(max_length=240)
+    operator: str = Field(max_length=80)
+    line: int = Field(ge=1)
+    column: int = Field(ge=0)
+    mutant_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    status: Literal["killed", "survived", "unavailable"]
+    exit_code: int | None = None
+    timed_out: bool = False
+    sandboxed: bool = False
+    execution_evidence: EvidenceRecord
+
+
+class GroundedMutationResponse(BaseModel):
+    task_id: str
+    file_path: str
+    symbol_name: str
+    source_sha256: str
+    status: Literal["passed", "failed", "unavailable"]
+    baseline_status: Literal["passed", "failed", "unavailable"]
+    baseline_evidence: EvidenceRecord
+    mutants_total: int = Field(ge=0)
+    mutants_killed: int = Field(ge=0)
+    mutants_survived: int = Field(ge=0)
+    mutants_unavailable: int = Field(ge=0)
+    mutation_score: float | None = Field(default=None, ge=0, le=1)
+    mutants: list[GroundedMutantResult] = Field(default_factory=list)
+    summary_evidence: EvidenceRecord
+    limitations: list[str] = Field(default_factory=list)
 
 
 class GroundedCounterexample(BaseModel):
@@ -428,6 +630,37 @@ class GroundedShrinkResult(BaseModel):
     note: str
 
 
+class GroundedCoverageBranch(BaseModel):
+    branch_id: Annotated[str, StringConstraints(pattern=r"^branch-[0-9]{3}$")]
+    kind: Literal["if", "while", "for", "async_for"]
+    line: int = Field(ge=1)
+    condition: str = Field(max_length=300)
+    then_observed: bool
+    else_observed: bool | None = None
+
+
+class GroundedCoverageResult(BaseModel):
+    status: Literal["complete", "unavailable"]
+    reason: str | None = Field(default=None, max_length=300)
+    target_file: str
+    symbol_name: str
+    source_sha256: str
+    trace_sha256: Annotated[
+        str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")
+    ] | None = None
+    coverable_line_count: int = Field(default=0, ge=0)
+    executed_line_count: int = Field(default=0, ge=0)
+    missing_line_count: int = Field(default=0, ge=0)
+    missing_lines: list[int] = Field(default_factory=list, max_length=500)
+    line_coverage: float | None = Field(default=None, ge=0, le=1)
+    supported_branch_arms: int = Field(default=0, ge=0)
+    observed_branch_arms: int = Field(default=0, ge=0)
+    branch_coverage: float | None = Field(default=None, ge=0, le=1)
+    branches: list[GroundedCoverageBranch] = Field(default_factory=list, max_length=200)
+    cases_measured: int = Field(default=0, ge=0, le=20)
+    truncated: bool = False
+
+
 class GroundedTestResponse(BaseModel):
     task_id: str
     file_path: str
@@ -441,6 +674,8 @@ class GroundedTestResponse(BaseModel):
     execution_evidence: EvidenceRecord
     trace_evidence: EvidenceRecord
     oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    coverage: GroundedCoverageResult | None = None
+    coverage_evidence: EvidenceRecord | None = None
     limitations: list[str] = Field(default_factory=list)
 
 
@@ -461,6 +696,12 @@ class TaskProofBundleResponse(BaseModel):
     shrink_attempt_count: int = Field(ge=0)
     shrunk_counterexample_count: int = Field(ge=0)
     unverified_probe_candidate_count: int = Field(ge=0)
+    mutation_run_count: int = Field(default=0, ge=0)
+    latest_mutation_summary: EvidenceRecord | None = None
+    mutation_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    coverage_run_count: int = Field(default=0, ge=0)
+    latest_coverage_summary: EvidenceRecord | None = None
+    coverage_evidence: list[EvidenceRecord] = Field(default_factory=list)
     counterexamples: list[GroundedCounterexample] = Field(default_factory=list)
     oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
     shrink_evidence: list[EvidenceRecord] = Field(default_factory=list)

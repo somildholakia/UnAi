@@ -1,72 +1,259 @@
-# unAI training and fine-tuning
+# unAI training and specialist adapters
 
-Training is an optional offline workflow. The phone runs inference only. Training requires suitable GPU hardware, storage and a reproducible dataset; having a free API key or model endpoint does not mean model weights can be fine-tuned for free.
+M5 has a reproducible training and evaluation workflow for three separate LoRA/QLoRA adapters:
 
-## Training strategy
+- `next_action`: select the next approved inspection, retrieval, edit or test action.
+- `planner`: convert a user goal into bounded plans, acceptance checks and permission requirements.
+- `verifier`: interpret test evidence, distinguish failures from unavailable checks, and report unresolved risks.
 
-Use small specialist adapters, not a from-scratch frontier pretraining run:
+These are separate adapter roles, not three claims of autonomous capability. Training is offline and requires a compatible model, a suitable machine and a curated dataset. The 6 GB Android profile is an inference/release target, not a training device. No adapter weights are currently committed or claimed trained.
 
-1. Collect task trajectories only from sources with explicit consent and compatible licenses.
-2. Keep only tasks with verifiable outcomes, acceptance checks and source provenance.
-3. Remove secrets, deduplicate records and split by repository/project so evaluation does not leak training examples.
-4. LoRA/QLoRA supervised fine-tuning teaches task execution style, tool selection and structured responses.
-5. DPO is a later optional stage using a chosen and rejected response whose outcomes have been independently checked.
-6. Evaluate the adapter on held-out coding tasks with the same budget as the base model before deployment.
+## 0. Create a first-party bootstrap corpus (no third-party dataset wait)
 
-The trainer writes an adapter and a JSON manifest. It does not create a self-contained model; keep the original base model and its license with the adapter.
+The repository includes a deterministic synthetic collector so development and training-pipeline smoke tests can start immediately without downloading third-party data:
 
-## Install
+```bash
+python -m training.collect_synthetic \
+  --output data/raw/unai-synthetic.jsonl \
+  --groups 20 \
+  --examples-per-group 12 \
+  --seed 20261105 \
+  --license CC0-1.0
 
-From repository root:
+python -m training.audit_corpus --input data/raw/unai-synthetic.jsonl
 
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -e "./apps/engine[train]"
+python -m training.prepare_corpus \
+  --input data/raw/unai-synthetic.jsonl \
+  --output-dir data/specialists \
+  --seed 20261105 \
+  --eval-fraction 0.2
+```
 
-QLoRA needs a supported CUDA GPU and bitsandbytes. Non-quantized LoRA can run on supported hardware but CPU-only training is generally impractical for useful coding models. Do not run training on the 6 GB Android target.
+The default creates 720 deterministic records (240 per specialist) across 20 project groups per role. Each generated answer is checked against a role-specific deterministic contract before the JSONL file is written. The adjacent `.manifest.json` records the generator version, seed, counts, output digest and limitations. Generated data is kept local and `data/raw/`, `data/specialists/`, `artifacts/` and `reports/` are git-ignored.
 
-## SFT JSONL format
+These examples are explicitly marked `source_type: synthetic`, carry generator/version/rights-basis provenance, and use the selected output license (default `CC0-1.0`). Change `--license` only when you intend to use that license for the generated corpus. Synthetic verification validates the generator's own response contracts; it is not a real codebase test, real user trajectory or evidence of model capability. Treat this as a bootstrap corpus for testing the pipeline and initial experiments, not a substitute for diverse, independently verified tasks.
 
-Each line contains a messages array, a verified outcome and provenance:
+For public datasets, do not treat public visibility as permission to train. Every record marked `source_type: public` must include an HTTPS `source_url`, content-addressed immutable `source_revision` (40/64-character commit SHA or `sha256:` digest), HTTPS `license_url`, named license, explicit consent/permission metadata and a repository/project grouping key. The audit reports source types in aggregate only. Data from local projects requires explicit authorization; do not ingest private chats or repositories by default.
 
-    {
-      "messages": [
-        {"role": "user", "content": "Fix the bug..."},
-        {"role": "assistant", "content": "The verified fix is..."}
-      ],
-      "outcome": "passed",
-      "verification": {
-        "status": "passed",
-        "checks": [{"name": "unit tests", "passed": true}]
-      },
-      "provenance": {
-        "source": "your consented task dataset",
-        "license": "Apache-2.0",
-        "consented": true
-      }
-    }
+## 1. Collect eligible trajectories
 
-Prepare and inspect the cleaned file:
+Each raw JSONL record must include:
 
-    python training/prepare_dataset.py --input data/raw.jsonl --output data/sft.jsonl
+```json
+{
+  "specialist": "next_action",
+  "messages": [
+    {"role": "user", "content": "Inspect the failing function and its tests."},
+    {"role": "assistant", "content": "Read the target file and the linked test first."}
+  ],
+  "outcome": "passed",
+  "verification": {
+    "status": "passed",
+    "checks": [
+      {"name": "independent acceptance suite", "passed": true}
+    ]
+  },
+  "provenance": {
+    "source": "consented task trajectory source",
+    "license": "Apache-2.0",
+    "consented": true,
+    "repository": "project-or-repository-group"
+  }
+}
+```
 
-The filter rejects samples without explicit consent, source/license metadata and passing verification checks. It redacts common token/key patterns and deduplicates messages. Review the report and cleaned examples before training; automated redaction is not a guarantee of privacy.
+Only the three named specialist values are accepted. Messages must be valid user/assistant conversation turns and end with an assistant response. A trajectory is rejected unless the outcome and every verification check passed, explicit consent is true, a license is named, and a repository/project grouping key exists. New public-source records must also pin their HTTPS source, immutable revision and HTTPS license evidence; first-party synthetic records must identify their generator, version and rights basis. Legacy records without a source_type remain readable for compatibility, but new collection flows should always declare it.
 
-## Run LoRA / QLoRA
+Never add private conversations, private repositories, credentials, or third-party data without explicit permission and compatible rights. Automated redaction covers common secret formats only; it is not a privacy guarantee. Inspect the prepared examples before training.
 
-    python training/train_lora.py       --model YOUR_SMALL_BASE_MODEL       --train-file data/sft.jsonl       --eval-file data/heldout.jsonl       --output-dir artifacts/unai-sft       --qlora
+## 1A. Read-only corpus preflight
 
-Start with a small, supported open-weight coding model. The right size depends on your GPU memory, context length, runtime support and license. Do not infer mobile feasibility from parameter count alone.
+Before preparing any files, audit the raw JSONL without writing split files:
 
-## DPO preference stage
+```bash
+python -m training.audit_corpus --input data/raw-trajectories.jsonl
+```
 
-Preference JSONL must contain prompt, chosen and rejected message arrays, provenance, and independently measured checks. The chosen response must pass; rejected must fail.
+The report includes the raw input SHA-256/byte count, eligible/rejected/duplicate counts, per-specialist eligible record and distinct repository/project-group counts, and whether each specialist has enough groups for a deterministic train/eval split. Rejection reasons are aggregated; conversation text, raw repository identifiers and provenance source strings are never printed. The audit is read-only and enforces a 2 GiB total-input limit while reading records in chunks no larger than 1 MB plus one byte. Overlong records are drained without buffering the full line, counted as rejected, and still included in the exact source digest. The corpus preparer applies the same streaming limits.
 
-    python training/prepare_preferences.py --input data/preferences-raw.jsonl --output data/preferences.jsonl
-    python training/train_dpo.py       --model YOUR_BASE_MODEL       --train-file data/preferences.jsonl       --eval-file data/preferences-heldout.jsonl       --output-dir artifacts/unai-dpo
+A role is marked split-ready only when it has at least one eligible record and at least two distinct repository/project groups. This is only a structural preflight: it does not establish that consent or license claims are authentic, independently replay verification, establish dataset quality, or mean there are enough examples to train a useful model. Review source permissions and sanitized samples before preparation and training.
 
-DPO is optional and should only follow a stable SFT baseline. A rejected answer is not automatically a good negative example; keep the reason and evidence in your source data and curate it.
+## 2. Build deterministic specialist splits
 
-## Release gate
+From the repository root:
 
-Do not ship an adapter unless it passes held-out acceptance tests, has a reproducible manifest, respects the base model license, contains no secrets/private data, and fits the target inference budget. Compare base model, adapter-only and full unAI system separately. No custom weights are currently trained or included in this repository.
+```bash
+python -m training.prepare_corpus \
+  --input data/raw-trajectories.jsonl \
+  --output-dir data/specialists \
+  --seed 20261103 \
+  --eval-fraction 0.2
+```
+
+The preparation command:
+- validates consent, license and passing verification;
+- redacts common token/key patterns and deduplicates sanitized conversations;
+- hashes repository/project IDs before storing them in output;
+- keeps every repository/project group entirely in train or eval;
+- requires at least two distinct groups for every specialist;
+- writes `next_action.train.jsonl` / `next_action.eval.jsonl`, likewise for planner and verifier, plus `corpus_manifest.json` with dataset hashes and split counts.
+
+Do not train if the manifest reports too few groups or examples. One task split into multiple messages is not independent evidence.
+
+## 3. Select the base model
+
+The default pinned base is `Qwen/Qwen3-1.7B` at immutable revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`, declared Apache-2.0 by the publisher. It is a practical starting point for a shared compact base: 1.7B parameters, Transformers chat-template support, LoRA/QLoRA compatibility and post-training GGUF quantization options. It is not claimed to be the strongest model overall. Preserve the exact revision and license with every adapter. The model config lives in `training/model_config.json`; update it only after checking the publisher card and license.
+
+## 4. Train each adapter separately
+
+Install from the repository root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e "./apps/engine[train]"
+```
+
+QLoRA requires supported CUDA hardware and bitsandbytes. LoRA can use supported hardware, but CPU-only training may be impractical. Training never runs from the Engine API or on the Android phone.
+
+The orchestrator below validates all six split files and the corpus manifest, then runs one role at a time with a separate output directory. This is the recommended entry point on a free Colab/Kaggle GPU session or another compatible CUDA host:
+
+```bash
+python -m training.train_specialists --dry-run
+python -m training.train_specialists
+```
+
+The default is QLoRA 4-bit NF4, one sample per device, gradient accumulation 16, rank 16, two epochs and a fixed seed. To continue after a notebook/session disconnect, keep the `artifacts/` directory and run `python -m training.train_specialists --resume`. The trainer writes regular epoch checkpoints and the orchestrator never runs two specialists concurrently. Free GPU availability and session duration are provider-controlled; no paid API or GPU is assumed.
+
+Example for an individual next-action adapter:
+
+```bash
+python training/train_lora.py \
+  --model YOUR_SMALL_OPEN_WEIGHT_BASE_MODEL \
+  --revision IMMUTABLE_MODEL_REVISION \
+  --specialist next_action \
+  --train-file data/specialists/next_action.train.jsonl \
+  --eval-file data/specialists/next_action.eval.jsonl \
+  --output-dir artifacts/unai-next-action \
+  --qlora
+```
+
+Repeat with `--specialist planner` and `--specialist verifier`, pointing to their respective prepared files and unique output directories. Before loading the model, the trainer requires the adjacent `corpus_manifest.json` and verifies the selected specialist's exact train/eval filenames, SHA-256 values of the exact byte snapshots parsed into the in-memory datasets, example counts and repository-group counts. Hashing and parsing one snapshot prevents a file change between separate reads from making the manifest describe different bytes than the rows used for training. It also recomputes every record ID, requires SHA-256-shaped group IDs, checks provenance/group consistency, rejects malformed or oversized message sequences, and refuses train/eval group overlap. It then masks prompt tokens from the loss, preserves assistant responses when truncating long prompts, pads labels with `-100`, and records data hashes, train/eval groups, hyperparameters, package versions, GPU details, metrics and an adapter artifact digest in `unai_adapter_manifest.json`.
+
+A LoRA adapter is not a standalone model. Retain the exact compatible base-model revision and its license.
+
+## 5. Compare matched held-out results
+
+The evaluation harness consumes one JSONL row per system and held-out case. For every `suite_id + case_id + specialist`, provide results for all three systems:
+
+- `base`: base model without tools;
+- `adapter`: the same base model with the specialist adapter;
+- `tool_augmented`: the tool-augmented system, including non-empty tool names and tool evidence IDs.
+
+Each row must declare `schema: "unai.benchmark-result.v1"` and include a `case_contract` object with the exact `prompt` and non-empty `acceptance_criteria` list. It also needs `model_id`, `base_model`, a SHA-256 `case_sha256` recomputed from that canonical contract, `latency_ms`, `tokens`, a consented/licensed provenance object and a `verification` object containing a status, named boolean checks, an evidence ID and verifier identifier. The same `suite_id + case_id + specialist` must carry the same `case_sha256` for all three systems. The accepted record shape is published in [benchmark-result.schema.json](schemas/benchmark-result.schema.json); unknown fields are rejected by the evaluator. Unavailable runs are excluded rather than counted as failures or wins. The evaluator rejects incomplete or duplicate matched sets, contradictory status/check pairs, model or case-content mismatches and missing tool traces.
+
+Compute `case_sha256` from the exact task and acceptance contract that all three systems receive, not from the response or observed outcome:
+
+```python
+import hashlib
+import json
+
+case_contract = {
+    "prompt": "Fix the off-by-one error in the range calculation.",
+    "acceptance_criteria": ["boundary test passes", "no unrelated file changes"],
+}
+canonical = json.dumps(
+    case_contract,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+).encode("utf-8")
+case_sha256 = hashlib.sha256(canonical).hexdigest()
+```
+
+Include the same canonical case contract and its digest in every base, adapter and tool-augmented row. The evaluator recomputes the digest and rejects mismatches. Keep the task suite frozen before evaluating any adapter; do not derive acceptance checks after seeing model outputs.
+
+```bash
+python training/evaluate_results.py \
+  --input data/heldout-results.jsonl \
+  --output reports/next-action-evaluation.json
+```
+
+The report includes verified success rates, paired improvements/regressions, latency and token summaries, plus an exact two-sided McNemar test on discordant paired outcomes. The release floor is 30 matched held-out cases and significance alpha is capped at 0.05. An adapter must improve the matched verified success rate, have zero base-pass/adapter-fail regressions, and pass the exact paired test; a tiny sample can show a descriptive gain but cannot pass the release gate. The evaluator stores the case-content hashes and the release gate recomputes p-values from paired counts instead of trusting a reported boolean. This is a measurement on the supplied held-out set, not proof of general capability.
+
+## 6. Physical-device release gate
+
+The evaluation report alone cannot approve a mobile release. Provide a separate instrumented physical-device measurement JSON using schema `unai.mobile-benchmark.v1`:
+
+```json
+{
+  "schema": "unai.mobile-benchmark.v1",
+  "specialist": "next_action",
+  "base_model": "YOUR_SMALL_OPEN_WEIGHT_BASE_MODEL",
+  "adapter_artifacts_sha256": "SHA256_FROM_ADAPTER_MANIFEST",
+  "device_model": "physical Android device model",
+  "android_version": "recorded Android version",
+  "measured_at": "2026-11-03T12:00:00Z",
+  "measurement_method": "documented repeatable sustained local inference test",
+  "memory_budget_mb": 6144,
+  "peak_rss_mb": 5400,
+  "ttft_ms": 2200,
+  "ttft_budget_ms": 5000,
+  "sustained_tokens_per_second": 7.5,
+  "minimum_tokens_per_second": 5.0,
+  "thermal_throttling": false
+}
+```
+
+The numbers above are an example schema only, not measured results or product defaults. Use actual recorded values and choose explicit budgets for your test protocol. The release gate independently checks the adapter artifact hash, specialist/base-model identity, the minimum 30-case paired significance threshold and exact p-value, a memory budget no higher than 6144 MiB, measured peak RSS, TTFT, sustained tokens/second and thermal throttling:
+
+```bash
+python training/release_gate.py \
+  --adapter-manifest artifacts/unai-next-action/unai_adapter_manifest.json \
+  --evaluation-report reports/next-action-evaluation.json \
+  --mobile-metrics data/mobile/next-action-device.json \
+  --output reports/next-action-release-decision.json
+```
+
+A missing mobile measurement, a failed performance comparison, any regression, a hash mismatch, an out-of-budget measurement or thermal throttling blocks release. Do not edit a release decision manually to mark an adapter ready.
+
+## 7. Serve and route the three specialists
+
+The Engine can route a request to a separately served OpenAI-compatible adapter model. Configure only model IDs that your local inference server actually exposes:
+
+```dotenv
+UNAI_SPECIALIST_NEXT_ACTION_MODEL=unai-next-action-lora
+UNAI_SPECIALIST_PLANNER_MODEL=unai-planner-lora
+UNAI_SPECIALIST_VERIFIER_MODEL=unai-verifier-lora
+```
+
+Leave a value blank until that adapter is trained, validated and loaded by the serving runtime. The model ID is selected by server configuration, never by caller input. The routes are:
+
+```text
+POST /api/specialists/next_action/chat
+POST /api/specialists/planner/chat
+POST /api/specialists/verifier/chat
+```
+
+Each request accepts `message` and optional user/assistant `history`; the response identifies the selected specialist and configured model ID. The API inherits the Engine bearer-token/loopback perimeter. If a specialist model is missing, the endpoint returns HTTP 503 and does not silently use the base model. This is model routing, not proof that a specialist adapter has been trained or released.
+
+## 8. DPO is optional and later
+
+The existing preference-data and DPO scripts remain an experimental second stage. Use them only after a stable SFT baseline and only with chosen/rejected answers whose outcomes have been independently verified. A failed answer is not automatically a useful negative example.
+
+## Current M5 status
+
+The consented-corpus preparation, repository-disjoint splitting, role-specific LoRA/QLoRA trainer, matched-result evaluator and physical-device release gate are implemented. The pinned Qwen3-1.7B default, sequential three-role launcher, checkpoint resume option and pre/post adapter held-out loss comparison are now part of the executable workflow. CI validation on `5143c42bd39c525bf0ac2ab5b24d58b0c1302968` passed 460 tests (Engine/Web run #423) and Brain Worker run #106. The built-in synthetic corpus remains a smoke-test dataset only. No GPU training run or specialist adapter artifact is claimed until a real CUDA execution produces a manifest and hashed adapter files; no physical Android benchmark has been run.
+
+
+Documentation handoff sync: the full checkpoint/continuity/roadmap refresh is at commit `dff355f7f3df6c4c92a761ff56e3c75b50709a4f`. This documentation-only follow-up does not change model weights or training results.
+
+
+## Actual training execution status — 2026-11-05
+
+The pinned model revision and license were checked. A live Colab attempt opened a blank notebook but could not reach a free GPU runtime: the current runtime-selection UI redirected to a Google Cloud deployment dialog. The local execution container has CPU-only PyTorch (`2.10.0+cpu`), no CUDA device and no `nvidia-smi`. No Kaggle session was available because the saved browser profile has no Kaggle sign-in.
+
+**No specialist training was started and no adapter artifacts or metrics exist.** Do not treat `--dry-run`, CI, base-model loading or the existing held-out-loss code as completion. The next operation must run `python -m training.train_specialists` on an actually connected free CUDA runtime and preserve the output root on persistent storage. Confirm `torch.cuda.is_available()` and record the GPU model/VRAM before the first training job.
+
+A compatible public-source candidate was identified: NVIDIA `SWE-Hero-openhands-trajectories` (34,269 trajectories, dataset card CC BY 4.0, with per-record repository SPDX licenses). It has not been downloaded, pinned to a full dataset commit SHA, mapped into specialist rows or used for training. Keep it out of the prepared corpus until attribution, immutable revision, row-level license, and successful execution evidence are retained. The included 720 synthetic records remain a pipeline smoke-test corpus only.
