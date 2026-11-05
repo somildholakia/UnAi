@@ -77,6 +77,16 @@ The training directory contains the M5 specialist pipeline for next-action, plan
 
 Public data imports must include explicit compatible rights, HTTPS source/license evidence and an immutable revision. Never ingest private conversations or repositories without explicit permission.
 
+Quick-start synthetic dataset flow (720 examples by default):
+
+```bash
+python -m training.collect_synthetic --output data/raw/unai-synthetic.jsonl
+python -m training.audit_corpus --input data/raw/unai-synthetic.jsonl
+python -m training.prepare_corpus --input data/raw/unai-synthetic.jsonl --output-dir data/specialists
+```
+
+The generated corpus is local, declared CC0-1.0 by default, and marked synthetic in every record. It is for pipeline bootstrapping—not a real-world coding benchmark.
+
 ## Mobile acceptance targets — unverified
 
 | Metric | Initial target |
