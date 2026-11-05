@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from training.prepare_dataset import sanitise
 
@@ -105,12 +106,62 @@ def _provenance(value: Any) -> dict[str, Any] | None:
         or len(group) > 500
     ):
         return None
-    return {
-        "source": source.strip(),
-        "license": license_name.strip(),
+    clean_source, _ = sanitise(source.strip())
+    clean_license, _ = sanitise(license_name.strip())
+    if not clean_source.strip() or "[REDACTED_SECRET]" in clean_license:
+        return None
+
+    source_type = value.get("source_type")
+    optional_text: dict[str, str] = {}
+    for field, maximum in (
+        ("source_type", 40),
+        ("source_url", 2_000),
+        ("source_revision", 240),
+        ("license_url", 2_000),
+        ("generator", 200),
+        ("generator_version", 80),
+        ("rights_basis", 500),
+        ("authorization_reference", 500),
+    ):
+        raw = value.get(field)
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw.strip() or len(raw) > maximum:
+            return None
+        cleaned, _ = sanitise(raw.strip())
+        if not cleaned.strip() or "[REDACTED_SECRET]" in cleaned:
+            return None
+        optional_text[field] = cleaned
+
+    if source_type is not None:
+        if source_type not in {"synthetic", "public", "authorized_local"}:
+            return None
+        if source_type == "synthetic" and not all(
+            optional_text.get(field)
+            for field in ("generator", "generator_version", "rights_basis")
+        ):
+            return None
+        if source_type == "public":
+            source_url = optional_text.get("source_url", "")
+            license_url = optional_text.get("license_url", "")
+            revision = optional_text.get("source_revision", "")
+            for url in (source_url, license_url):
+                parsed = urlsplit(url)
+                if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+                    return None
+            if not revision:
+                return None
+        if source_type == "authorized_local" and not optional_text.get("authorization_reference"):
+            return None
+
+    result = {
+        "source": clean_source.strip(),
+        "license": clean_license.strip(),
         "consented": True,
         "group_id": _sha256(group.strip().casefold().encode("utf-8")),
     }
+    result.update(optional_text)
+    return result
 
 
 def _verified(value: Any, outcome: Any) -> dict[str, Any] | None:
@@ -129,7 +180,16 @@ def _verified(value: Any, outcome: Any) -> dict[str, Any] | None:
         ):
             return None
         names.append(check["name"].strip()[:120])
-    return {"status": "passed", "check_names": names}
+    result = {"status": "passed", "check_names": names}
+    method = value.get("method")
+    if method is not None:
+        if not isinstance(method, str) or not method.strip() or len(method) > 120:
+            return None
+        cleaned_method, _ = sanitise(method.strip())
+        if not cleaned_method.strip() or "[REDACTED_SECRET]" in cleaned_method:
+            return None
+        result["method"] = cleaned_method
+    return result
 
 
 def _split_groups(groups: set[str], *, seed: int, specialist: str, fraction: float) -> tuple[set[str], set[str]]:
