@@ -79,6 +79,7 @@
 ## M5 — Specialist training
 - [x] Add a read-only, metadata-only corpus preflight with a 2 GiB input ceiling, bounded JSONL record handling and no raw conversation/repository/provenance values in its report.
 - [x] Expand credential sanitization for provider tokens, cloud access-key IDs, bearer/JWT forms, database URLs, PEM private keys and signed URL signatures, with regression tests.
+- [x] Read raw corpus JSONL through a bounded line reader, drain oversized records without buffering full lines, and enforce the total input byte budget during streaming while hashing the consumed snapshot.
 - [x] Build consent/license/verification-gated corpus preparation with sanitized deduplication, hashed repository groups and deterministic repository-disjoint specialist train/eval splits.
 - [x] Record the raw corpus input SHA-256/byte count and preflight all specialist splits before writing outputs, preserving previous artifacts on split-validation failures.
 - [x] Add separate next-action, planner and verifier LoRA/QLoRA training runs with provenance checks, leakage rejection and reproducible data/library/hardware manifests.

@@ -61,34 +61,36 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest validated code/test commit:** `90b75a8db13defaf9e76084e2c8c8bd228d8f256` — corrected the oversized-corpus audit regression-test fixture.
-**Engine/Web CI:** [run #405](https://github.com/somildholakia/UnAi/actions/runs/42011170907) — **447 tests passed in 23.51s**; Docker sandbox image build, Python compileall, all six Termux shell syntax checks and Web production build passed.
-**Brain Worker CI:** [run #88](https://github.com/somildholakia/UnAi/actions/runs/42011170937) — Worker typecheck, D1 migration validation and browser JavaScript syntax passed.
+**Latest validated code/test commit:** `6b6fca0c8c7401dae0f932c2bf2f2048c06b5c04` — bounded streaming of corpus JSONL records, oversized-line draining, exact input hashing and regression tests.
+**Engine/Web CI:** [run #409](https://github.com/somildholakia/UnAi/actions/runs/42012445065) — **449 tests passed in 21.40s**; Docker sandbox image build, Python compileall, all six Termux shell syntax checks and Web production build passed.
+**Brain Worker CI:** [run #92](https://github.com/somildholakia/UnAi/actions/runs/42012445055) — Worker typecheck, D1 migration validation and browser JavaScript syntax passed.
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.
 
 ### M4 completion status
 
-- M4 roadmap implementation is complete: grounded oracles, property/exception contracts, bounded shrinking, supported async/function/method invocation, mutation verification, source-bound coverage measurement and read-only coverage-guided ranking are implemented.
+- M4 roadmap implementation is complete: grounded oracles, property/exception contracts, bounded shrinking, supported async/function/method invocation, mutation tests, source-bound coverage measurement and read-only coverage-guided ranking are implemented.
 - Grounded checks remain tied to caller-supplied expected outputs and exact source hashes. Coverage ranks existing candidates only; it does not synthesize expected values or prove general correctness.
-- Supported target shapes and fail-closed boundaries remain as documented below and in `docs/VERIFICATION.md`.
+- Supported target shapes and fail-closed boundaries remain as documented in `docs/VERIFICATION.md`.
 
 ### M5 engineering-foundation status
 
-- Training corpus preparation now has a separate read-only preflight command: `python -m training.audit_corpus --input PATH`. It reports hashes, byte counts, aggregated eligibility/rejection counts and per-specialist split readiness without printing conversations, raw repository identifiers or provenance-source strings. It rejects inputs above 2 GiB and records above the existing 1 MiB JSONL-line limit.
-- Expanded sanitization covers additional provider credentials, cloud access-key IDs, webhook tokens, package/model-hosting tokens, bearer/JWT values, database connection URLs, PEM private-key blocks and signed URL query signatures. Regression tests assert whole-secret redaction.
-- M5 code infrastructure is complete: consent/license/verification-gated corpus preparation, repository-disjoint splits, read-only preflight, three role-specific LoRA/QLoRA trainers, manifest/provenance validation, matched held-out evaluation, statistical release gates and server-configured specialist routing.
-- The latest CI regression was a test-fixture issue: a mocked `Path.stat()` omitted `st_mode`, causing `Path.is_file()` to fail before the file-size check. The test now lowers the module limit with a tiny real file, preserving the actual production guard. Run #405 passed all 447 tests.
-
+- Corpus preparation and its separate read-only audit now consume JSONL records using bounded `readline(_MAX_LINE_BYTES + 1)` chunks. An overlong record is drained in bounded chunks without retaining the full line; all consumed bytes still contribute to the exact source SHA-256 and byte count.
+- Both commands enforce the 2 GiB total-input limit before reading and again as bytes stream in, so a file that grows after the initial size check is still rejected. Records larger than the 1 MiB limit are counted/rejected without JSON parsing.
+- `python -m training.audit_corpus --input PATH` produces a metadata-only eligibility and split-readiness report. It omits conversation text, raw repository/project IDs and provenance-source strings.
+- Expanded sanitization covers provider credentials, cloud access-key IDs, webhook/package/model-hosting tokens, bearer/JWT values, database connection URLs, PEM private-key blocks and signed URL query signatures. Regression tests assert whole-secret redaction.
+- M5 code infrastructure is complete: consent/license/verification-gated corpus preparation, repository-disjoint splits, preflight audit, three role-specific LoRA/QLoRA trainers, manifest/provenance validation, matched held-out evaluation, statistical release gates and fail-closed server-configured specialist routing.
+- The bounded-reader addition is validated on code/test HEAD `6b6fca0c8c7401dae0f932c2bf2f2048c06b5c04`. Engine/Web run #409 passed **449 tests in 21.40s**; Docker image build, Python compilation, six Termux shell syntax checks and Web production build passed. Brain Worker run #92 passed.
+  
 ### External inputs still required — not code-complete claims
 
 - No real consented/licensed multi-repository trajectory corpus has been supplied. Do not use private chats, private repositories or third-party data without explicit permission and compatible rights.
 - No specialist adapters have been trained; suitable GPU compute and retained, reproducible artifacts are still required.
-- No matched held-out comparison or physical Android RSS/PSS, TTFT, throughput, power or thermal report exists. Run these per adapter before promotion.
+- No matched held-out model comparison or physical Android RSS/PSS, TTFT, throughput, power or thermal report exists. Run these per adapter before promotion.
 - Cloudflare Brain remains a deployment scaffold until its D1 database, secrets, access policy and live URL are verified.
 - Do not merge PR #28 or modify `main` without explicit user instruction.
 
-**Next:** the M4/M5 software foundation is ready for real-data training and evaluation once the approved corpus and suitable compute are available. Continue with those external gates; do not fabricate training data, weights, benchmark scores or device measurements.
+**Next:** the M4/M5 software foundation is implemented and CI-validated. The remaining M5 training/release work depends on the approved corpus and suitable GPU compute; real Android measurements remain a later device-validation gate. Do not fabricate data, weights, benchmark scores or device measurements.
 
 ### Earlier M2 increment (historical)
 

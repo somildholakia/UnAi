@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 implementation and M5 engineering infrastructure validated through read-only consented-corpus preflight and expanded credential redaction; code/test HEAD `90b75a8db13defaf9e76084e2c8c8bd228d8f256`; 447 Engine tests passed and both Engine/Web and Brain Worker workflows are green.
+**Checkpoint:** M4 implementation and M5 engineering foundation validated through the bounded streaming corpus reader/audit and expanded credential redaction; code/test HEAD `6b6fca0c8c7401dae0f932c2bf2f2048c06b5c04`; 449 Engine tests passed and both Engine/Web and Brain Worker workflows are green.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -35,6 +35,7 @@
 
 - Added `python -m training.audit_corpus --input PATH`, a read-only, metadata-only preflight before corpus preparation. It reports the input digest/byte count, aggregate eligible/rejected/duplicate counts and per-specialist distinct-group split readiness.
 - The audit omits conversation bodies, raw repository/project identifiers and provenance-source strings from its output. It enforces the 2 GiB input ceiling and the corpus preparer's 1 MiB per-record ceiling; readiness means only that a structural split is possible, not that the data is sufficiently large or that consent/license statements are independently authenticated.
+- The audit and corpus preparer now read each JSONL record with a bounded `readline(1 MiB + 1 byte)` buffer. Oversized lines are drained in bounded chunks without retaining their full contents; the exact bytes still contribute to the input SHA-256 and byte count. The 2 GiB total-input budget is enforced both before reading and during streaming, including files that grow after the initial stat.
 - Expanded secret scrubbing to provider-specific tokens, cloud access key IDs, webhook/package/model-hosting tokens, bearer/JWT forms, database connection strings, PEM private-key blocks and signed URL signatures. Added focused regression coverage for those forms.
 - Fixed the oversized-input audit test so it changes the audit module's limit with a tiny real file rather than mocking `Path.stat()` with an incomplete stat object. This tests the intended guard without depending on pathlib implementation details.
 
@@ -941,3 +942,21 @@ Add coverage-guided and mutation-based verification only with explicit resource/
 - Nested functions, lambdas, classes, chained comparisons, annotations and docstrings are not mutated.
 - **Next incomplete M4 task:** add coverage-guided verification with deterministic fixed targets, explicit candidate/time/memory budgets and the same sandbox/evidence boundaries.
 - M5 still needs an approved consented/licensed multi-repository corpus and GPU training; no specialist weights, held-out model results or physical Android measurements are claimed. Keep Android setup deferred until the software roadmap is complete.
+
+## 2026-11-05 M5 bounded corpus-streaming validation
+
+**Bounded JSONL reader and streaming total-size enforcement:** code/test HEAD `6b6fca0c8c7401dae0f932c2bf2f2048c06b5c04`.
+**Engine/Web Actions run #409:** success — **449 tests passed in 21.40s**; Docker sandbox build, Python compileall, all six Termux shell syntax checks and Web production build passed.
+**Brain Worker Actions run #92:** success — Worker typecheck, D1 migration validation and browser JavaScript syntax passed.
+**PR #28:** open and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Introduced a shared bounded JSONL line reader for the corpus preparer and read-only audit. It reads at most 1 MiB + 1 byte for a record chunk, detects oversized lines, and drains the rest of that line with bounded reads rather than allocating the whole record.
+- The reader hashes every consumed byte. The audit's reported source byte count now comes from that same stream, so the digest and byte count describe exactly the bytes consumed.
+- The 2 GiB cap is checked from the file size before reading and enforced again as bytes stream in. This covers files that grow after the initial stat.
+- Added tests for oversized-line rejection/draining, exact source digest/byte counts and the read-only audit behavior. The initial red CI runs exposed malformed test line-ending fixtures; the fixtures now contain actual JSONL newline bytes and the current run #409 passed all tests.
+
+### Boundaries
+
+The audit remains a metadata-only structural preflight. It cannot independently authenticate consent/license claims or replay verification. A split-ready result means only that there are at least two repository/project groups for deterministic train/eval separation; it does not establish adequate training scale or quality.
