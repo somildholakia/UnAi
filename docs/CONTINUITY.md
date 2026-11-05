@@ -548,3 +548,13 @@ Continue M4 with safe expansion of decorator and Python signature support. First
 No consented/licensed multi-repository corpus or trained specialist artifacts exist; do not claim the model is trained or ready. Held-out model evaluation and physical Android memory/latency/thermal/lifecycle measurements remain open. Do not begin Android/Termux installation or ask for phone testing until all software development roadmap items are complete.
 
 Continue from the newest branch HEAD, read this handoff plus docs/CHECKPOINT.md, docs/ROADMAP.md and docs/VERIFICATION.md, and keep main unchanged and PR #28 unmerged.
+
+
+## M4 safe Python decorators and signature expansion — 2026-11-05 continuation
+
+- Starting commit: `a04a9a848c224ff0826a2f9ecd9805d50ee58b31` on `feat/m4-instance-methods-m5-specialists`.
+- Safely recognized `typing.final` only when directly imported from `typing` under a unique, unshadowed binding (module alias or function alias). This marker is an identity decorator; other decorators, decorator calls, shadowed bindings and unsupported orderings remain rejected before execution. `staticmethod`/`classmethod` built-in names are required to remain unshadowed.
+- Extended signature planning to positional-only, positional-or-keyword and keyword-only parameters. Variadic parameters are represented in JSON by their declared name: a list for `*args`, an object for `**kwargs`. The generated harness uses fixed binder code with a server-derived plan and never emits caller keys or values into Python source.
+- The same binding rules apply to constructor fixtures. Positional-only default holes and non-empty varargs with missing positional slots are rejected. Explicit keyword collisions are rejected; positional-only names may be present in the `**kwargs` object according to Python semantics.
+- Variadic probe-linked cases and variadic shrinking cases are rejected until the probe/shrinker structures can attest to the complete expanded call.
+- Tests and hosted CI status are pending; continue validation and record the final exact SHA before declaring the checkpoint complete. PR #28 remains open/unmerged; `main` remains unchanged; no mobile installation is started.

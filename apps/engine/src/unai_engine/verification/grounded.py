@@ -329,11 +329,435 @@ def _shrink_score(arguments: dict[str, Any]) -> tuple[Decimal, int, str]:
     return numeric_magnitude, len(encoded.encode("utf-8")), encoded
 
 
-def _decorator_name(decorator: ast.expr) -> str | None:
-    return decorator.id if isinstance(decorator, ast.Name) else None
+def _typing_final_bindings(tree: ast.Module) -> tuple[set[str], set[str]]:
+    """Return only unambiguous module aliases for typing.final.
+
+    We accept direct module-scope imports only. Any second binding (including a
+    local parameter/store with the same name) makes that alias ambiguous.
+    """
+    final_imports: list[str] = []
+    typing_imports: list[str] = []
+    final_import_lines: dict[str, list[int]] = {}
+    typing_import_lines: dict[str, list[int]] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Import):
+            for item in statement.names:
+                if item.name == "typing":
+                    bound = item.asname or "typing"
+                    typing_imports.append(bound)
+                    typing_import_lines.setdefault(bound, []).append(statement.lineno)
+        elif isinstance(statement, ast.ImportFrom) and statement.level == 0 and statement.module == "typing":
+            for item in statement.names:
+                if item.name == "final":
+                    bound = item.asname or "final"
+                    final_imports.append(bound)
+                    final_import_lines.setdefault(bound, []).append(statement.lineno)
+
+    def binding_count(name: str) -> int:
+        count = 0
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name:
+                count += 1
+            elif isinstance(node, ast.arg) and node.arg == name:
+                count += 1
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+                count += 1
+            elif isinstance(node, ast.alias):
+                bound = node.asname or node.name.split(".")[0]
+                if bound == name:
+                    count += 1
+            elif isinstance(node, ast.ExceptHandler) and node.name == name:
+                count += 1
+            elif isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+                count += 1
+        return count
+
+    unique_final = {
+        name for name in final_imports
+        if final_imports.count(name) == 1 and binding_count(name) == 1
+    }
+    unique_typing = {
+        name for name in typing_imports
+        if typing_imports.count(name) == 1 and binding_count(name) == 1
+    }
+
+    # Imported aliases are accepted only when their sole runtime use is the
+    # direct typing.final decorator itself. This prevents a source module from
+    # passing the module/function object elsewhere for mutation or rebinding.
+    allowed_final_references: set[int] = set()
+    allowed_typing_references: set[int] = set()
+    for node in ast.walk(tree):
+        decorators = getattr(node, "decorator_list", ())
+        for decorator in decorators:
+            if isinstance(decorator, ast.Name) and decorator.id in unique_final:
+                allowed_final_references.add(id(decorator))
+            elif (
+                isinstance(decorator, ast.Attribute)
+                and decorator.attr == "final"
+                and isinstance(decorator.value, ast.Name)
+                and decorator.value.id in unique_typing
+            ):
+                allowed_typing_references.add(id(decorator.value))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load):
+            continue
+        if node.id in unique_final and id(node) not in allowed_final_references:
+            unique_final.discard(node.id)
+        if node.id in unique_typing and id(node) not in allowed_typing_references:
+            unique_typing.discard(node.id)
+    for node in ast.walk(tree):
+        for decorator in getattr(node, "decorator_list", ()):
+            if (
+                isinstance(decorator, ast.Name)
+                and decorator.id in unique_final
+                and final_import_lines[decorator.id][0] >= decorator.lineno
+            ):
+                unique_final.discard(decorator.id)
+            elif (
+                isinstance(decorator, ast.Attribute)
+                and decorator.attr == "final"
+                and isinstance(decorator.value, ast.Name)
+                and decorator.value.id in unique_typing
+                and typing_import_lines[decorator.value.id][0] >= decorator.lineno
+            ):
+                unique_typing.discard(decorator.value.id)
+    return unique_final, unique_typing
+
+
+def _is_typing_final_decorator(
+    decorator: ast.expr, final_names: set[str], typing_names: set[str]
+) -> bool:
+    if isinstance(decorator, ast.Name):
+        return decorator.id in final_names
+    return (
+        isinstance(decorator, ast.Attribute)
+        and decorator.attr == "final"
+        and isinstance(decorator.value, ast.Name)
+        and decorator.value.id in typing_names
+    )
+
+
+def _has_only_typing_final(
+    decorators: list[ast.expr], final_names: set[str], typing_names: set[str]
+) -> bool:
+    return not decorators or (
+        len(decorators) == 1
+        and _is_typing_final_decorator(decorators[0], final_names, typing_names)
+    )
+
+
+def _is_unshadowed_builtin_name(tree: ast.Module, name: str) -> bool:
+    """A builtin decorator name is safe only when the module cannot shadow it."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name:
+            return False
+        if isinstance(node, ast.arg) and node.arg == name:
+            return False
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
+            return False
+        if isinstance(node, ast.alias):
+            bound = node.asname or node.name.split(".")[0]
+            if bound == name:
+                return False
+        if isinstance(node, ast.ExceptHandler) and node.name == name:
+            return False
+        if isinstance(node, (ast.Global, ast.Nonlocal)) and name in node.names:
+            return False
+    return True
 
 
 def _target_descriptor(source: str, symbol_name: str) -> dict[str, Any]:
+    """Resolve targets with only statically proven identity markers and call forms."""
+    parts = symbol_name.split(".")
+    if len(parts) not in {1, 2, 3} or any(not part.isidentifier() for part in parts):
+        raise GroundedVerificationError(
+            "Use a module-level function, ClassName.method or Outer.Inner.method."
+        )
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise GroundedVerificationError(
+            f"Target Python source does not parse at line {exc.lineno}.", 409
+        ) from exc
+    final_names, typing_names = _typing_final_bindings(tree)
+
+    if len(parts) == 1:
+        matches = [
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == parts[0]
+        ]
+        if len(matches) != 1:
+            if not matches:
+                raise GroundedVerificationError(
+                    f"Top-level Python function not found: {symbol_name}.", 404
+                )
+            raise GroundedVerificationError(
+                f"Function name is ambiguous: {symbol_name}.", 409
+            )
+        function = matches[0]
+        if not _has_only_typing_final(function.decorator_list, final_names, typing_names):
+            raise GroundedVerificationError(
+                "Only an unambiguously imported typing.final identity decorator is supported on module functions."
+            )
+        invocation_kind = "module_function"
+        owner_name = None
+        constructor = None
+    else:
+        owner_path, method_name = parts[:-1], parts[-1]
+        owner = None
+        namespace_body = tree.body
+        for depth, owner_component in enumerate(owner_path):
+            classes = [
+                node for node in namespace_body
+                if isinstance(node, ast.ClassDef) and node.name == owner_component
+            ]
+            if len(classes) != 1:
+                if not classes:
+                    scope = "Top-level" if depth == 0 else "Nested"
+                    raise GroundedVerificationError(
+                        f"{scope} class not found: {'.'.join(owner_path[:depth + 1])}.",
+                        404,
+                    )
+                raise GroundedVerificationError(
+                    f"Class name is ambiguous: {'.'.join(owner_path[:depth + 1])}.",
+                    409,
+                )
+            owner = classes[0]
+            if not _has_only_typing_final(owner.decorator_list, final_names, typing_names):
+                raise GroundedVerificationError(
+                    "Class targets accept only an unambiguously imported typing.final identity marker."
+                )
+            if len(owner_path) > 1 and (owner.bases or owner.keywords):
+                raise GroundedVerificationError(
+                    "Nested-class targets require namespace classes without bases or metaclass keywords."
+                )
+            namespace_body = owner.body
+
+        assert owner is not None
+        methods = [
+            node for node in owner.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == method_name
+        ]
+        if len(methods) != 1:
+            if not methods:
+                raise GroundedVerificationError(
+                    f"Class method not found: {symbol_name}.", 404
+                )
+            raise GroundedVerificationError(
+                f"Class method name is ambiguous: {symbol_name}.", 409
+            )
+        function = methods[0]
+        decorators = function.decorator_list
+        if not decorators or (
+            len(decorators) == 1
+            and _is_typing_final_decorator(decorators[0], final_names, typing_names)
+        ):
+            invocation_kind = "instance_method"
+            if owner.bases or owner.keywords:
+                raise GroundedVerificationError(
+                    "Instance-method targets require a class without bases or metaclass keywords."
+                )
+            if any(
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__new__"
+                for node in owner.body
+            ):
+                raise GroundedVerificationError(
+                    "Instance-method fixtures do not support custom __new__ constructors."
+                )
+            constructors = [
+                node for node in owner.body
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "__init__"
+            ]
+            if len(constructors) > 1:
+                raise GroundedVerificationError(
+                    "Instance-method fixture class has an ambiguous __init__ constructor."
+                )
+            constructor = constructors[0] if constructors else None
+            if constructor is not None:
+                first_constructor_parameter = (
+                    constructor.args.posonlyargs[0].arg
+                    if constructor.args.posonlyargs
+                    else constructor.args.args[0].arg
+                    if constructor.args.args
+                    else None
+                )
+                if (
+                    isinstance(constructor, ast.AsyncFunctionDef)
+                    or first_constructor_parameter != "self"
+                    or not _has_only_typing_final(
+                        constructor.decorator_list, final_names, typing_names
+                    )
+                ):
+                    raise GroundedVerificationError(
+                        "Instance fixture __init__ must be synchronous, with self first, and undecorated or marked only with typing.final."
+                    )
+            first_method_parameter = (
+                function.args.posonlyargs[0].arg
+                if function.args.posonlyargs
+                else function.args.args[0].arg
+                if function.args.args
+                else None
+            )
+            if first_method_parameter != "self":
+                raise GroundedVerificationError(
+                    "An ordinary instance method must declare self as its first parameter."
+                )
+        elif (
+            len(decorators) == 1
+            and isinstance(decorators[0], ast.Name)
+            and decorators[0].id == "staticmethod"
+            and _is_unshadowed_builtin_name(tree, "staticmethod")
+        ):
+            invocation_kind = "staticmethod"
+            constructor = None
+        elif (
+            len(decorators) == 1
+            and isinstance(decorators[0], ast.Name)
+            and decorators[0].id == "classmethod"
+            and _is_unshadowed_builtin_name(tree, "classmethod")
+        ):
+            invocation_kind = "classmethod"
+            constructor = None
+        elif (
+            len(decorators) == 2
+            and isinstance(decorators[0], ast.Name)
+            and decorators[0].id in {"staticmethod", "classmethod"}
+            and _is_unshadowed_builtin_name(tree, decorators[0].id)
+            and _is_typing_final_decorator(decorators[1], final_names, typing_names)
+        ):
+            invocation_kind = (
+                "staticmethod" if decorators[0].id == "staticmethod" else "classmethod"
+            )
+            constructor = None
+        else:
+            raise GroundedVerificationError(
+                "Only undecorated instance methods, explicit @staticmethod/@classmethod, and the safe typing.final marker are supported."
+            )
+
+        owner_name = ".".join(owner_path)
+
+    return {
+        "function": function,
+        "invocation_kind": invocation_kind,
+        "owner_name": owner_name,
+        "constructor": constructor,
+    }
+
+
+def _target_function(
+    source: str, symbol_name: str
+) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """Compatibility wrapper returning only the selected function AST."""
+    return _target_descriptor(source, symbol_name)["function"]
+
+
+def _signature_plan(
+    function: ast.FunctionDef | ast.AsyncFunctionDef | None,
+    *,
+    drop_first_parameter: bool = False,
+) -> dict[str, Any]:
+    """Describe Python's supported binding slots without evaluating defaults."""
+    if function is None:
+        return {
+            "posonly": [],
+            "poskw": [],
+            "kwonly": [],
+            "required_posonly": [],
+            "required_poskw": [],
+            "required_kwonly": [],
+            "vararg": None,
+            "varkw": None,
+        }
+    posonly = list(function.args.posonlyargs)
+    poskw = list(function.args.args)
+    all_positional = posonly + poskw
+    defaults_start = len(all_positional) - len(function.args.defaults)
+    required_names = {
+        parameter.arg
+        for index, parameter in enumerate(all_positional)
+        if index < defaults_start
+    }
+    if drop_first_parameter:
+        if not all_positional:
+            raise GroundedVerificationError(
+                "A bound method or constructor must declare its bound first parameter."
+            )
+        first = all_positional[0]
+        if posonly and posonly[0] is first:
+            posonly = posonly[1:]
+        else:
+            poskw = poskw[1:]
+        required_names.discard(first.arg)
+    required_kwonly = [
+        parameter.arg
+        for parameter, default in zip(function.args.kwonlyargs, function.args.kw_defaults)
+        if default is None
+    ]
+    return {
+        "posonly": [parameter.arg for parameter in posonly],
+        "poskw": [parameter.arg for parameter in poskw],
+        "kwonly": [parameter.arg for parameter in function.args.kwonlyargs],
+        "required_posonly": [item.arg for item in posonly if item.arg in required_names],
+        "required_poskw": [item.arg for item in poskw if item.arg in required_names],
+        "required_kwonly": required_kwonly,
+        "vararg": function.args.vararg.arg if function.args.vararg else None,
+        "varkw": function.args.kwarg.arg if function.args.kwarg else None,
+    }
+
+
+def _validate_signature_values(values: dict[str, Any], plan: dict[str, Any], label: str) -> None:
+    if not isinstance(values, dict) or any(not isinstance(key, str) for key in values):
+        raise GroundedVerificationError(f"{label} must be a JSON object with string keys.")
+    declared = set(plan["posonly"] + plan["poskw"] + plan["kwonly"])
+    vararg_name = plan["vararg"]
+    varkw_name = plan["varkw"]
+    allowed = declared | {name for name in (vararg_name, varkw_name) if name}
+    unknown = set(values) - allowed
+    if unknown:
+        raise GroundedVerificationError(
+            f"{label} contains unknown parameters: {', '.join(sorted(unknown))}."
+        )
+    varargs = values.get(vararg_name, []) if vararg_name else []
+    if type(varargs) is not list:
+        raise GroundedVerificationError(
+            f"{label} variadic parameter {vararg_name} must be a JSON list."
+        )
+    extra_keywords = values.get(varkw_name, {}) if varkw_name else {}
+    if type(extra_keywords) is not dict or any(type(key) is not str for key in extra_keywords):
+        raise GroundedVerificationError(
+            f"{label} variadic keyword parameter {varkw_name} must be a JSON object with string keys."
+        )
+    supplied_posonly = [name for name in plan["posonly"] if name in values]
+    if supplied_posonly != plan["posonly"][:len(supplied_posonly)]:
+        raise GroundedVerificationError(
+            f"{label} cannot omit an earlier positional-only default while supplying a later positional-only parameter."
+        )
+    explicit_keywords = (set(plan["poskw"]) | set(plan["kwonly"])) & set(values)
+    collisions = explicit_keywords & set(extra_keywords)
+    if collisions:
+        raise GroundedVerificationError(
+            f"{label} contains duplicate explicit and variadic keyword parameters: {', '.join(sorted(collisions))}."
+        )
+    required = set(plan["required_posonly"] + plan["required_poskw"] + plan["required_kwonly"])
+    extra_bound_names = set(extra_keywords) & (set(plan["poskw"]) | set(plan["kwonly"]))
+    missing = required - set(values) - extra_bound_names
+    if missing:
+        raise GroundedVerificationError(
+            f"{label} is missing required parameters: {', '.join(sorted(missing))}."
+        )
+    if vararg_name and varargs:
+        missing_positional = set(plan["posonly"] + plan["poskw"]) - set(values)
+        if missing_positional:
+            raise GroundedVerificationError(
+                f"{label} must explicitly supply every positional parameter when {vararg_name} contains values."
+            )
+
+
+
     """Resolve module functions and a deliberately bounded class-method surface."""
     parts = symbol_name.split(".")
     if len(parts) not in {1, 2, 3} or any(not part.isidentifier() for part in parts):
@@ -544,15 +968,18 @@ def _validate_cases(
     function = target["function"]
     invocation_kind = target["invocation_kind"]
     is_bound_method = invocation_kind in {"classmethod", "instance_method"}
-    allowed, required = _signature(function, drop_first_parameter=is_bound_method)
-    constructor_allowed: set[str] = set()
-    constructor_required: set[str] = set()
-    if invocation_kind == "instance_method":
-        constructor = target.get("constructor")
-        if constructor is not None:
-            constructor_allowed, constructor_required = _signature(
-                constructor, drop_first_parameter=True
-            )
+    target_signature_plan = _signature_plan(
+        function, drop_first_parameter=is_bound_method
+    )
+    constructor_signature_plan = (
+        _signature_plan(target.get("constructor"), drop_first_parameter=True)
+        if invocation_kind == "instance_method" and target.get("constructor") is not None
+        else _signature_plan(None)
+    )
+    target_is_variadic = bool(target_signature_plan["vararg"] or target_signature_plan["varkw"])
+    constructor_is_variadic = bool(
+        constructor_signature_plan["vararg"] or constructor_signature_plan["varkw"]
+    )
     candidates = _candidate_index(
         snapshot, request.file_path, request.symbol_name, request.source_sha256
     )
@@ -646,16 +1073,10 @@ def _validate_cases(
                 )
         if invocation_kind == "instance_method":
             instance_arguments = dict(case.instance_arguments or {})
-            unknown_instance = set(instance_arguments) - constructor_allowed
-            missing_instance = constructor_required - set(instance_arguments)
-            if unknown_instance:
-                raise GroundedVerificationError(
-                    f"Oracle case {case.case_id} contains unknown constructor parameters: {', '.join(sorted(unknown_instance))}."
-                )
-            if missing_instance:
-                raise GroundedVerificationError(
-                    f"Oracle case {case.case_id} is missing required constructor parameters: {', '.join(sorted(missing_instance))}."
-                )
+            _validate_signature_values(
+                instance_arguments, constructor_signature_plan,
+                f"Oracle case {case.case_id} constructor arguments",
+            )
         else:
             if case.instance_arguments is not None:
                 raise GroundedVerificationError(
@@ -664,15 +1085,24 @@ def _validate_cases(
             instance_arguments = {}
 
         arguments = dict(case.arguments)
-        unknown = set(arguments) - allowed
-        missing = required - set(arguments)
-        if unknown:
+        _validate_signature_values(
+            arguments, target_signature_plan, f"Oracle case {case.case_id} arguments"
+        )
+        if case.probe_candidate_id and (target_is_variadic or constructor_is_variadic):
             raise GroundedVerificationError(
-                f"Oracle case {case.case_id} contains unknown parameters: {', '.join(sorted(unknown))}."
+                f"Oracle case {case.case_id} cannot bind a probe candidate to a variadic target signature."
             )
-        if missing:
+        if (
+            case.oracle_property is not None
+            and case.oracle_property.kind not in {
+                "output_stable_across_replays",
+                "workspace_filesystem_unchanged",
+                "external_fixture_filesystem_unchanged",
+            }
+            and (target_is_variadic or constructor_is_variadic)
+        ):
             raise GroundedVerificationError(
-                f"Oracle case {case.case_id} is missing required parameters: {', '.join(sorted(missing))}."
+                f"Oracle case {case.case_id} cannot enable shrinking for a variadic target or constructor signature."
             )
 
         if case.probe_candidate_id:
@@ -725,6 +1155,12 @@ def _validate_cases(
                 "instance_arguments": instance_arguments if invocation_kind == "instance_method" else None,
                 "instance_arguments_sha256": (
                     _digest(instance_arguments, "Instance constructor arguments")
+                    if invocation_kind == "instance_method"
+                    else None
+                ),
+                "_unai_signature": target_signature_plan,
+                "_unai_constructor_signature": (
+                    constructor_signature_plan
                     if invocation_kind == "instance_method"
                     else None
                 ),
@@ -791,11 +1227,12 @@ def _generated_pytest(
         ):
             raise GroundedVerificationError("Replay trace path must be a generated workspace JSON file.")
         replay_trace_literal = repr(replay_trace_path)
-    if invocation_kind == "instance_method":
-        direct_call = "_FUNCTION(_CLASS(**case['instance_arguments']), **case['arguments'])"
-    else:
-        direct_call = "_FUNCTION(**case['arguments'])"
-    invocation = f"asyncio.run({direct_call})" if is_async else direct_call
+    invocation = "asyncio.run(_invoke_case(case))" if is_async else "_invoke_case(case)"
+    replay_invocation = (
+        "asyncio.run(_invoke_case(case, copy.deepcopy(case['arguments'])))"
+        if is_async
+        else "_invoke_case(case, copy.deepcopy(case['arguments']))"
+    )
     # Embed a JSON string as a Python string literal; never interpolate caller text
     # as executable Python source.
     payload_literal = repr(payload)
@@ -915,6 +1352,52 @@ _SPEC.loader.exec_module(_MODULE)
 {target_resolution}
 if not callable(_FUNCTION):
     raise RuntimeError("Grounded test target is not callable.")
+
+
+def _invoke_with_signature(function, values, plan, bound=None):
+    """Invoke only from the validated, server-derived signature plan."""
+    positional_names = plan["posonly"] + plan["poskw"]
+    vararg_name = plan["vararg"]
+    varkw_name = plan["varkw"]
+    varargs = values.get(vararg_name, []) if vararg_name else []
+    extra_keywords = values.get(varkw_name, {}) if varkw_name else {}
+    if varargs:
+        positional = [values[name] for name in positional_names] + list(varargs)
+        keywords = {{
+            name: values[name]
+            for name in plan["kwonly"]
+            if name in values
+        }}
+    else:
+        positional = [values[name] for name in plan["posonly"] if name in values]
+        keywords = {{
+            name: values[name]
+            for name in plan["poskw"] + plan["kwonly"]
+            if name in values
+        }}
+    for name, value in extra_keywords.items():
+        if name in keywords:
+            raise TypeError("A keyword argument was supplied more than once.")
+        keywords[name] = value
+    if bound is not None:
+        positional.insert(0, bound)
+    return function(*positional, **keywords)
+
+
+def _invoke_case(case, arguments=None):
+    values = case["arguments"] if arguments is None else arguments
+    if _CASE_INVOCATION_KIND == "instance_method":
+        instance_values = copy.deepcopy(case["instance_arguments"] or {})
+        instance = _invoke_with_signature(
+            _CLASS, instance_values, case["_unai_constructor_signature"]
+        )
+        return _invoke_with_signature(
+            _FUNCTION, values, case["_unai_signature"], bound=instance
+        )
+    return _invoke_with_signature(_FUNCTION, values, case["_unai_signature"])
+
+
+_CASE_INVOCATION_KIND = {invocation_kind!r}
 
 
 def _strict_equal(actual, expected):
@@ -1353,7 +1836,7 @@ def test_grounded_oracle_case(case):
         replay_count = property_spec["replay_count"]
         for replay_index in range(replay_count):
             try:
-                actual = {invocation.replace("case['arguments']", "copy.deepcopy(case['arguments'])")}
+                actual = {replay_invocation}
             except Exception as exc:
                 stable = False
                 frame = _target_exception_frame(exc)

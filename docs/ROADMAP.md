@@ -65,7 +65,7 @@
 - [x] Support explicitly decorated top-level-class @staticmethod and @classmethod targets with bound invocation, async support, signature validation and generated-harness tests.
 - [x] Support ordinary instance methods on top-level classes with JSON-only constructor fixtures, explicit self/constructor signatures, no inheritance/metaclass/custom __new__, and the existing Docker-only runner; bind fixture hashes into reviewer attestations.
 - [x] Support one explicit nested class namespace level (`Outer.Inner.method`) for static, class and ordinary instance methods when each class in the chain is directly declared, undecorated and has no bases or metaclass keywords; instance methods retain hash-bound fresh constructor fixtures.
-- [ ] Extend grounded tests to other decorators and broader Python signatures only with separately reviewed construction/invocation rules.
+- [x] Add bounded `typing.final` identity-marker support with strict import binding, decorator-order and built-in shadow checks; add positional-only, `*args` and `**kwargs` signature binding for functions, methods and instance constructors with JSON-only argument containers, fixed generated invocation and explicit rejection for unsafe shrink/probe combinations.
 - [ ] Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies.
 
 ## M5 — Specialist training

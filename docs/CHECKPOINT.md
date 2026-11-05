@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 recursive property-oracle shrinking extended to eight nested JSON container levels and a 256-node traversal ceiling; three regression tests added; CI passed on validation HEAD cab14a827b2821445e566271ecbc89436c1d4465 (383 tests plus compile/build checks).
+**Checkpoint:** M4 safe Python signature expansion and bounded `typing.final` decorator support implemented; focused/full CI validation pending.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -788,3 +788,12 @@ Continue M4 with broader recursive shrinking only where each type has its own co
 - The result remains a smallest-observed failing input, not a global minimality proof. Exact-output failures and replay/filesystem divergence cases are not automatically shrunk.
 - **Next M4 task:** review and safely expand decorator and Python signature support. Each accepted decorator/signature form must have explicit construction/binding/invocation semantics, fail-closed rejection for ambiguous cases, and generated-harness security/regression tests. Coverage-guided or mutation-based verification remains a later M4 item requiring fixed deterministic targets, isolation and hard execution budgets.
 - M5 specialist weights remain untrained because no approved consented/licensed corpus and reproducible training artifacts exist. Android setup and physical-device validation remain deferred until the software roadmap is complete.
+
+## 2026-11-05 M4 safe Python decorators and signature expansion — validation pending
+
+- Feature branch: `feat/m4-instance-methods-m5-specialists`; base commit: `a04a9a848c224ff0826a2f9ecd9805d50ee58b31`.
+- Added fail-closed support for the standard-library `typing.final` identity marker with direct, unshadowed module imports only. Decorator calls, unknown/custom decorators, alias shadowing and unsafe `staticmethod`/`classmethod` order are rejected.
+- Added signature plans and fixed generated invocation for positional-only, positional-or-keyword and keyword-only parameters plus declared `*args` JSON lists and `**kwargs` JSON objects. Constructor fixture binding follows the same rules.
+- Optional positional-only parameters may be omitted only as a trailing suffix. Non-empty `*args` requires explicit values for every positional slot. Variadic probes and shrinking are rejected because existing probe/shrink structures cannot safely preserve expanded calls.
+- Added tests for alias/decorator safety, parameter container validation, positional-only holes, generated variadic module calls, generated variadic instance construction/method calls, and preflight rejection without a runner call.
+- Focused/full validation and exact commit SHA are pending; do not treat this checkpoint as complete until GitHub Actions succeeds.

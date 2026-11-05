@@ -42,6 +42,10 @@ from unai_engine.verification.attestations import (
 from unai_engine.verification.grounded import (
     GroundedTestVerifier,
     GroundedVerificationError,
+    _generated_pytest,
+    _signature_plan,
+    _target_descriptor,
+    _validate_signature_values,
     build_proof_bundle,
 )
 from unai_engine.verification.ledger import EvidenceLedger
@@ -3356,3 +3360,284 @@ def test_recursive_shrinker_is_deterministic_non_mutating_and_type_safe() -> Non
     assert all(type(item) is float for item in _direct_value_shrink_candidates(2.5))
     assert all(type(item) is str for item in _direct_value_shrink_candidates("abc"))
 
+
+
+def _execute_generated_signature_harness(
+    tmp_path: Path, source: str, generated_content: str
+) -> subprocess.CompletedProcess[str]:
+    """Execute a captured fixed harness in an isolated temporary test workspace."""
+    staged_root = tmp_path / "generated-signature-workspace"
+    staged_root.mkdir()
+    (staged_root / "service.py").write_text(source, encoding="utf-8")
+    generated_test = staged_root / "unai_generated_tests" / "test_signature.py"
+    generated_test.parent.mkdir(parents=True)
+    generated_test.write_text(generated_content, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", str(generated_test)],
+        cwd=staged_root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_typing_final_identity_decorator_supports_safe_import_aliases() -> None:
+    source = (
+        "import typing as t\n"
+        "@t.final\n"
+        "def module_target(value):\n"
+        "    return value\n"
+        "@t.final\n"
+        "class Calculator:\n"
+        "    @staticmethod\n"
+        "    @t.final\n"
+        "    def static_target(value):\n"
+        "        return value\n"
+        "    @classmethod\n"
+        "    @t.final\n"
+        "    def class_target(cls, value):\n"
+        "        return value\n"
+    )
+    module = _target_descriptor(source, "module_target")
+    static = _target_descriptor(source, "Calculator.static_target")
+    class_method = _target_descriptor(source, "Calculator.class_target")
+    assert module["invocation_kind"] == "module_function"
+    assert static["invocation_kind"] == "staticmethod"
+    assert class_method["invocation_kind"] == "classmethod"
+
+
+@pytest.mark.parametrize(
+    "source,symbol",
+    [
+        (
+            "from typing import final as mark\n"
+            "def shadow(mark):\n"
+            "    return mark\n"
+            "@mark\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+        (
+            "from typing import final as mark\n"
+            "mark = lambda fn: fn\n"
+            "@mark\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+        (
+            "import typing as t\n"
+            "@t.final()\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+        (
+            "import typing as t\n"
+            "class Calculator:\n"
+            "    @t.final\n"
+            "    @staticmethod\n"
+            "    def target(value):\n"
+            "        return value\n",
+            "Calculator.target",
+        ),
+        (
+            "@mark\n"
+            "def target(value):\n"
+            "    return value\n"
+            "from typing import final as mark\n",
+            "target",
+        ),
+        (
+            "staticmethod = lambda fn: fn\n"
+            "class Calculator:\n"
+            "    @staticmethod\n"
+            "    def target(value):\n"
+            "        return value\n",
+            "Calculator.target",
+        ),
+        (
+            "def decorator(fn):\n"
+            "    return fn\n"
+            "@decorator\n"
+            "def target(value):\n"
+            "    return value\n",
+            "target",
+        ),
+    ],
+)
+def test_ambiguous_or_unsafe_decorators_are_rejected(
+    source: str, symbol: str
+) -> None:
+    with pytest.raises(GroundedVerificationError):
+        _target_descriptor(source, symbol)
+
+
+def test_variadic_signature_validation_rejects_bad_containers_collisions_and_holes() -> None:
+    function = ast.parse(
+        "def target(first=1, second=2, /, value=3, *items, mode='x', **extras):\n"
+        "    return first, second, value, items, mode, extras\n"
+    ).body[0]
+    plan = _signature_plan(function)
+    _validate_signature_values(
+        {
+            "first": 1,
+            "second": 2,
+            "value": 3,
+            "items": [4, 5],
+            "mode": "safe",
+            "extras": {"first": 99},
+        },
+        plan,
+        "case",
+    )
+    for bad_values in (
+        {"second": 2},
+        {"first": 1, "second": 2, "items": True},
+        {"first": 1, "second": 2, "extras": []},
+        {"first": 1, "second": 2, "mode": "safe", "extras": {"mode": "unsafe"}},
+    ):
+        with pytest.raises(GroundedVerificationError):
+            _validate_signature_values(bad_values, plan, "case")
+
+
+def test_variadic_module_function_generated_harness_preserves_python_binding(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "from typing import final as mark\n"
+        "@mark\n"
+        "def collect(first, /, second=2, *items, mode='default', **extras):\n"
+        "    return [first, second, list(items), mode, extras]\n"
+    )
+    descriptor = _target_descriptor(source, "collect")
+    plan = _signature_plan(descriptor["function"])
+    cases = [
+        {
+            "case_id": "variadic",
+            "arguments": {
+                "first": 1,
+                "second": 2,
+                "items": [3, 4],
+                "mode": "safe",
+                "extras": {"first": 99, "tag": "ok"},
+            },
+            "expected_output": [1, 2, [3, 4], "safe", {"first": 99, "tag": "ok"}],
+            "oracle_property": None,
+            "oracle_artifact_path": None,
+            "oracle_artifact_sha256": None,
+            "_unai_signature": plan,
+            "_unai_constructor_signature": None,
+        }
+    ]
+    generated = _generated_pytest(
+        "service.py", "collect", cases, hashlib.sha256(source.encode()).hexdigest()
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_variadic_instance_constructor_and_method_generated_harness(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "class Counter:\n"
+        "    def __init__(self, start, /, *offsets, scale=1, **labels):\n"
+        "        self.value = start + sum(offsets) * scale\n"
+        "        self.labels = labels\n"
+        "    def total(self, /, factor=2, *items, label='x', **options):\n"
+        "        return [self.value + sum(items) * factor, label, options]\n"
+    )
+    descriptor = _target_descriptor(source, "Counter.total")
+    target_plan = _signature_plan(descriptor["function"], drop_first_parameter=True)
+    constructor_plan = _signature_plan(descriptor["constructor"], drop_first_parameter=True)
+    instance_arguments = {
+        "start": 10,
+        "offsets": [2, 3],
+        "scale": 2,
+        "labels": {"source": "fixture"},
+    }
+    arguments = {
+        "factor": 2,
+        "items": [4, 5],
+        "label": "counted",
+        "options": {"note": "fresh"},
+    }
+    _validate_signature_values(instance_arguments, constructor_plan, "fixture")
+    _validate_signature_values(arguments, target_plan, "arguments")
+    case = {
+        "case_id": "instance-variadic",
+        "arguments": arguments,
+        "instance_arguments": instance_arguments,
+        "expected_output": [38, "counted", {"note": "fresh"}],
+        "oracle_property": None,
+        "oracle_artifact_path": None,
+        "oracle_artifact_sha256": None,
+        "_unai_signature": target_plan,
+        "_unai_constructor_signature": constructor_plan,
+    }
+    generated = _generated_pytest(
+        "service.py",
+        "Counter.total",
+        [case],
+        hashlib.sha256(source.encode()).hexdigest(),
+        invocation_kind="instance_method",
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_variadic_probe_and_shrinking_are_rejected_before_runner_execution(
+    tmp_path: Path,
+) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = "def total(value, *items):\n    return value + sum(items)\n"
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="total",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="variadic-shrink",
+                arguments={"value": 1, "items": [2]},
+                oracle_property=GroundedPropertyOracle(kind="output_not_empty"),
+                oracle_kind="user",
+                oracle_reference="User-supplied property for a variadic function",
+            )
+        ],
+    )
+    with pytest.raises(GroundedVerificationError, match="cannot enable shrinking"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
+
+
+def test_positional_only_default_hole_is_rejected_before_runner_execution(
+    tmp_path: Path,
+) -> None:
+    task_id, workspace_root, target, _source, _ledger, _snapshot, _probes, runner, verifier = _setup(tmp_path)
+    source = "def target(first=1, second=2, /):\n    return first + second\n"
+    target.write_text(source, encoding="utf-8")
+    fresh = verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="target",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="positional-only-hole",
+                arguments={"second": 3},
+                expected_output=4,
+                oracle_kind="user",
+                oracle_reference="User supplied positional-only binding test",
+            )
+        ],
+    )
+    with pytest.raises(GroundedVerificationError, match="positional-only default"):
+        verifier.run(task_id, request, workspace_root)
+    assert runner.calls == []
