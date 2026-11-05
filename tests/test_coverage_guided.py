@@ -32,9 +32,7 @@ def _digest(source: str = SOURCE) -> str:
 
 
 def _probe_candidates(source: str = SOURCE) -> list[dict]:
-    descriptor = BoundaryProbeGenerator(EvidenceLedger(":memory:"))
-    # Use the public generator with a durable temporary ledger in service tests;
-    # this helper provides the exact deterministic candidate shape for pure tests.
+    # These are the exact deterministic candidate records produced by the AST generator.
     return [
         {
             "candidate_id": "probe-1",
@@ -198,7 +196,11 @@ def _setup_planner(tmp_path: Path):
         source="grounded-oracle-sandbox",
         claim="Grounded oracle cases were executed in the disposable Docker workspace.",
         passed=True,
-        metadata={"target_file": "service.py", "target_function": "classify"},
+        metadata={
+            "target_file": "service.py",
+            "target_function": "classify",
+            "target_sha256": source.sha256,
+        },
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     coverage = EvidenceRecord(
@@ -260,7 +262,8 @@ def test_planner_rejects_stale_source_hash(tmp_path: Path) -> None:
 
 def test_planner_rejects_coverage_from_different_target(tmp_path: Path) -> None:
     planner, task_id, workspace_root, request, ledger = _setup_planner(tmp_path)
-    coverage = ledger.get_snapshot(task_id).evidence[-1]
+    snapshot = ledger.get_snapshot(task_id)
+    coverage = next(item for item in snapshot.evidence if item.evidence_id == request.coverage_evidence_id)
     wrong = coverage.model_copy(
         update={"metadata": {**coverage.metadata, "target_file": "other.py"}}
     )
