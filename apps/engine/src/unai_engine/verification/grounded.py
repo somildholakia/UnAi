@@ -1181,7 +1181,7 @@ def _invoke_with_signature(function, values, plan, bound=None):
     vararg_name = plan["vararg"]
     varkw_name = plan["varkw"]
     varargs = values.get(vararg_name, []) if vararg_name else []
-    extra_keywords = values.get(varkw_name, {}) if varkw_name else {}
+    extra_keywords = values.get(varkw_name, {{}}) if varkw_name else {{}}
     if varargs:
         positional = [values[name] for name in positional_names] + list(varargs)
         keywords = {{
