@@ -121,3 +121,16 @@
 - [x] Forward shutdown signals to active service child processes; test exact model/Engine/Web launch arguments and working directories in CI.
 - [ ] Verify install and offline chat on a physical Android device; record RSS/PSS, TTFT, throughput and thermal behavior.
 - [ ] Validate memory, process lifecycle and recovery after Android background/low-memory kills.
+
+## M5 — actual trained specialist artifacts (execution gate, 2026-11-05)
+
+- [x] Pin Qwen3-1.7B to an immutable Apache-2.0 revision.
+- [x] Implement sequential independent QLoRA jobs, assistant-only loss masking, checkpoint recovery, dataset snapshot verification and adapter provenance manifests.
+- [x] Implement deterministic repository/project-disjoint splits and matched held-out loss recording.
+- [ ] Connect and verify a free CUDA GPU runtime. Colab was reached, but the current runtime-selection UI redirected to a Google Cloud deployment dialog; no GPU was connected. The local runtime is CPU-only. Kaggle is not authenticated in the current browser profile.
+- [ ] Execute and retain all three specialist adapters, trainer checkpoints, logs and SHA-256 manifests.
+- [ ] Run matched base-versus-adapter task generation on frozen held-out examples; report specialist accuracy, invalid-output and instruction-following rates, regressions and failure analyses.
+- [ ] Run regression/reproducibility checks on the resulting manifests and model artifacts.
+- [ ] Complete artifact storage/release and update PR #28. Do not merge without explicit permission.
+
+The NVIDIA SWE-Hero/OpenHands trajectory dataset is a possible attribution-compatible corpus addition (dataset card: CC BY 4.0; 34,269 rows; per-record repository licenses), but it has not been downloaded or used. Pin its full immutable revision and validate successful execution evidence and row-level provenance before ingestion. Synthetic-only outcomes remain smoke-test evidence, not real-world quality evidence.
