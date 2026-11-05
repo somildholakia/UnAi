@@ -666,3 +666,141 @@ def test_task_context_rejects_source_changed_after_inspection(tmp_path, monkeypa
     response = client.get(f"/api/tasks/{task_id}/context")
     assert response.status_code == 409
     assert "re-inspect" in response.json()["detail"].lower()
+
+
+def test_coverage_guided_probe_api_uses_existing_hash_bound_evidence_without_execution(
+    tmp_path, monkeypatch
+) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    target = workspace_root / "demo" / "branching.py"
+    target.write_text(
+        "def classify(value):\\n"
+        "    if value < 0:\\n"
+        "        return \\"negative\\"\\n"
+        "    else:\\n"
+        "        return \\"non-negative\\"\\n",
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review classify branch coverage",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    assert inspected.status_code == 200
+    task_id = inspected.json()["task_id"]
+
+    generated = client.post(
+        f"/api/tasks/{task_id}/probes",
+        json={"file_path": "branching.py", "symbol_name": "classify", "limit": 10},
+    )
+    assert generated.status_code == 200
+    probe = generated.json()
+    source_sha256 = probe["source_sha256"]
+
+    execution = EvidenceRecord(
+        evidence_id="coverage-guided-execution",
+        task_id=task_id,
+        kind="execution",
+        source="grounded-oracle-sandbox",
+        claim="Supplied grounded cases were executed in Docker.",
+        passed=True,
+        metadata={"target_file": "branching.py", "target_function": "classify"},
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    coverage = EvidenceRecord(
+        evidence_id="coverage-guided-coverage",
+        task_id=task_id,
+        kind="coverage",
+        source="grounded-coverage",
+        claim="Coverage measured for supplied cases.",
+        passed=None,
+        metadata={
+            "schema": "unai.coverage.v1",
+            "execution_evidence_id": execution.evidence_id,
+            "target_file": "branching.py",
+            "symbol_name": "classify",
+            "source_sha256": source_sha256,
+            "trace_sha256": "a" * 64,
+            "status": "complete",
+            "branches": [{
+                "branch_id": "branch-001",
+                "kind": "if",
+                "line": 2,
+                "condition": "value < 0",
+                "then_observed": True,
+                "else_observed": False,
+            }],
+        },
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    main_module.evidence_ledger.append_evidence(execution)
+    main_module.evidence_ledger.append_evidence(coverage)
+
+    before = main_module.evidence_ledger.get_snapshot(task_id)
+    before_execution_count = sum(item.kind == "execution" for item in before.evidence)
+    response = client.post(
+        f"/api/tasks/{task_id}/coverage-guided-probes",
+        json={
+            "file_path": "branching.py",
+            "symbol_name": "classify",
+            "source_sha256": source_sha256,
+            "probe_evidence_id": probe["evidence"]["evidence_id"],
+            "coverage_evidence_id": coverage.evidence_id,
+            "limit": 10,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "ranked"
+    assert [item["candidate_id"] for item in body["candidates"]] == ["probe-2", "probe-3"]
+    assert all(item["predicted_arm"] == "else" for item in body["candidates"])
+    assert body["evidence"]["passed"] is None
+    assert body["evidence"]["metadata"]["executed"] is False
+    assert body["evidence"]["metadata"]["expected_outputs_inferred"] is False
+    after = main_module.evidence_ledger.get_snapshot(task_id)
+    assert sum(item.kind == "execution" for item in after.evidence) == before_execution_count
+
+
+def test_coverage_guided_probe_api_rejects_stale_or_foreign_evidence(
+    tmp_path, monkeypatch
+) -> None:
+    workspace_root = _configure_inspection(tmp_path, monkeypatch)
+    target = workspace_root / "demo" / "branching.py"
+    target.write_text(
+        "def classify(value):\\n"
+        "    if value < 0:\\n"
+        "        return \\"negative\\"\\n"
+        "    else:\\n"
+        "        return \\"non-negative\\"\\n",
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+    inspected = client.post(
+        "/api/tasks/inspect",
+        json={
+            "request": "Review classify branch coverage",
+            "workspace": "demo",
+            "permissions": ["workspace_read"],
+        },
+    )
+    task_id = inspected.json()["task_id"]
+    generated = client.post(
+        f"/api/tasks/{task_id}/probes",
+        json={"file_path": "branching.py", "symbol_name": "classify"},
+    )
+    probe = generated.json()
+    response = client.post(
+        f"/api/tasks/{task_id}/coverage-guided-probes",
+        json={
+            "file_path": "branching.py",
+            "symbol_name": "classify",
+            "source_sha256": "b" * 64,
+            "probe_evidence_id": probe["evidence"]["evidence_id"],
+            "coverage_evidence_id": "missing-coverage",
+        },
+    )
+    assert response.status_code == 409
