@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 implementation and M5 engineering foundation validated through the bounded streaming corpus reader/audit and expanded credential redaction; code/test HEAD `6b6fca0c8c7401dae0f932c2bf2f2048c06b5c04`; 449 Engine tests passed and both Engine/Web and Brain Worker workflows are green.
+**Checkpoint:** M4 complete; M5 dataset collection, provenance validation, audit and preparation increment validated; code/test commit `cdc52327e1ec8008f5b6aea626fdf80084c32a37`; validated branch HEAD `77f5261fd4ea5f93f39e7d929a3b2886191a2104`; Engine/Web run #420 passed 456 tests and Brain Worker run #103 passed.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -24,11 +24,11 @@
 ## 2026-11-05 M5 first-party dataset collection increment
 
 **Implementation:** deterministic synthetic collector, synthetic-contract validation, source-provenance preservation, public-source revision/license-evidence checks, aggregate source-type audit, end-to-end pipeline tests and local-data ignore rules.
-**Status:** implementation pushed to `feat/m4-instance-methods-m5-specialists`; CI validation pending at the time of this note.
+**Status:** implementation and regression suite validated on branch HEAD `77f5261fd4ea5f93f39e7d929a3b2886191a2104`. Engine/Web [run #420](https://github.com/somildholakia/UnAi/actions/runs/42015249910) passed **456 tests in 22.84s**; Docker sandbox build, Python compileall, six Termux shell syntax checks and Web production build passed. Brain Worker [run #103](https://github.com/somildholakia/UnAi/actions/runs/42015250196) passed Worker typecheck, D1 migration validation and browser JavaScript syntax.
 **Entry point:** `python -m training.collect_synthetic --output data/raw/unai-synthetic.jsonl`.
 **Default size:** 20 repository/project groups × 12 records × 3 specialist roles = 720 synthetic records.
 **Data flow:** collect → read-only audit → repository-disjoint preparation → trainer manifest verification.
-**Trust boundary:** generated answers are checked against deterministic generator contracts only. They are synthetic, not real repository trajectories, and do not demonstrate model quality. Public-source rows require HTTPS source/license evidence and an immutable revision. No adapter weights, held-out model results or device metrics are claimed.
+**Trust boundary:** generated answers are checked against deterministic generator contracts only. They are synthetic, not real repository trajectories, and do not demonstrate model quality. Public-source rows require HTTPS source/license evidence and a content-addressed immutable revision (full commit SHA or SHA-256 digest). No adapter weights, held-out model results or device metrics are claimed.
 
 ### Delivered behavior
 
@@ -38,6 +38,7 @@
 - Preparation preserves source type, generator/version, rights basis, and public source/revision/license URLs after validation. Public URLs must use HTTPS; local authorized imports require an authorization reference.
 - Provenance source and license evidence are sanitized before prepared output. Regression tests cover redaction and malformed source metadata.
 - Training files and generated artifacts remain local through `.gitignore`.
+- New tests verify deterministic collection, output digest/manifest, synthetic-to-audit-to-prepare flow, repository split isolation, public source revision/HTTPS validation, synthetic provenance requirements, secret redaction and atomic preservation on generator contract failure.
 
 ### Current boundaries
 
