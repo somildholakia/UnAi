@@ -86,10 +86,10 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest validated code/test commit:** `6b6fca0c8c7401dae0f932c2bf2f2048c06b5c04` — bounded streaming of corpus JSONL records, oversized-line draining, exact input hashing and regression tests.
+**Latest validated training-pipeline code/test commit:** `c8bc9f2de92412edc2eae36a9e230e5903e83b14` (documentation correction commit `5143c42bd39c525bf0ac2ab5b24d58b0c1302968`). Engine/Web run #423 passed **460 tests in 22.50s**, Docker sandbox build, Python compileall, six Termux shell syntax checks and Web production build. Brain Worker run #106 passed typecheck, D1 migration validation and browser JavaScript syntax.
 **Engine/Web CI:** [run #409](https://github.com/somildholakia/UnAi/actions/runs/42012445065) — **449 tests passed in 21.40s**; Docker sandbox image build, Python compileall, all six Termux shell syntax checks and Web production build passed.
-**Brain Worker CI:** [run #92](https://github.com/somildholakia/UnAi/actions/runs/42012445055) — Worker typecheck, D1 migration validation and browser JavaScript syntax passed.
-**Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.
+**Previous Brain Worker CI:** [run #92](https://github.com/somildholakia/UnAi/actions/runs/42012445055) — Worker typecheck, D1 migration validation and browser JavaScript syntax passed.
+**Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged; its description includes the specialist training launcher update.
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.
 
 ### M4 completion status
@@ -115,7 +115,7 @@ minimum; it is not automatically persisted.
 - Cloudflare Brain remains a deployment scaffold until its D1 database, secrets, access policy and live URL are verified.
 - Do not merge PR #28 or modify `main` without explicit user instruction.
 
-**Next:** the M4/M5 software foundation is implemented and CI-validated. The remaining M5 training/release work depends on the approved corpus and suitable GPU compute; real Android measurements remain a later device-validation gate. Do not fabricate data, weights, benchmark scores or device measurements.
+**Next:** execute the three jobs on a compatible free CUDA session using `python -m training.train_specialists`; the current environment had no GPU and no adapter artifacts were produced. The 720 synthetic records are only a pipeline smoke-test corpus. A diverse independently verified held-out set and physical Android measurements remain release gates. Do not fabricate data, weights, benchmark scores or device measurements.
 
 ### Earlier M2 increment (historical)
 

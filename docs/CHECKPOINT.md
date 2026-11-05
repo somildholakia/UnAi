@@ -2,15 +2,15 @@
 
 ## Current active specialist-training checkpoint (2026-11-05)
 
-**Branch HEAD at start:** `6caa5ff7313c5c1e3c1f9c52b5576146243fce42` (verified against PR #28). PR #28 remains open/unmerged and `main` is unchanged.
+**Branch HEAD at start:** `6caa5ff7313c5c1e3c1f9c52b5576146243fce42`. **Validated implementation commit:** `c8bc9f2de92412edc2eae36a9e230e5903e83b14`. **Current docs/CI head:** `5143c42bd39c525bf0ac2ab5b24d58b0c1302968`. PR #28 remains open/unmerged and `main` is unchanged.
 
-**CI at starting HEAD:** Engine/Web run #421 passed; Brain Worker run #104 passed. Engine job included the test suite, Python compileall, Docker sandbox build, six Termux shell syntax checks and Web production build. Worker job included typecheck, D1 migration validation and browser JavaScript syntax.
+**CI at starting HEAD:** Engine/Web run #421 and Brain Worker run #104 passed. **CI after this implementation:** Engine/Web [run #423](https://github.com/somildholakia/UnAi/actions/runs/42018324911) passed **460 tests in 22.50s**, Docker sandbox build, Python compileall, six Termux shell syntax checks and Web production build. Brain Worker [run #106](https://github.com/somildholakia/UnAi/actions/runs/42018325060) passed typecheck, D1 migration validation and browser JavaScript syntax.
 
 **Training implementation:** pinned Qwen3-1.7B Apache-2.0 base revision; sequential three-specialist orchestrator; dry-run command generation; checkpoint resume; base-versus-adapter held-out loss recording; exact loaded corpus digest propagation; focused orchestration tests.
 
 **Training execution status:** no GPU was available in this environment, so no actual adapter artifacts, training metrics or specialist-quality gains are claimed. Run the documented pipeline on a compatible free CUDA session. The 720-row synthetic corpus is only a bootstrap/smoke-test corpus, not sufficient evidence of model quality.
 
-**Next:** run a GPU smoke training for all three roles; then supply a diverse independently verified held-out corpus and execute the matched task-level evaluation. Physical Android measurements remain a later release gate.
+**Next:** run `python -m training.train_specialists` on a compatible free CUDA session. No GPU was available here, so the three model jobs have not actually executed and no adapter artifacts or training metrics exist. Then supply a diverse independently verified held-out corpus and execute the matched task-level evaluation. Physical Android measurements remain a later release gate.
 
 ---
 

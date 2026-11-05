@@ -99,6 +99,8 @@
 - [ ] Run independently verified, matched held-out task comparisons (base vs adapter vs tool-augmented) and physical Android measurements for each adapter.
 - [ ] Package/promote only adapters that pass both gates. No weights have been trained or released.
 
+**Training implementation validation (2026-11-05):** commit `c8bc9f2de92412edc2eae36a9e230e5903e83b14`, documentation/validation head `5143c42bd39c525bf0ac2ab5b24d58b0c1302968`; Engine/Web run #423 passed 460 tests and build checks, Brain Worker run #106 passed. This validates the software pipeline only; no GPU training run or model-quality result exists.
+
 ## M6 — Mobile and deployment validation
 - [ ] Benchmark on physical Android hardware.
 - [ ] Record peak PSS/RSS, load time, TTFT, tokens/sec, power and sustained thermals.
