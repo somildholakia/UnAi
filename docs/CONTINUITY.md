@@ -25,7 +25,7 @@ Read these in order before extending unAI:
 - Oracle references and property contracts are requester-supplied. A workspace specification artifact may be SHA-256-pinned for byte integrity, but that does not authenticate its author/publisher or prove the expected output is correct. Passing examples are not a semantic proof; keep acceptance gaps and unknowns visible.
 - Shrinking may run only for an explicitly supplied fixed property oracle; deterministic reductions cover non-zero integers, finite floats, non-empty strings, lists and string-keyed dictionaries, with depth/node/candidate/round limits and a 24-execution request budget. Results are the smallest observed violations, not global-minimality proofs.
 - Execution trace hashes and redacted previews are bounded evidence, not full deterministic replay. Do not include secrets in oracle inputs or expected outputs.
-- Coverage is an opt-in audit of the supplied grounded oracle cases (`measure_coverage: true`), not a source of new expected values. It records bounded target statement lines and supported branch arms against the exact source hash; unavailable coverage must not alter the oracle verdict, and this does not yet implement automatic case generation or fuzzing.
+- Coverage is an opt-in audit of the supplied grounded oracle cases (`measure_coverage: true`), not a source of new expected values. It records bounded target statement lines and supported branch arms against the exact source hash; unavailable coverage must not alter the oracle verdict. The separate `coverage-guided-probes` endpoint only ranks existing unverified probes against observed uncovered explicit if/else arms; it requires same-task/source-linked probe, coverage and execution evidence, does not execute target code and does not infer oracle outputs.
 - Current grounded testing supports synchronous/async Python functions and static, class and ordinary instance methods on supported top-level classes, including one explicit nested class namespace level. The bounded `typing.final` identity marker and positional-only, positional-or-keyword, keyword-only, `*args` and `**kwargs` binding are supported through server-derived fixed harness plans. Instance cases supply JSON-only `instance_arguments`; constructor/method signatures are separately validated and a fresh instance is built for each invocation in the disposable Docker copy. Inheritance, metaclass keywords, custom `__new__`, async/decorated constructors, deeper nesting, ambiguous/custom decorators and unsupported argument forms remain fail-closed. Constructor fixture hashes are bound into evidence and reviewer attestations.
 - Do not describe a Cloudflare scaffold as deployed until a D1 database, secrets, access policy and live URL have been verified.
 - Do not claim weights have been trained unless an adapter artifact and reproducible training manifest exist.
@@ -61,8 +61,8 @@ minimum; it is not automatically persisted.
 
 **Repository:** https://github.com/somildholakia/UnAi
 **Active branch:** `feat/m4-instance-methods-m5-specialists`
-**Latest validated code/test commit:** `e6af02a48fa03ace04627b9910c39f6c2bd57233` — opt-in grounded coverage measurement and Docker trace-lifecycle fix.
-**Latest Engine/Web CI:** [run #378](https://github.com/somildholakia/UnAi/actions/runs/42007140164) — 433 tests passed in 23.74s on docs-updated code/test branch HEAD `8318d190b7403a6eac77773fa64bb1f9199e1838`, including Docker-backed coverage, compileall, six Termux shell syntax checks and Web production build. [Brain Worker run #61](https://github.com/somildholakia/UnAi/actions/runs/42007140229) passed. These checks include all code changes; later checkpoint/roadmap edits are documentation-only.
+**Latest validated code/test commit:** `4920622429f31dbed780f325efcbcb7f2bfdeae9` — read-only coverage-guided ranking of existing unverified probes.
+**Latest Engine/Web CI:** [run #395](https://github.com/somildholakia/UnAi/actions/runs/42009350095) — 442 tests passed in 18.82s, including the new coverage-guided planner/API tests; Docker sandbox build, Python compileall, six Termux shell syntax checks and Web production build passed. [Brain Worker run #78](https://github.com/somildholakia/UnAi/actions/runs/42009349905) passed typecheck, D1 migration validation and browser JavaScript syntax. The code/test head is the validated commit above.
 **Integration PR:** https://github.com/somildholakia/UnAi/pull/28 — open, mergeable and not merged.
 **Main SHA:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896` — unchanged.
 
@@ -72,9 +72,16 @@ minimum; it is not automatically persisted.
 - Planner bounds: 50,000 AST nodes, 5,000 target statement lines, 200 supported branch descriptions, 300 condition characters and 500 response missing-line entries. Trace is capped at 256 KiB and validated before use.
 - Coverage evidence is append-only and appears in proof bundles. A missing/unusable trace yields coverage `unavailable` and a proof risk without changing the grounded oracle verdict.
 - The container executes as the staging process UID/GID; the harness persists aggregate coverage after each measured invocation and at exit. Run #372 exercised this through the production Docker runner.
-- This does not implement automatic coverage-guided input synthesis or fuzzing. Keep the exact supplied oracle as the sole verdict source.
 
-**Next:** M4 coverage measurement is validated. M5 adapter training is blocked on an approved consented/licensed multi-repository corpus and suitable GPU compute; do not invent data or claim trained weights. Continue one checkpoint at a time and defer physical Android setup until software development is complete.
+### Current coverage-guided probe ranking increment
+
+- `POST /api/tasks/{task_id}/coverage-guided-probes` consumes existing AST-probe and complete grounded-coverage evidence IDs. It verifies the current file hash, task ownership, file/symbol match and the coverage record's linked grounded execution.
+- It ranks existing candidates only for explicit if/else branches where a coverage arm remains unobserved. A bounded, side-effect-free AST evaluator predicts supported conditions; unsupported expressions remain `unknown`.
+- Results are append-only `kind=probe` evidence with `passed=null`, `executed=false` and `expected_outputs_inferred=false`. It requires `tasks:write` + `workspace:read` scopes and task-level `workspace_read`, not `workspace:execute`.
+- Candidate/expression/value bounds are 60 candidates, 16 expression levels, 8 JSON nesting levels, 128 container items, 10,000-character strings and 256-bit integers.
+- This is prioritization of existing unverified probes, not automatic input synthesis, fuzzing, oracle generation or proof of correctness.
+
+**Next:** M4 now has bounded case-coverage measurement and read-only coverage-guided probe ranking. M5 adapter training is blocked on a real consented/licensed multi-repository trajectory corpus and suitable GPU compute; do not fabricate data or claim trained weights. Continue one checkpoint at a time and defer physical Android setup until software development is complete.
 
 ### Earlier M2 increment (historical)
 
