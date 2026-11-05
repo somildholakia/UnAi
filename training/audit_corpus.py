@@ -43,6 +43,7 @@ def audit(source: Path) -> dict[str, Any]:
     }
     groups: dict[str, set[str]] = {role: set() for role in SPECIALISTS}
     seen: set[str] = set()
+    source_types: dict[str, int] = {}
 
     source_bytes = 0
     with source.open("rb") as handle:
@@ -102,6 +103,8 @@ def audit(source: Path) -> dict[str, Any]:
                                 counts["eligible_records"] += 1
                                 per_specialist[role]["eligible_records"] += 1
                                 groups[role].add(provenance["group_id"])
+                                source_type = provenance.get("source_type", "legacy")
+                                source_types[source_type] = source_types.get(source_type, 0) + 1
                 except (UnicodeDecodeError, json.JSONDecodeError, TypeError, AttributeError, ValueError):
                     reason = "malformed_record"
 
@@ -125,6 +128,7 @@ def audit(source: Path) -> dict[str, Any]:
         **counts,
         "rejected_reasons": dict(sorted(rejected_reasons.items())),
         "specialists": per_specialist,
+        "source_types": dict(sorted(source_types.items())),
         "all_specialists_split_ready": ready_roles == len(SPECIALISTS),
         "ready_specialists": ready_roles,
         "required_specialists": len(SPECIALISTS),
