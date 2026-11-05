@@ -998,3 +998,16 @@ Add coverage-guided and mutation-based verification only with explicit resource/
 ### Boundaries
 
 The audit remains a metadata-only structural preflight. It cannot independently authenticate consent/license claims or replay verification. A split-ready result means only that there are at least two repository/project groups for deterministic train/eval separation; it does not establish adequate training scale or quality.
+
+
+## 2026-11-05 — actual specialist training execution attempt (blocked before training)
+
+The live repository was re-checked before this attempt: feature branch HEAD was `8de64a5126d6eefdea83549494e008f632ccb8c3`; PR #28 was open, mergeable and unmerged; Engine/Web run #425 and Brain Worker run #108 completed successfully. The pinned base remains `Qwen/Qwen3-1.7B` revision `70d244cc86ccca08cf5af4e1e306ecf908b1ad5e`; the pinned Hugging Face model card declares Apache-2.0.
+
+A real free-GPU availability check was attempted through the saved Google Colab browser session. Colab opened a blank notebook, but the visible runtime-selection flow diverted to a Google Cloud deployment dialog. No free accelerator was selected or connected, and no `nvidia-smi`/CUDA runtime query ran. The local execution container reports PyTorch `2.10.0+cpu`, `torch.cuda.is_available() == False`, and no `nvidia-smi` binary. The available browser profile records Google sign-in but not Kaggle sign-in, so no authenticated Kaggle GPU session was available.
+
+**Result:** no training process was started. There are no trained Next Action, Planner or Verifier adapters, no training checkpoints, no adapter manifests or SHA-256 weight hashes, and no base-versus-adapter task metrics or failure reports from this attempt. This is an environment blocker, not a successful training checkpoint. Do not mark this milestone complete or configure specialist routing.
+
+Dataset follow-up: the NVIDIA `SWE-Hero-openhands-trajectories` card currently describes 34,269 execution-based trajectories, CC BY 4.0 dataset terms, and per-row source-repository SPDX licenses. It is a promising compatible source for future corpus expansion, but it was **not downloaded or ingested** in this attempt. Before use, pin the dataset repository to a full immutable commit SHA, preserve attribution and per-row source licenses, verify each trajectory's successful execution evidence, and transform only examples that genuinely fit the specialist schema. Do not represent the dataset card's general description as independent verification of every row.
+
+**Resume gate:** obtain a reachable free CUDA runtime (Colab free GPU or an authenticated Kaggle notebook), verify its actual GPU model and available VRAM, then run the documented collect → audit → prepare → sequential three-specialist training workflow with persistent storage. Evaluate all three adapters on the exact same repository-disjoint held-out examples and retain raw predictions, task metrics, invalid-output/instruction-following rates, regressions, failure analyses and SHA-256 manifests. Training on the 720-record synthetic corpus alone can verify the pipeline but cannot establish real-world specialist quality.
