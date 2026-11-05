@@ -726,7 +726,7 @@ def _validate_signature_values(values: dict[str, Any], plan: dict[str, Any], lab
         raise GroundedVerificationError(
             f"{label} variadic parameter {vararg_name} must be a JSON list."
         )
-    extra_keywords = values.get(varkw_name, {}) if varkw_name else {}
+    extra_keywords = values.get(varkw_name, {{}}) if varkw_name else {{}}
     if type(extra_keywords) is not dict or any(type(key) is not str for key in extra_keywords):
         raise GroundedVerificationError(
             f"{label} variadic keyword parameter {varkw_name} must be a JSON object with string keys."
@@ -1208,7 +1208,7 @@ def _invoke_with_signature(function, values, plan, bound=None):
 def _invoke_case(case, arguments=None):
     values = case["arguments"] if arguments is None else arguments
     if _CASE_INVOCATION_KIND == "instance_method":
-        instance_values = copy.deepcopy(case["instance_arguments"] or {})
+        instance_values = copy.deepcopy(case["instance_arguments"] or {{}})
         instance = _invoke_with_signature(
             _CLASS, instance_values, case["_unai_constructor_signature"]
         )
