@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 bounded mutation-based test-strength verification implemented and Docker-backed CI-validated on `81ed3576ab9c64b464c2d9d2bce3c518e9967fbc`; 421 tests and all Engine/Web/Brain Worker checks passed.
+**Checkpoint:** M4 bounded coverage measurement implemented and Docker-backed CI-validated on code/test HEAD `e6af02a48fa03ace04627b9910c39f6c2bd57233`; 433 Engine tests passed, with Engine/Web and Brain Worker workflows green.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -20,6 +20,35 @@
 **M4 cumulative multi-argument shrinking merge commit:** 8c2ff696c33efd905374e6c11527465a5deff111
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
+
+## 2026-11-05 M4 bounded coverage-measurement checkpoint
+
+**Repository:** https://github.com/somildholakia/UnAi
+**Branch:** `feat/m4-instance-methods-m5-specialists`
+**Validated code/test HEAD:** `e6af02a48fa03ace04627b9910c39f6c2bd57233`
+**Coverage implementation:** `c1e01b5fef276b7dda14fe2a59b1efb18bfef6b7`
+**Trace lifecycle fix:** `b86c9307371613ad2214413d59f109d633c587f7`
+**Docker workspace-owner fix:** `9cf91687954ed1d5ae8978625a809590b6d5d7bc`
+**Sandbox regression assertion:** `e6af02a48fa03ace04627b9910c39f6c2bd57233`
+**Engine/Web Actions run #372:** success — [433 tests passed in 17.19s](https://github.com/somildholakia/UnAi/actions/runs/42006411694); the job built `unai-python-test:latest`, ran the real Docker-backed coverage integration test, passed Python compileall, all six Termux shell syntax checks and the Web production build.
+**Brain Worker Actions run #55:** success — [Worker checks](https://github.com/somildholakia/UnAi/actions/runs/42006411841), including typecheck, D1 migration validation and browser JavaScript syntax.
+**Integration PR #28:** open, unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Added opt-in `measure_coverage: true` to the existing source-hash-bound grounded-test request. It measures the supplied cases in the same approved, disposable Docker run; it does not create new oracle inputs or expected outputs.
+- Added a deterministic AST plan for target-body statement lines and supported `if`, `while`, `for` and `async for` branch arms. Bounds include 50,000 AST nodes, 5,000 coverable lines, 200 branch descriptions, 300 condition characters and 500 returned missing-line entries.
+- The generated harness traces only the selected target's exact code object and writes a hash-bound JSON trace with case IDs and source line numbers only. Trace size is capped at 256 KiB; the runner validates its path, schema, source hash, case IDs and line-number data before scoring.
+- Coverage is append-only `kind=coverage`, `source=grounded-coverage` evidence linked to the execution event. Grounded responses and proof bundles expose the coverage report, evidence count/latest summary and unresolved availability risk.
+- A missing or invalid coverage trace leaves the oracle verdict unchanged and reports coverage as unavailable. Coverage is an audit of observed statements/arms, not semantic correctness or automatic coverage-guided fuzzing.
+- Fixed the Docker integration failure where the expected trace was missing: the harness now persists the aggregate trace after every measured invocation (with exit-time fallback), and the container runs as the staging process UID/GID so files in the bind-mounted staging workspace keep the correct owner.
+- Regression coverage includes AST bounds and branch planning, trace-file hardening, real local generated-harness tracing, verifier/evidence/proof behavior and the Docker-backed end-to-end test.
+
+### Boundaries and next step
+
+Coverage measurement completes the pending M4 roadmap item. It does not implement automatic test generation, coverage-guided fuzzing, symbolic execution or universal branch semantics. Do not treat a high coverage ratio as proof of correctness; the supplied oracle and its provenance remain decisive.
+
+M5 model training remains blocked until a real consented/licensed multi-repository trajectory corpus and suitable GPU compute are available. No specialist weights or held-out evaluation are claimed. Physical Android setup and measurement remain deferred until the software roadmap is complete. Do not merge PR #28 or modify `main` without explicit permission.
 
 ## 2026-11-03 continuation checkpoint
 
