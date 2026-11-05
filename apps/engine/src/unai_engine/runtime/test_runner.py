@@ -24,6 +24,14 @@ from unai_engine.verification.ledger import EvidenceLedger
 
 
 COMMAND = "python -m pytest -q"
+GENERATED_TEST_EVIDENCE_SOURCES = {
+    "grounded-oracle-sandbox",
+    "grounded-oracle-shrink-sandbox",
+    "grounded-mutation-sandbox",
+}
+MUTATION_EVIDENCE_SOURCE = "grounded-mutation-sandbox"
+MAX_SOURCE_OVERRIDES = 2
+MAX_SOURCE_OVERRIDE_BYTES = 300_000
 SKIP_DIRS = {
     ".git", ".venv", "venv", "env", "node_modules", "dist", "build",
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
@@ -151,6 +159,36 @@ def stage_python_workspace(
             total_bytes += copied
 
     return StagedWorkspace(file_count, total_bytes, skipped)
+
+
+def _validate_source_overrides(
+    source_overrides: dict[str, str] | None,
+) -> dict[str, str]:
+    """Validate mutant-source replacements before touching the staging copy."""
+    if source_overrides is None:
+        return {}
+    if not isinstance(source_overrides, dict) or len(source_overrides) > MAX_SOURCE_OVERRIDES:
+        raise WorkspaceStagingError("Source overrides exceed the allowed count.")
+    normalized: dict[str, str] = {}
+    for relative_path, content in source_overrides.items():
+        if not isinstance(relative_path, str) or not isinstance(content, str):
+            raise WorkspaceStagingError("Source overrides must map paths to text content.")
+        relative = PurePosixPath(relative_path)
+        if (
+            relative.is_absolute()
+            or "\\" in relative_path
+            or relative.as_posix() != relative_path
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or not relative.parts
+            or relative.parts[0] == "unai_generated_tests"
+            or relative.suffix.casefold() != ".py"
+        ):
+            raise WorkspaceStagingError("Source override path is outside the allowed boundary.")
+        encoded = content.encode("utf-8")
+        if not encoded or len(encoded) > MAX_SOURCE_OVERRIDE_BYTES:
+            raise WorkspaceStagingError("Source override content is empty or exceeds its size limit.")
+        normalized[relative_path] = content
+    return normalized
 
 
 def _redact_preview(value: str, limit: int = 2_000) -> str:
@@ -469,6 +507,17 @@ class IsolatedPythonTestRunner:
                             normalized_marker["target_function"] = function_name[:128]
                     markers.append(normalized_marker)
             metadata["counterexample_markers"] = markers
+        if evidence_source == MUTATION_EVIDENCE_SOURCE and status in {"passed", "failed"}:
+            # For a mutant run, a failing pytest suite means the mutant was killed.
+            killed = status == "failed"
+            metadata["mutation_killed"] = killed
+            mutant_id = str(metadata.get("mutant_id", "unknown"))[:32]
+            claim = (
+                f"Mutant {mutant_id} was killed by the grounded oracle suite."
+                if killed
+                else f"Mutant {mutant_id} survived the grounded oracle suite."
+            )
+            passed = killed
         evidence = EvidenceRecord(
             evidence_id=uuid4().hex,
             task_id=snapshot.task_id,
@@ -509,9 +558,10 @@ class IsolatedPythonTestRunner:
         evidence_metadata: dict[str, Any],
         *,
         evidence_source: str = "grounded-oracle-sandbox",
+        source_overrides: dict[str, str] | None = None,
     ) -> TaskTestRunResponse:
         """Run one server-generated oracle test alongside the filtered workspace copy."""
-        if evidence_source not in {"grounded-oracle-sandbox", "grounded-oracle-shrink-sandbox"}:
+        if evidence_source not in GENERATED_TEST_EVIDENCE_SOURCES:
             raise ValueError("Unsupported generated-test evidence source.")
         return self.run(
             task_id,
@@ -519,6 +569,7 @@ class IsolatedPythonTestRunner:
             generated_test=(generated_test_path, generated_test_content),
             evidence_source=evidence_source,
             evidence_metadata=evidence_metadata,
+            source_overrides=source_overrides,
             artifact_ref=f"task:{task_id}/grounded-oracle-tests",
         )
 
@@ -530,8 +581,12 @@ class IsolatedPythonTestRunner:
         generated_test: tuple[str, str] | None = None,
         evidence_source: str = "docker-sandbox",
         evidence_metadata: dict[str, Any] | None = None,
+        source_overrides: dict[str, str] | None = None,
         artifact_ref: str | None = None,
     ) -> TaskTestRunResponse:
+        if source_overrides is not None and evidence_source != MUTATION_EVIDENCE_SOURCE:
+            raise ValueError("Source overrides are allowed only for mutation evidence.")
+        normalized_overrides = _validate_source_overrides(source_overrides)
         snapshot = self.ledger.get_snapshot(task_id)
         if snapshot is None:
             raise KeyError(task_id)
@@ -560,6 +615,35 @@ class IsolatedPythonTestRunner:
                     max_files=self.max_files,
                     max_bytes=self.max_bytes,
                 )
+                effective_evidence_metadata = dict(evidence_metadata or {})
+                if normalized_overrides:
+                    override_hashes: dict[str, str] = {}
+                    for relative_path, override_content in normalized_overrides.items():
+                        override_target = stage_path.joinpath(
+                            *PurePosixPath(relative_path).parts
+                        )
+                        if override_target.is_symlink() or not override_target.is_file():
+                            raise WorkspaceStagingError(
+                                "A mutation source override target is missing or unsafe."
+                            )
+                        resolved_target = override_target.resolve(strict=True)
+                        if not resolved_target.is_relative_to(stage_path.resolve()):
+                            raise WorkspaceStagingError(
+                                "A mutation source override escaped the staging workspace."
+                            )
+                        override_target.write_text(
+                            override_content, encoding="utf-8", newline=""
+                        )
+                        override_hashes[relative_path] = hashlib.sha256(
+                            override_content.encode("utf-8")
+                        ).hexdigest()
+                        staged = StagedWorkspace(
+                            staged.files,
+                            staged.bytes_copied
+                            + len(override_content.encode("utf-8")),
+                            staged.skipped_files,
+                        )
+                    effective_evidence_metadata["source_override_sha256"] = override_hashes
                 if generated_test is not None:
                     relative_text, generated_content = generated_test
                     relative = PurePosixPath(relative_text)
@@ -581,7 +665,7 @@ class IsolatedPythonTestRunner:
                         staged.bytes_copied + len(generated_content.encode("utf-8")),
                         staged.skipped_files,
                     )
-                external_fixture_case_ids = (evidence_metadata or {}).get(
+                external_fixture_case_ids = effective_evidence_metadata.get(
                     "external_fixture_case_ids", []
                 )
                 if external_fixture_case_ids:
@@ -594,7 +678,6 @@ class IsolatedPythonTestRunner:
                     result = self.sandbox.run(stage_path, COMMAND)
                 stdout = result.stdout or ""
                 stderr = result.stderr or ""
-                effective_evidence_metadata = dict(evidence_metadata or {})
                 external_fixture_case_ids = effective_evidence_metadata.get(
                     "external_fixture_case_ids", []
                 )

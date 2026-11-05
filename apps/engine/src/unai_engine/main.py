@@ -24,7 +24,8 @@ from unai_engine.models import (
     PatchProposalRequest, PatchProposalResponse, PatchApplyApprovalRequest, PatchApplyResponse,
     WorkspaceFileSnapshot, TaskProofResponse, ProbeRequest, ProbeResponse,
     TaskQualityCheckResponse, TaskCodeContextResponse, CodeContextSlice,
-    EvidenceRecord, GroundedTestApprovalRequest,
+    EvidenceRecord, GroundedMutationApprovalRequest,
+    GroundedMutationResponse, GroundedTestApprovalRequest,
     GroundedTestResponse, TaskProofBundleResponse,
   )
 from unai_engine.providers.openai_compat import OpenAICompatibleProvider, ProviderError
@@ -38,6 +39,7 @@ from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, TaskRunRej
 from unai_engine.runtime.patches import PatchConflict, PatchManager, PatchRejected
 from unai_engine.runtime.workspace import WorkspaceError, resolve_workspace_path
 from unai_engine.verification.proof import summarize_proof
+from unai_engine.verification.mutation import MutationTestVerifier
 from unai_engine.verification.probes import BoundaryProbeGenerator, ProbeTargetError
 from unai_engine.verification.transparency import TransparencyCheckpointStore
 from unai_engine.verification.grounded import (
@@ -93,6 +95,9 @@ grounded_test_verifier = GroundedTestVerifier(
     oracle_transparency_min_witnesses=settings.oracle_transparency_min_witnesses,
     transparency_checkpoint_store=TransparencyCheckpointStore(settings.oracle_transparency_db_path),
 )
+mutation_test_verifier = MutationTestVerifier(
+    evidence_ledger, patch_manager, task_test_runner, grounded_test_verifier
+)
 
 api_token_store = ApiTokenStore(settings.api_token_store_path)
 _tenant_services_cache: dict[str, TenantServices] = {}
@@ -133,6 +138,7 @@ def _tenant_services(request: Request) -> TenantServices:
             task_inspector=task_inspector, task_test_runner=task_test_runner,
             patch_manager=patch_manager, probe_generator=probe_generator,
             grounded_test_verifier=grounded_test_verifier,
+            mutation_test_verifier=mutation_test_verifier,
         )
     with _tenant_services_lock:
         cached = _tenant_services_cache.get(identity.tenant_id)
@@ -410,6 +416,34 @@ async def run_grounded_task_tests(
     try:
         return await asyncio.to_thread(
             services.grounded_test_verifier.run,
+            task_id,
+            request,
+            services.workspace_root,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task evidence not found.") from exc
+    except PatchRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except PatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GroundedVerificationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/tasks/{task_id}/mutation-tests", response_model=GroundedMutationResponse)
+async def run_mutation_task_tests(
+    task_id: str,
+    request: GroundedMutationApprovalRequest,
+    http_request: Request,
+) -> GroundedMutationResponse:
+    """Run a bounded mutation-based test-strength check after a passing grounded baseline."""
+    _require_scopes(http_request, "tasks:write", "workspace:read", "workspace:execute")
+    services = _tenant_services(http_request)
+    if request.confirm != "run-grounded-mutation-tests":
+        raise HTTPException(status_code=422, detail="Explicit mutation-test confirmation is required.")
+    try:
+        return await asyncio.to_thread(
+            services.mutation_test_verifier.run,
             task_id,
             request,
             services.workspace_root,

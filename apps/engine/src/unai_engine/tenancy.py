@@ -16,6 +16,7 @@ from unai_engine.runtime.sandbox import DockerSandbox
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner
 from unai_engine.verification.grounded import GroundedTestVerifier
 from unai_engine.verification.ledger import EvidenceLedger
+from unai_engine.verification.mutation import MutationTestVerifier
 from unai_engine.verification.probes import BoundaryProbeGenerator
 from unai_engine.verification.transparency import TransparencyCheckpointStore
 
@@ -33,6 +34,7 @@ class TenantServices:
     patch_manager: PatchManager
     probe_generator: BoundaryProbeGenerator
     grounded_test_verifier: GroundedTestVerifier
+    mutation_test_verifier: MutationTestVerifier
 
 
 def build_tenant_services(
@@ -92,6 +94,7 @@ def build_tenant_services(
         oracle_transparency_min_witnesses=oracle_transparency_min_witnesses,
         transparency_checkpoint_store=TransparencyCheckpointStore(data / "transparency-checkpoints.sqlite3"),
     )
+    mutation = MutationTestVerifier(ledger, patch_manager, task_test_runner, grounded)
     agent = AgentOrchestrator(
         provider,
         context_search=vault.search,
@@ -109,4 +112,5 @@ def build_tenant_services(
         patch_manager=patch_manager,
         probe_generator=probe_generator,
         grounded_test_verifier=grounded,
+        mutation_test_verifier=mutation,
     )

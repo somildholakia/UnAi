@@ -53,6 +53,8 @@ _MAX_SHRINK_ROUNDS = 6
 _MAX_NESTED_SHRINK_DEPTH = 8
 _MAX_NESTED_SHRINK_NODES = 256
 _MAX_NESTED_CANDIDATES_PER_ARGUMENT = 12
+_MUTATION_EVIDENCE_SOURCE = "grounded-mutation-sandbox"
+_MUTATION_SUMMARY_SOURCE = "grounded-mutation-summary"
 
 _LIMITATIONS = [
     "Exact expected outputs and property predicates are supplied by the requester; specification cases may be authenticated only when a configured Ed25519 reviewer key signs the exact source/artifact/input/expectation assertion.",
@@ -3150,6 +3152,14 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         item for item in events
         if item.kind == "shrink" and item.source == "grounded-property-shrinker"
     ]
+    mutation_summaries = [
+        item for item in events
+        if item.kind == "mutation" and item.source == _MUTATION_SUMMARY_SOURCE
+    ]
+    mutation_runs = [
+        item for item in events
+        if item.kind == "execution" and item.source == _MUTATION_EVIDENCE_SOURCE
+    ]
     probes = [
         item for item in events
         if item.kind == "probe" and item.source == "ast-boundary-probes"
@@ -3264,6 +3274,21 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         risks.append(
             "Counterexamples are tied to the source hash recorded at execution time; later edits require fresh reruns."
         )
+    if mutation_summaries:
+        latest_mutation = mutation_summaries[-1]
+        survived = int(latest_mutation.metadata.get("mutants_survived", 0) or 0)
+        if survived:
+            risks.append(
+                f"The latest mutation run left {survived} mutant(s) alive; the supplied oracle cases do not distinguish those source changes."
+            )
+        elif latest_mutation.metadata.get("status") == "unavailable":
+            risks.append(
+                "The latest mutation run did not complete within its baseline and sandbox limits, so test strength remains unknown."
+            )
+    else:
+        risks.append(
+            "No mutation-based test-strength run is recorded; passing oracle cases may not distinguish small source changes."
+        )
     if not any(item.passed is True for item in grounded_runs):
         risks.append("No passing grounded-oracle execution is currently recorded.")
     risks.extend(
@@ -3287,6 +3312,14 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
             if item.metadata.get("status") == "smaller_failure_observed"
         ),
         unverified_probe_candidate_count=unverified_count,
+        mutation_run_count=len(mutation_summaries),
+        latest_mutation_summary=(
+            mutation_summaries[-1] if mutation_summaries else None
+        ),
+        mutation_evidence=sorted(
+            mutation_runs + mutation_summaries,
+            key=lambda item: (item.created_at, item.evidence_id),
+        )[-60:],
         counterexamples=counterexamples,
         oracle_evidence=oracle_events[-100:],
         shrink_evidence=shrink_events[-100:],

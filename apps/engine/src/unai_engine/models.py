@@ -158,7 +158,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace", "shrink"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace", "shrink", "mutation"]
     source: str
     claim: str
     passed: bool | None = None
@@ -515,6 +515,45 @@ class GroundedTestApprovalRequest(BaseModel):
     cases: list[GroundedOracleCase] = Field(min_length=1, max_length=20)
 
 
+class GroundedMutationApprovalRequest(GroundedTestApprovalRequest):
+    """A separately confirmed, bounded mutation run over a grounded oracle suite."""
+
+    confirm: Literal["run-grounded-mutation-tests"]
+    max_mutants: int = Field(default=6, ge=1, le=8)
+
+
+class GroundedMutantResult(BaseModel):
+    mutant_id: Annotated[str, StringConstraints(pattern=r"^mut-[0-9]{3}$")]
+    description: str = Field(max_length=240)
+    operator: str = Field(max_length=80)
+    line: int = Field(ge=1)
+    column: int = Field(ge=0)
+    mutant_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
+    status: Literal["killed", "survived", "unavailable"]
+    exit_code: int | None = None
+    timed_out: bool = False
+    sandboxed: bool = False
+    execution_evidence: EvidenceRecord
+
+
+class GroundedMutationResponse(BaseModel):
+    task_id: str
+    file_path: str
+    symbol_name: str
+    source_sha256: str
+    status: Literal["passed", "failed", "unavailable"]
+    baseline_status: Literal["passed", "failed", "unavailable"]
+    baseline_evidence: EvidenceRecord
+    mutants_total: int = Field(ge=0)
+    mutants_killed: int = Field(ge=0)
+    mutants_survived: int = Field(ge=0)
+    mutants_unavailable: int = Field(ge=0)
+    mutation_score: float | None = Field(default=None, ge=0, le=1)
+    mutants: list[GroundedMutantResult] = Field(default_factory=list)
+    summary_evidence: EvidenceRecord
+    limitations: list[str] = Field(default_factory=list)
+
+
 class GroundedCounterexample(BaseModel):
     case_id: str
     probe_candidate_id: str | None = None
@@ -587,6 +626,9 @@ class TaskProofBundleResponse(BaseModel):
     shrink_attempt_count: int = Field(ge=0)
     shrunk_counterexample_count: int = Field(ge=0)
     unverified_probe_candidate_count: int = Field(ge=0)
+    mutation_run_count: int = Field(default=0, ge=0)
+    latest_mutation_summary: EvidenceRecord | None = None
+    mutation_evidence: list[EvidenceRecord] = Field(default_factory=list)
     counterexamples: list[GroundedCounterexample] = Field(default_factory=list)
     oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
     shrink_evidence: list[EvidenceRecord] = Field(default_factory=list)
