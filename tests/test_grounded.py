@@ -3643,3 +3643,90 @@ def test_positional_only_default_hole_is_rejected_before_runner_execution(
     with pytest.raises(GroundedVerificationError, match="positional-only default"):
         verifier.run(task_id, request, workspace_root)
     assert runner.calls == []
+
+
+def test_typing_final_async_module_function_runs_in_generated_harness(tmp_path: Path) -> None:
+    source = (
+        "from typing import final as marker\n"
+        "@marker\n"
+        "async def async_total(value, /, *, offset=1):\n"
+        "    return value + offset\n"
+    )
+    descriptor = _target_descriptor(source, "async_total")
+    case = {
+        "case_id": "typing-final-async",
+        "arguments": {"value": 4, "offset": 3},
+        "expected_output": 7,
+        "oracle_property": None,
+        "oracle_artifact_path": None,
+        "oracle_artifact_sha256": None,
+        "_unai_signature": _signature_plan(descriptor["function"]),
+        "_unai_constructor_signature": None,
+    }
+    generated = _generated_pytest(
+        "service.py",
+        "async_total",
+        [case],
+        hashlib.sha256(source.encode()).hexdigest(),
+        is_async=True,
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.parametrize(
+    "symbol,expected,drop_first",
+    [
+        (
+            "Calculator.static_total",
+            [16, {"start": 99, "tag": "static"}],
+            False,
+        ),
+        (
+            "Calculator.class_total",
+            ["Calculator", 16, {"start": 99, "tag": "class"}],
+            True,
+        ),
+    ],
+)
+def test_static_and_classmethod_variadic_generated_harnesses(
+    tmp_path: Path, symbol: str, expected: list, drop_first: bool
+) -> None:
+    source = (
+        "import typing as typing_alias\n"
+        "@typing_alias.final\n"
+        "class Calculator:\n"
+        "    @staticmethod\n"
+        "    def static_total(start, /, *items, scale=1, **extra):\n"
+        "        return [start + sum(items) * scale, extra]\n"
+        "    @classmethod\n"
+        "    def class_total(cls, start, /, *items, scale=1, **extra):\n"
+        "        return [cls.__name__, start + sum(items) * scale, extra]\n"
+    )
+    descriptor = _target_descriptor(source, symbol)
+    plan = _signature_plan(descriptor["function"], drop_first_parameter=drop_first)
+    suffix = "static" if not drop_first else "class"
+    case = {
+        "case_id": "variadic-" + suffix,
+        "arguments": {
+            "start": 2,
+            "items": [3, 4],
+            "scale": 2,
+            "extra": {"start": 99, "tag": suffix},
+        },
+        "expected_output": expected,
+        "oracle_property": None,
+        "oracle_artifact_path": None,
+        "oracle_artifact_sha256": None,
+        "_unai_signature": plan,
+        "_unai_constructor_signature": None,
+    }
+    generated = _generated_pytest(
+        "service.py",
+        symbol,
+        [case],
+        hashlib.sha256(source.encode()).hexdigest(),
+        invocation_kind=descriptor["invocation_kind"],
+    )
+    completed = _execute_generated_signature_harness(tmp_path, source, generated)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
