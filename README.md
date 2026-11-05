@@ -73,9 +73,9 @@ The Cloudflare Worker is a deployment scaffold, not a deployed service. Every /a
 
 ## Training and fine-tuning
 
-The training directory contains M5 specialist infrastructure: consent/license/verification-gated trajectories, deterministic repository-disjoint train/eval splits, separate next-action/planner/verifier LoRA/QLoRA runs, matched base/adapter/tool-augmented held-out evaluation with case-content fingerprints and exact paired significance, and a physical-device release gate. The Engine supports server-configured model routing to each separately served specialist without base-model fallback. Train on suitable GPU hardware; the 6 GB phone is an inference target, not a training machine. No dataset has been supplied, no weights have been trained, and no Android release benchmark is claimed complete.
+The training directory contains the M5 specialist pipeline for next-action, planner and verifier adapters. It includes a deterministic first-party synthetic data collector, metadata-only preflight, bounded JSONL validation, credential redaction, deduplication, repository-disjoint splits, reproducible manifests, separate LoRA/QLoRA trainers, matched held-out evaluation and a physical-device release gate. Start with `python -m training.collect_synthetic --output data/raw/unai-synthetic.jsonl`, then audit and prepare as documented in training/README.md. Synthetic examples bootstrap the pipeline; they are not real repository trajectories or proof of model quality. No adapter weights have been trained or released. Train on suitable GPU hardware; the 6 GB phone is an inference target, not a training machine.
 
-Read training/README.md before preparing data. Never train on private conversations or repositories without explicit permission and compatible licenses.
+Public data imports must include explicit compatible rights, HTTPS source/license evidence and an immutable revision. Never ingest private conversations or repositories without explicit permission.
 
 ## Mobile acceptance targets — unverified
 
