@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import subprocess
 
 import pytest
@@ -45,6 +46,8 @@ def test_external_side_effect_fixture_is_opt_in_ephemeral_and_non_executable(
     assert "--network=none" in args
     assert "--read-only" in args
     assert "--cap-drop=ALL" in args
+    if os.name == "posix":
+        assert args[args.index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
 
 
 def test_external_side_effect_fixture_is_absent_from_default_sandbox(
