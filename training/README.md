@@ -39,6 +39,18 @@ Only the three named specialist values are accepted. Messages must be valid user
 
 Never add private conversations, private repositories, credentials, or third-party data without explicit permission and compatible rights. Automated redaction covers common secret formats only; it is not a privacy guarantee. Inspect the prepared examples before training.
 
+## 1A. Read-only corpus preflight
+
+Before preparing any files, audit the raw JSONL without writing split files:
+
+```bash
+python -m training.audit_corpus --input data/raw-trajectories.jsonl
+```
+
+The report includes the raw input SHA-256/byte count, eligible/rejected/duplicate counts, per-specialist eligible record and distinct repository/project-group counts, and whether each specialist has enough groups for a deterministic train/eval split. Rejection reasons are aggregated; conversation text, raw repository identifiers and provenance source strings are never printed. The audit is read-only and rejects inputs larger than 2 GiB or individual JSONL lines larger than the corpus preparer's 1 MB limit.
+
+A role is marked split-ready only when it has at least one eligible record and at least two distinct repository/project groups. This is only a structural preflight: it does not establish that consent or license claims are authentic, independently replay verification, establish dataset quality, or mean there are enough examples to train a useful model. Review source permissions and sanitized samples before preparation and training.
+
 ## 2. Build deterministic specialist splits
 
 From the repository root:
