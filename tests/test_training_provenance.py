@@ -22,6 +22,7 @@ def test_public_source_requires_immutable_revision_and_https_license_evidence() 
             "license_url": "https://example.org/datasets/LICENSE",
         }
     )
+    assert len(row["source_revision"]) == 40
     assert _provenance(row) is not None
 
     mutable_revision = dict(row, source_revision="main")
