@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 recursive property-oracle shrinking extended to eight nested JSON container levels and a 256-node traversal ceiling; regression tests added; hosted verification for this continuation is pending.
+**Checkpoint:** M4 recursive property-oracle shrinking extended to eight nested JSON container levels and a 256-node traversal ceiling; three regression tests added; CI passed on validation HEAD cab14a827b2821445e566271ecbc89436c1d4465 (383 tests plus compile/build checks).
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -756,3 +756,35 @@ The Docker command-line contract is covered with a mocked Docker invocation; gen
 ### Remaining software work
 
 Continue M4 with broader recursive shrinking only where each type has its own correctness/resource policy, and other decorators/signatures or coverage/mutation verification only with separately reviewed sandbox and execution budgets. M5 specialist adapters remain untrained: no explicitly approved consented/licensed multi-repository corpus or reproducible GPU training run has been supplied. Keep Android install, offline inference and physical-device benchmarks for the final integration phase.
+
+## 2026-11-05 M4 bounded recursive-shrinking extension — CI validated
+
+**Repository:** https://github.com/somildholakia/UnAi  
+**Branch:** feat/m4-instance-methods-m5-specialists  
+**Implementation commit:** 9ecb52918d0455b9bb71f40adaa65dc73554bd8e — depth/node budget expansion and three regression tests.  
+**Test-correction commit:** cab14a827b2821445e566271ecbc89436c1d4465 — corrected the depth-boundary test to distinguish removed collection paths from changed values beyond the traversal limit.  
+**Validated branch HEAD at test time:** cab14a827b2821445e566271ecbc89436c1d4465.  
+**Main SHA:** fef00e16fbe721e7c7946aee89fcc8e44fb0e896 (unchanged).  
+**PR #28:** open, mergeable and unmerged.
+
+### Delivered
+
+- Expanded recursive JSON input shrinking from four to eight container levels.
+- Raised the deterministic traversal ceiling from 128 to 256 visited JSON nodes per argument.
+- Preserved the existing 12-candidate-per-argument ceiling, 24 candidate executions and 6 isolated Docker rounds per request, and the 10 KB per-value oracle input cap.
+- Kept deterministic per-type shrinking, strict recursive reduction ordering, JSON type integrity, source/specification freshness checks and Docker isolation.
+- Added regression tests for the depth-8/depth-9 boundary, a hard visited-node ceiling, deterministic output, input immutability, strict reduction ordering and bool/int/float/string handling.
+
+### CI evidence
+
+- **Engine/Web Actions run #352:** success — https://github.com/somildholakia/UnAi/actions/runs/41986190439. The Engine suite passed **383 tests in 17.12s**; Python compileall and all six Termux shell syntax checks passed. The Web TypeScript check and Vite production build passed.
+- **Brain Worker Actions run #35:** success — https://github.com/somildholakia/UnAi/actions/runs/41986190243. Worker checks, D1 migration smoke test and browser JavaScript syntax validation passed.
+- The first run after implementation, Engine/Web run #351, exposed one incorrect assertion in the newly added depth-boundary test (382 passed, one failed). The test was corrected in cab14a8; run #352 passed on that exact validation HEAD.
+- The previous code HEAD ae191d633d5414d211a35787dae459b50f2392ac had also completed Engine/Web run #350 (380 tests passed) and Worker run #33 successfully before this change.
+
+### Limits and next task
+
+- Values deeper than eight container levels are not traversed; bounded collection deletion may remove a path as one candidate. Supported nested JSON types remain unchanged; arbitrary objects and non-string mapping keys are not introduced.
+- The result remains a smallest-observed failing input, not a global minimality proof. Exact-output failures and replay/filesystem divergence cases are not automatically shrunk.
+- **Next M4 task:** review and safely expand decorator and Python signature support. Each accepted decorator/signature form must have explicit construction/binding/invocation semantics, fail-closed rejection for ambiguous cases, and generated-harness security/regression tests. Coverage-guided or mutation-based verification remains a later M4 item requiring fixed deterministic targets, isolation and hard execution budgets.
+- M5 specialist weights remain untrained because no approved consented/licensed corpus and reproducible training artifacts exist. Android setup and physical-device validation remain deferred until the software roadmap is complete.

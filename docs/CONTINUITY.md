@@ -520,3 +520,31 @@ One explicit nested class namespace level is supported for static, class and ord
 ### Mandatory sequencing
 
 The user requested one checkpoint at a time and explicitly requires all software work to be completed before mobile setup. Continue on `feat/m4-instance-methods-m5-specialists`; keep `main` unchanged and PR #28 unmerged. Update GitHub and the continuity/checkpoint docs at each validated milestone. Do not ask the user to install or test on Android yet.
+
+## Authoritative continuation handoff — M4 recursive shrinking depth extension — 2026-11-05
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Active branch:** feat/m4-instance-methods-m5-specialists
+- **Implementation commit:** 9ecb52918d0455b9bb71f40adaa65dc73554bd8e.
+- **Test correction / validated code HEAD:** cab14a827b2821445e566271ecbc89436c1d4465.
+- **Main:** fef00e16fbe721e7c7946aee89fcc8e44fb0e896; unchanged.
+- **PR #28:** open, mergeable and unmerged. Do not merge it.
+- **Engine/Web Actions run #352:** success; 383 tests passed in 17.12s, compileall, all six Termux shell syntax checks and Web TypeScript/Vite production build passed.
+- **Brain Worker Actions run #35:** success; Worker type checks, D1 migration smoke test and browser JavaScript syntax passed.
+- **Initial test attempt:** run #351 failed one new depth-boundary assertion (382 passed); the test was corrected in cab14a8, and run #352 passed on that validation HEAD.
+
+### M4 change
+
+Recursive property-oracle shrinking now traverses up to eight nested JSON container levels and 256 visited nodes per argument. The existing per-argument candidate ceiling (12), request-wide candidate execution budget (24), isolated round budget (6), per-value 10 KB oracle input ceiling and Docker isolation are unchanged. Deterministic scalar/collection reducers and strict reduction ordering are preserved.
+
+Regression coverage checks the depth-8/depth-9 boundary, hard traversal ceiling, strict reduction ordering, deterministic results, input immutability and scalar type distinctions (especially bool versus int). Shrinking remains opt-in and property-oracle-only; exact-output, replay-divergence and filesystem-divergence cases are not shrunk.
+
+### Next software task
+
+Continue M4 with safe expansion of decorator and Python signature support. First enumerate exact construction/binding/invocation behavior for each proposed form, reject unsupported or ambiguous forms before execution, and exercise fixed generated harnesses in the disposable sandbox. Coverage-guided/mutation-based verification follows only with deterministic fixed targets and explicit candidate, CPU, memory and wall-clock budgets.
+
+### M5/M6 status and sequencing
+
+No consented/licensed multi-repository corpus or trained specialist artifacts exist; do not claim the model is trained or ready. Held-out model evaluation and physical Android memory/latency/thermal/lifecycle measurements remain open. Do not begin Android/Termux installation or ask for phone testing until all software development roadmap items are complete.
+
+Continue from the newest branch HEAD, read this handoff plus docs/CHECKPOINT.md, docs/ROADMAP.md and docs/VERIFICATION.md, and keep main unchanged and PR #28 unmerged.
