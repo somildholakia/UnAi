@@ -204,8 +204,8 @@ def test_prepare_rejects_oversized_record_while_preserving_exact_input_digest(tm
         for role in SPECIALISTS
         for group in ("repo-one", "repo-two")
     ]
-    oversized = b"x" * 4096 + b"\\n"
-    valid_payload = "".join(json.dumps(row) + "\\n" for row in rows).encode("utf-8")
+    oversized = b"x" * 4096 + b"\n"
+    valid_payload = "".join(json.dumps(row) + "\n" for row in rows).encode("utf-8")
     source = tmp_path / "raw.jsonl"
     payload = oversized + valid_payload
     source.write_bytes(payload)
