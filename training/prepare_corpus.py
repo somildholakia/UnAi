@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -149,7 +150,7 @@ def _provenance(value: Any) -> dict[str, Any] | None:
                 parsed = urlsplit(url)
                 if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
                     return None
-            if not revision:
+            if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})", revision, re.IGNORECASE):
                 return None
         if source_type == "authorized_local" and not optional_text.get("authorization_reference"):
             return None
