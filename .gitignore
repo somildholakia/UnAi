@@ -19,3 +19,9 @@ dist/
 .tenant-workspaces/
 *.log
 .DS_Store
+
+# Training inputs, prepared data, weights and generated reports
+data/raw/
+data/specialists/
+artifacts/
+reports/
