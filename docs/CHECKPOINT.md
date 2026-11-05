@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Checkpoint:** M4 safe Python signature expansion and bounded `typing.final` decorator support implemented; focused/full CI validation pending.
+**Checkpoint:** M4 safe Python decorator and signature expansion implemented and CI-validated on `8ae33e2fa3d1257a9053428cf4602df632a23b5b`; 399 tests and all Engine/Web/Brain Worker checks passed.
 **Date:** 2026-11-05
 **Repository:** https://github.com/somildholakia/UnAi
 **Branch:** feat/m4-instance-methods-m5-specialists
@@ -797,3 +797,30 @@ Continue M4 with broader recursive shrinking only where each type has its own co
 - Optional positional-only parameters may be omitted only as a trailing suffix. Non-empty `*args` requires explicit values for every positional slot. Variadic probes and shrinking are rejected because existing probe/shrink structures cannot safely preserve expanded calls.
 - Added tests for alias/decorator safety, parameter container validation, positional-only holes, generated variadic module calls, generated variadic instance construction/method calls, and preflight rejection without a runner call.
 - Focused/full validation and exact commit SHA are pending; do not treat this checkpoint as complete until GitHub Actions succeeds.
+
+## 2026-11-05 M4 safe Python decorators and signature expansion — CI validated
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Branch:** `feat/m4-instance-methods-m5-specialists`
+- **Validated HEAD:** `8ae33e2fa3d1257a9053428cf4602df632a23b5b`
+- **Starting checkpoint:** `a04a9a848c224ff0826a2f9ecd9805d50ee58b31`
+- **PR #28:** open, mergeable and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Delivered
+
+- Restricted decorator expansion to the standard-library `typing.final` identity marker with direct, unique module-scope imports. Reassigned, reused, late-bound or otherwise ambiguous aliases are rejected; decorator calls/custom decorators and unsafe stack order are rejected before target import. The built-in `staticmethod`/`classmethod` names must be unshadowed.
+- Added signature plans for positional-only, positional-or-keyword, keyword-only, `*args` and `**kwargs` for module functions and static/class/instance methods, including synchronous instance constructor fixtures.
+- Variadic containers are JSON-only: the declared vararg name maps to a list; the declared varkw name maps to a string-keyed object. Required parameters, positional-only default suffixes, variadic positional slots and explicit keyword collisions are preflight-validated.
+- Generated harness invocation uses a fixed helper and server-derived signature plans; caller-controlled values stay in JSON and are not emitted into executable source. Fresh instances are constructed for every case/replay.
+- Probe-linked and shrinking cases on variadic target/constructor signatures are rejected rather than partially binding or shrinking an incomplete call.
+
+### Validation
+
+- **Engine/Web Actions run #361:** success — [run details](https://github.com/somildholakia/UnAi/actions/runs/41993901671). **399 Python tests passed in 15.06s**. Python compileall, all six Termux shell syntax checks, Web dependency install and Vite production build passed.
+- **Brain Worker Actions run #44:** success — [run details](https://github.com/somildholakia/UnAi/actions/runs/41993901745). Worker typecheck, D1 migration/legacy tenant smoke test and browser JavaScript syntax passed.
+- Added generated-harness regression tests for async module functions decorated with `typing.final`, variadic static/class methods, variadic module functions and variadic instance constructors/methods, plus preflight rejection, unsafe decorators, malformed containers and positional-only gaps.
+- Harness tests execute generated pytest files in isolated temporary staging workspaces using the repository's existing test pattern. No live Docker-container integration test or physical Android test is claimed by this checkpoint.
+
+### Next incomplete M4 roadmap task
+
+Add coverage-guided and mutation-based verification only with explicit resource/sandbox policies. Keep physical Android/Termux setup deferred until software roadmap work is complete.

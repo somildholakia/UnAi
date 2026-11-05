@@ -290,3 +290,12 @@ The Engine now includes `unai_engine.verification.transparency`, a verification 
 A caller supplies the signed tree head, trusted log-key mapping, leaf index, inclusion path and (when advancing an existing checkpoint) the consistency path. Merkle proof nodes are 32-byte hexadecimal hashes. The tree-head signature covers the schema, log ID, key ID, timestamp, tree size and root hash in canonical UTF-8 JSON; this is the unAI envelope, not a claim of wire compatibility with every public log protocol.
 
 This component verifies cryptographic statements supplied to it. It does **not** fetch proofs, discover logs or keys, perform witness gossip, prove that a log is globally append-only, or authenticate a publisher's legal identity. Operator key pinning and checkpoint storage remain local trust inputs. The grounded publisher-oracle acceptance path now verifies the signed tree head, exact manifest inclusion, consistency with the stored per-log checkpoint, configured independent witness signatures/quorum, and records proof/checkpoint provenance in append-only oracle evidence. This is still offline verification of caller-supplied proof material, not a deployed public log or universal consensus protocol.
+
+## M4 decorator/signature expansion — validation record
+
+**Validated commit:** `8ae33e2fa3d1257a9053428cf4602df632a23b5b` on `feat/m4-instance-methods-m5-specialists`.
+
+- Engine/Web run #361 passed **399 tests in 15.06s**, Python compileall, all six Termux shell syntax checks and Web production build (https://github.com/somildholakia/UnAi/actions/runs/41993901671).
+- Brain Worker run #44 passed Worker typecheck, D1 migration/legacy tenant smoke test and browser JavaScript syntax (https://github.com/somildholakia/UnAi/actions/runs/41993901745).
+- Regression coverage executes generated harnesses from temporary staged workspace copies. This record does not claim a separate live Docker-container integration test or Android execution.
+- Unsupported decorators, ambiguous import bindings, decorator calls, shadowed built-ins, positional-only default holes, malformed variadic containers, duplicate explicit keywords, variadic probes and variadic shrinking remain fail-closed.

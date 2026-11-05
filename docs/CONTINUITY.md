@@ -558,3 +558,26 @@ Continue from the newest branch HEAD, read this handoff plus docs/CHECKPOINT.md,
 - The same binding rules apply to constructor fixtures. Positional-only default holes and non-empty varargs with missing positional slots are rejected. Explicit keyword collisions are rejected; positional-only names may be present in the `**kwargs` object according to Python semantics.
 - Variadic probe-linked cases and variadic shrinking cases are rejected until the probe/shrinker structures can attest to the complete expanded call.
 - Tests and hosted CI status are pending; continue validation and record the final exact SHA before declaring the checkpoint complete. PR #28 remains open/unmerged; `main` remains unchanged; no mobile installation is started.
+
+
+## Authoritative continuation handoff — M4 safe Python decorators and signature expansion — 2026-11-05
+
+- **Repository:** https://github.com/somildholakia/UnAi
+- **Branch:** `feat/m4-instance-methods-m5-specialists`
+- **Validated branch HEAD:** `8ae33e2fa3d1257a9053428cf4602df632a23b5b`
+- **Previous task checkpoint HEAD:** `a04a9a848c224ff0826a2f9ecd9805d50ee58b31`
+- **Engine/Web Actions run #361:** success; 399 tests passed in 15.06s, Python compileall, all six Termux shell syntax checks and Web production build passed. https://github.com/somildholakia/UnAi/actions/runs/41993901671
+- **Brain Worker Actions run #44:** success; Worker typecheck, D1 migration smoke test and browser JS syntax passed. https://github.com/somildholakia/UnAi/actions/runs/41993901745
+- **PR #28:** open, mergeable and unmerged. **main:** `fef00e16fbe721e7c7946aee89fcc8e44fb0e896`, unchanged.
+
+### Implementation rules now supported
+
+- Only unambiguous direct module-scope `typing.final` imports qualify for the identity marker. Rebinding, alias reuse outside a decorator, late import, shadowed `staticmethod`/`classmethod`, decorator calls, custom decorators and unsafe stack order fail closed.
+- Positional-only, positional-or-keyword and keyword-only parameters retain name-keyed JSON inputs. Variadic positional values use the declared `*args` parameter name and a JSON list; variadic keyword values use the declared `**kwargs` parameter name and a string-keyed JSON object.
+- Constructor fixtures use the same signature binder and preserve fixture hashes. The generated harness uses fixed call helper code driven by server-derived plans; JSON case content is not interpolated as Python source.
+- Positional-only default holes, non-empty variadic calls with missing positional slots, malformed containers, duplicate keyword bindings, variadic probe-linked cases and variadic shrink cases reject before execution.
+- Generated harness tests cover module/async, static, class and instance binding in temporary staged copies. This CI checkpoint does not claim a separate live Docker-container run.
+
+### Next incomplete roadmap task
+
+M4 next: add coverage-guided and mutation-based verification only with explicit resource/sandbox policies. M5 still requires a real consented/licensed corpus, trained specialist weights and held-out evaluation; no such corpus or trained weights are claimed. M6 device metrics and deployment remain unverified. Do not start Android setup or request phone testing until the software roadmap is complete.
