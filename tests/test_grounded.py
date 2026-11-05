@@ -3270,18 +3270,21 @@ def test_recursive_shrinker_supports_eight_nested_containers_but_not_nine() -> N
             value = {"child": value}
         return value
 
-    def leaf(value: dict | int, levels: int) -> int:
+    def leaf_if_present(value: dict | int, levels: int) -> int | None:
         current = value
         for _ in range(levels):
-            assert isinstance(current, dict)
+            if not isinstance(current, dict) or "child" not in current:
+                return None
             current = current["child"]
-        assert type(current) is int
-        return current
+        return current if type(current) is int else None
 
     depth_eight = nested(8)
     eight_candidates = _nested_argument_shrink_candidates(depth_eight)
     assert eight_candidates
-    assert any(leaf(candidate, 8) != 11 for candidate in eight_candidates)
+    assert any(
+        (reduced := leaf_if_present(candidate, 8)) is not None and reduced != 11
+        for candidate in eight_candidates
+    )
     assert all(
         _argument_measure(candidate) < _argument_measure(depth_eight)
         for candidate in eight_candidates
@@ -3292,11 +3295,9 @@ def test_recursive_shrinker_supports_eight_nested_containers_but_not_nine() -> N
     # A candidate may remove a containing key, but the value beyond the depth
     # boundary must never be changed while its full path remains present.
     for candidate in nine_candidates:
-        try:
-            candidate_leaf = leaf(candidate, 9)
-        except (AssertionError, KeyError, TypeError):
-            continue
-        assert candidate_leaf == 11
+        candidate_leaf = leaf_if_present(candidate, 9)
+        if candidate_leaf is not None:
+            assert candidate_leaf == 11
 
 
 def test_recursive_shrinker_enforces_hard_visited_node_budget(monkeypatch: pytest.MonkeyPatch) -> None:
