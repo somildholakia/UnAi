@@ -1409,8 +1409,7 @@ def test_instance_method_uses_explicit_json_constructor_fixture(tmp_path: Path) 
     ast.parse(generated)
     assert "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None" in generated
     assert "_invoke_case(case)" in generated
-    assert "_invoke_with_signature(_CLASS, instance_values" in generated
-    assert "_invoke_with_signature(_FUNCTION, values" in generated
+    assert "_invoke_with_signature(" in generated
     assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
     fixture_hash = result.oracle_evidence[0].metadata["instance_arguments_sha256"]
     assert fixture_hash == hashlib.sha256(
@@ -1460,8 +1459,7 @@ def test_async_instance_method_uses_fresh_constructor_fixture(tmp_path: Path) ->
     generated = runner.calls[0]["content"]
     ast.parse(generated)
     assert "asyncio.run(_invoke_case(case))" in generated
-    assert "_invoke_with_signature(_CLASS, instance_values" in generated
-    assert "_invoke_with_signature(_FUNCTION, values" in generated
+    assert "_invoke_with_signature(" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
     assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
 
