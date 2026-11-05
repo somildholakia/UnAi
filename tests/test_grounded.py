@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -32,7 +33,7 @@ from unai_engine.models import (
     TaskTestRunResponse,
 )
 from unai_engine.runtime.patches import PatchManager
-from unai_engine.runtime.sandbox import ExecutionResult
+from unai_engine.runtime.sandbox import DockerSandbox, ExecutionResult
 from unai_engine.runtime.test_runner import IsolatedPythonTestRunner, WorkspaceStagingError
 from unai_engine.verification.attestations import (
     build_oracle_attestation_statement,
@@ -3730,3 +3731,62 @@ def test_static_and_classmethod_variadic_generated_harnesses(
     )
     completed = _execute_generated_signature_harness(tmp_path, source, generated)
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_variadic_generated_harness_executes_in_disposable_docker_sandbox(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is unavailable; the CI engine job builds the sandbox image.")
+    image_check = subprocess.run(
+        ["docker", "image", "inspect", "unai-python-test:latest"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if image_check.returncode != 0:
+        pytest.skip("unai-python-test:latest is not built; the CI engine job builds it.")
+
+    task_id, workspace_root, target, _source, ledger, _snapshot, _probes, _fake_runner, fake_verifier = _setup(tmp_path)
+    source = (
+        "from typing import final as marker\n"
+        "@marker\n"
+        "def total(value, /, *items, mode='default', **extra):\n"
+        "    return [value + sum(items), mode, extra]\n"
+    )
+    target.write_text(source, encoding="utf-8")
+    fresh = fake_verifier.patch_manager.read_file(task_id, "service.py", workspace_root)
+    request = GroundedTestApprovalRequest(
+        confirm="run-grounded-oracle-tests",
+        file_path="service.py",
+        symbol_name="total",
+        source_sha256=fresh.sha256,
+        cases=[
+            GroundedOracleCase(
+                case_id="docker-variadic-generated",
+                arguments={
+                    "value": 2,
+                    "items": [3, 4],
+                    "mode": "isolated",
+                    "extra": {"value": 99, "ok": True},
+                },
+                expected_output=[9, "isolated", {"value": 99, "ok": True}],
+                oracle_kind="user",
+                oracle_reference="User supplied disposable Docker variadic invocation result",
+            )
+        ],
+    )
+    docker_runner = IsolatedPythonTestRunner(
+        ledger, DockerSandbox(timeout_seconds=45)
+    )
+    docker_verifier = GroundedTestVerifier(
+        ledger, fake_verifier.patch_manager, docker_runner
+    )
+
+    result = docker_verifier.run(task_id, request, workspace_root)
+
+    assert result.status == "passed"
+    assert result.execution_evidence is not None
+    assert result.execution_evidence.metadata["sandboxed"] is True
+    assert result.execution_evidence.metadata["command"] == "python -m pytest -q"
