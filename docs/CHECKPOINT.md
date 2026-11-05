@@ -21,6 +21,28 @@
 **M3.2 implementation PR:** https://github.com/somildholakia/UnAi/pull/1 (merged)
 **M3.2 code merge commit:** 4b83a48927939b7b8fb2ea811f7d26f7aa6313aa
 
+## 2026-11-05 M5 first-party dataset collection increment
+
+**Implementation:** deterministic synthetic collector, synthetic-contract validation, source-provenance preservation, public-source revision/license-evidence checks, aggregate source-type audit, end-to-end pipeline tests and local-data ignore rules.
+**Status:** implementation pushed to `feat/m4-instance-methods-m5-specialists`; CI validation pending at the time of this note.
+**Entry point:** `python -m training.collect_synthetic --output data/raw/unai-synthetic.jsonl`.
+**Default size:** 20 repository/project groups × 12 records × 3 specialist roles = 720 synthetic records.
+**Data flow:** collect → read-only audit → repository-disjoint preparation → trainer manifest verification.
+**Trust boundary:** generated answers are checked against deterministic generator contracts only. They are synthetic, not real repository trajectories, and do not demonstrate model quality. Public-source rows require HTTPS source/license evidence and an immutable revision. No adapter weights, held-out model results or device metrics are claimed.
+
+### Delivered behavior
+
+- The standard-library-only collector produces deterministic `next_action`, `planner` and `verifier` examples, validates the response contract before writing, and emits a sidecar manifest with seed, generator version, license, counts, bytes and SHA-256.
+- It writes generated JSONL via a temporary file and atomic rename; a failed contract check leaves an existing dataset untouched.
+- The existing bounded audit now reports synthetic/public/legacy source classes only as aggregates.
+- Preparation preserves source type, generator/version, rights basis, and public source/revision/license URLs after validation. Public URLs must use HTTPS; local authorized imports require an authorization reference.
+- Provenance source and license evidence are sanitized before prepared output. Regression tests cover redaction and malformed source metadata.
+- Training files and generated artifacts remain local through `.gitignore`.
+
+### Current boundaries
+
+The generator bootstraps the data pipeline and creates modest synthetic examples. It does not replace a diverse, independently verified real-world corpus. Specialist adapters have not been trained; matched held-out evaluations and physical Android measurements remain separate release gates.
+
 ## 2026-11-05 M5 corpus-preflight and credential-redaction checkpoint
 
 **Branch:** `feat/m4-instance-methods-m5-specialists`
