@@ -1072,7 +1072,7 @@ def test_async_grounded_function_uses_asyncio_run_in_generated_harness(tmp_path:
     generated = runner.calls[0]["content"]
     ast.parse(generated)
     assert "import asyncio\nimport atexit\nimport copy\nimport hashlib\nimport importlib.util" in generated
-    assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
+    assert "asyncio.run(_invoke_case(case))" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
 
@@ -1119,7 +1119,7 @@ def test_staticmethod_grounded_target_uses_explicit_class_binding(tmp_path: Path
     assert "_METHOD = 'add'" in generated
     assert "_CLASS = getattr(_MODULE, _OWNER, None)" in generated
     assert "_FUNCTION = getattr(_CLASS, _METHOD, None)" in generated
-    assert "_FUNCTION(**case['arguments'])" in generated
+    assert "_invoke_case(case)" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is False
 
 
@@ -1291,7 +1291,7 @@ def test_async_classmethod_uses_bound_cls_and_asyncio_run(tmp_path: Path) -> Non
     assert result.status == "passed"
     generated = runner.calls[0]["content"]
     ast.parse(generated)
-    assert "asyncio.run(_FUNCTION(**case['arguments']))" in generated
+    assert "asyncio.run(_invoke_case(case))" in generated
     assert "_OWNER = 'AsyncCalculator'" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
 
@@ -1408,7 +1408,9 @@ def test_instance_method_uses_explicit_json_constructor_fixture(tmp_path: Path) 
     generated = runner.calls[0]["content"]
     ast.parse(generated)
     assert "_FUNCTION = _CLASS.__dict__.get(_METHOD) if _CLASS is not None else None" in generated
-    assert "_FUNCTION(_CLASS(**case['instance_arguments']), **case['arguments'])" in generated
+    assert "_invoke_case(case)" in generated
+    assert "_invoke_with_signature(_CLASS, instance_values" in generated
+    assert "_invoke_with_signature(_FUNCTION, values" in generated
     assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
     fixture_hash = result.oracle_evidence[0].metadata["instance_arguments_sha256"]
     assert fixture_hash == hashlib.sha256(
@@ -1457,7 +1459,9 @@ def test_async_instance_method_uses_fresh_constructor_fixture(tmp_path: Path) ->
     assert result.status == "passed"
     generated = runner.calls[0]["content"]
     ast.parse(generated)
-    assert "asyncio.run(_FUNCTION(_CLASS(**case['instance_arguments']), **case['arguments']))" in generated
+    assert "asyncio.run(_invoke_case(case))" in generated
+    assert "_invoke_with_signature(_CLASS, instance_values" in generated
+    assert "_invoke_with_signature(_FUNCTION, values" in generated
     assert runner.calls[0]["metadata"]["target_is_async"] is True
     assert runner.calls[0]["metadata"]["target_invocation_kind"] == "instance_method"
 
