@@ -676,11 +676,11 @@ def test_coverage_guided_probe_api_uses_existing_hash_bound_evidence_without_exe
     workspace_root = _configure_inspection(tmp_path, monkeypatch)
     target = workspace_root / "demo" / "branching.py"
     target.write_text(
-        "def classify(value):\\n"
-        "    if value < 0:\\n"
-        "        return \\"negative\\"\\n"
-        "    else:\\n"
-        "        return \\"non-negative\\"\\n",
+        "def classify(value):\n"
+        "    if value < 0:\n"
+        "        return \"negative\"\n"
+        "    else:\n"
+        "        return \"non-negative\"\n",
         encoding="utf-8",
     )
     client = TestClient(app)
@@ -777,11 +777,11 @@ def test_coverage_guided_probe_api_rejects_stale_or_foreign_evidence(
     workspace_root = _configure_inspection(tmp_path, monkeypatch)
     target = workspace_root / "demo" / "branching.py"
     target.write_text(
-        "def classify(value):\\n"
-        "    if value < 0:\\n"
-        "        return \\"negative\\"\\n"
-        "    else:\\n"
-        "        return \\"non-negative\\"\\n",
+        "def classify(value):\n"
+        "    if value < 0:\n"
+        "        return \"negative\"\n"
+        "    else:\n"
+        "        return \"non-negative\"\n",
         encoding="utf-8",
     )
     client = TestClient(app)
