@@ -158,7 +158,7 @@ class SymbolReference(BaseModel):
 class EvidenceRecord(BaseModel):
     evidence_id: str
     task_id: str
-    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace", "shrink", "mutation"]
+    kind: Literal["precondition", "repository", "quality", "discovery", "execution", "patch", "probe", "oracle", "counterexample", "trace", "shrink", "mutation", "coverage"]
     source: str
     claim: str
     passed: bool | None = None
@@ -513,6 +513,8 @@ class GroundedTestApprovalRequest(BaseModel):
     symbol_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
     source_sha256: Annotated[str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")]
     cases: list[GroundedOracleCase] = Field(min_length=1, max_length=20)
+    # Opt-in, bounded line/branch-arm measurement in the same approved run.
+    measure_coverage: bool = False
 
 
 class GroundedMutationApprovalRequest(GroundedTestApprovalRequest):
@@ -593,6 +595,37 @@ class GroundedShrinkResult(BaseModel):
     note: str
 
 
+class GroundedCoverageBranch(BaseModel):
+    branch_id: Annotated[str, StringConstraints(pattern=r"^branch-[0-9]{3}$")]
+    kind: Literal["if", "while", "for", "async_for"]
+    line: int = Field(ge=1)
+    condition: str = Field(max_length=300)
+    then_observed: bool
+    else_observed: bool | None = None
+
+
+class GroundedCoverageResult(BaseModel):
+    status: Literal["complete", "unavailable"]
+    reason: str | None = Field(default=None, max_length=300)
+    target_file: str
+    symbol_name: str
+    source_sha256: str
+    trace_sha256: Annotated[
+        str, StringConstraints(pattern=r"^[a-fA-F0-9]{64}$")
+    ] | None = None
+    coverable_line_count: int = Field(default=0, ge=0)
+    executed_line_count: int = Field(default=0, ge=0)
+    missing_line_count: int = Field(default=0, ge=0)
+    missing_lines: list[int] = Field(default_factory=list, max_length=500)
+    line_coverage: float | None = Field(default=None, ge=0, le=1)
+    supported_branch_arms: int = Field(default=0, ge=0)
+    observed_branch_arms: int = Field(default=0, ge=0)
+    branch_coverage: float | None = Field(default=None, ge=0, le=1)
+    branches: list[GroundedCoverageBranch] = Field(default_factory=list, max_length=200)
+    cases_measured: int = Field(default=0, ge=0, le=20)
+    truncated: bool = False
+
+
 class GroundedTestResponse(BaseModel):
     task_id: str
     file_path: str
@@ -606,6 +639,8 @@ class GroundedTestResponse(BaseModel):
     execution_evidence: EvidenceRecord
     trace_evidence: EvidenceRecord
     oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    coverage: GroundedCoverageResult | None = None
+    coverage_evidence: EvidenceRecord | None = None
     limitations: list[str] = Field(default_factory=list)
 
 
@@ -629,6 +664,9 @@ class TaskProofBundleResponse(BaseModel):
     mutation_run_count: int = Field(default=0, ge=0)
     latest_mutation_summary: EvidenceRecord | None = None
     mutation_evidence: list[EvidenceRecord] = Field(default_factory=list)
+    coverage_run_count: int = Field(default=0, ge=0)
+    latest_coverage_summary: EvidenceRecord | None = None
+    coverage_evidence: list[EvidenceRecord] = Field(default_factory=list)
     counterexamples: list[GroundedCounterexample] = Field(default_factory=list)
     oracle_evidence: list[EvidenceRecord] = Field(default_factory=list)
     shrink_evidence: list[EvidenceRecord] = Field(default_factory=list)

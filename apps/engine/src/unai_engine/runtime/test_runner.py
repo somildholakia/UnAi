@@ -400,6 +400,107 @@ def _validated_replay_trace(
     return normalized, "complete" if seen == expected else "partial"
 
 
+def _validated_coverage_trace(
+    workspace: Path,
+    relative_path: str,
+    expected_case_ids: list[str],
+    expected_target_file: str,
+    expected_target_sha256: str,
+) -> tuple[dict[str, Any] | None, str]:
+    """Load only the bounded, hash-only line trace written by the harness."""
+    if not isinstance(relative_path, str):
+        return None, "invalid_path"
+    relative = PurePosixPath(relative_path)
+    if (
+        relative.is_absolute()
+        or relative.as_posix() != relative_path
+        or len(relative.parts) != 2
+        or relative.parts[0] != "unai_generated_tests"
+        or relative.suffix != ".json"
+        or not relative.name.endswith(".coverage.json")
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        return None, "invalid_path"
+    expected = {
+        item for item in expected_case_ids
+        if isinstance(item, str) and item
+    }
+    if not expected or len(expected) > 20:
+        return None, "invalid_case_ids"
+    workspace_root = workspace.resolve()
+    trace_directory = workspace / relative.parts[0]
+    if trace_directory.is_symlink() or not trace_directory.is_dir():
+        return None, "unsafe_directory"
+    try:
+        resolved_directory = trace_directory.resolve(strict=True)
+        if not resolved_directory.is_relative_to(workspace_root):
+            return None, "unsafe_directory"
+        trace_path = trace_directory / relative.parts[1]
+        if trace_path.is_symlink() or not trace_path.is_file():
+            return None, "missing"
+        resolved_trace_path = trace_path.resolve(strict=True)
+        if not resolved_trace_path.is_relative_to(resolved_directory):
+            return None, "unsafe_path"
+        if resolved_trace_path.stat().st_size > 262_144:
+            return None, "oversized"
+        raw = resolved_trace_path.read_text(encoding="utf-8")
+        payload = json.loads(raw)
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        return None, "invalid"
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema") != "unai.coverage-trace.v1"
+        or payload.get("target_file") != expected_target_file
+        or not isinstance(payload.get("target_sha256"), str)
+        or payload["target_sha256"].lower() != expected_target_sha256.lower()
+    ):
+        return None, "invalid"
+
+    def normalize_lines(value: Any, limit: int) -> list[int] | None:
+        if not isinstance(value, list) or len(value) > limit:
+            return None
+        normalized: set[int] = set()
+        for item in value:
+            if (
+                not isinstance(item, int)
+                or isinstance(item, bool)
+                or not 1 <= item <= 1_000_000
+            ):
+                return None
+            normalized.add(item)
+        return sorted(normalized)
+
+    executed_lines = normalize_lines(payload.get("executed_lines"), 5_000)
+    if executed_lines is None:
+        return None, "invalid"
+    case_lines = payload.get("case_lines")
+    if not isinstance(case_lines, dict) or len(case_lines) > len(expected):
+        return None, "invalid"
+    normalized_cases: dict[str, list[int]] = {}
+    total_case_lines = 0
+    for case_id, lines in case_lines.items():
+        if case_id not in expected:
+            return None, "invalid"
+        normalized_lines = normalize_lines(lines, 5_000)
+        if normalized_lines is None:
+            return None, "invalid"
+        total_case_lines += len(normalized_lines)
+        if total_case_lines > 20_000:
+            return None, "invalid"
+        normalized_cases[case_id] = normalized_lines
+    trace_sha256 = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema": "unai.coverage-trace.v1",
+        "target_file": expected_target_file,
+        "target_sha256": expected_target_sha256.lower(),
+        "executed_lines": executed_lines,
+        "case_lines": normalized_cases,
+        "trace_sha256": trace_sha256,
+    }, "complete"
+
+
 class IsolatedPythonTestRunner:
     """Runs only pytest in Docker, with no network and a filtered temporary copy."""
 
@@ -741,6 +842,27 @@ class IsolatedPythonTestRunner:
                                 for case_id in external_fixture_case_ids
                                 if external_fixture_records.get(case_id, {}).get("status") != "complete"
                             )
+                coverage_trace_relative_path = effective_evidence_metadata.get(
+                    "coverage_trace_relative_path"
+                )
+                if coverage_trace_relative_path is not None and generated_test is not None:
+                    generated_relative = PurePosixPath(relative_text)
+                    expected_trace_path = generated_relative.with_suffix(
+                        ".coverage.json"
+                    ).as_posix()
+                    if coverage_trace_relative_path != expected_trace_path:
+                        effective_evidence_metadata["coverage_trace"] = None
+                        effective_evidence_metadata["coverage_trace_status"] = "invalid_path"
+                    else:
+                        coverage_trace, coverage_status = _validated_coverage_trace(
+                            stage_path,
+                            coverage_trace_relative_path,
+                            effective_evidence_metadata.get("coverage_case_ids", []),
+                            effective_evidence_metadata.get("target_file", ""),
+                            effective_evidence_metadata.get("target_sha256", ""),
+                        )
+                        effective_evidence_metadata["coverage_trace"] = coverage_trace
+                        effective_evidence_metadata["coverage_trace_status"] = coverage_status
                 if result.exit_code != 0 and (
                     "No module named pytest" in stderr
                     or "No module named pytest" in stdout

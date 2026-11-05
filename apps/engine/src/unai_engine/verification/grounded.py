@@ -38,6 +38,12 @@ from unai_engine.verification.attestations import (
     canonical_attestation_message,
     verify_ed25519_attestation,
 )
+from unai_engine.verification.coverage import (
+    CoveragePlanningError,
+    analyze_coverage,
+    build_coverage_plan,
+    unavailable_coverage,
+)
 from unai_engine.verification.ledger import EvidenceLedger
 from unai_engine.verification.proof import summarize_proof
 from unai_engine.verification.transparency import (
@@ -68,6 +74,7 @@ _LIMITATIONS = [
     "Return-value oracles require JSON-compatible results; an explicit raises_exception property may require only one of the fixed allowlisted built-in exception types, never an arbitrary caller-supplied class name.",
     "The sandbox stages a filtered copy. Missing project dependencies, omitted non-Python assets, or environment differences can make results unavailable or inconclusive.",
     "Execution traces retain hashes and redacted bounded previews, not a complete deterministic replay of process state.",
+    "Coverage is measured only from line events and supported if/while/for arms observed while the supplied oracle cases run; it does not prove unexecuted behavior, infer expected outputs, or establish completeness.",
 ]
 
 
@@ -1035,6 +1042,7 @@ def _generated_pytest(
     is_async: bool = False,
     invocation_kind: str = "module_function",
     replay_trace_path: str | None = None,
+    coverage_trace_path: str | None = None,
 ) -> str:
     payload = _json_text(cases, "Oracle cases")
     target_hash_literal = repr(target_sha256)
@@ -1052,12 +1060,44 @@ def _generated_pytest(
         ):
             raise GroundedVerificationError("Replay trace path must be a generated workspace JSON file.")
         replay_trace_literal = repr(replay_trace_path)
-    invocation = "asyncio.run(_invoke_case(case))" if is_async else "_invoke_case(case)"
-    replay_invocation = (
-        "asyncio.run(_invoke_case(case, copy.deepcopy(case['arguments'])))"
-        if is_async
-        else "_invoke_case(case, copy.deepcopy(case['arguments']))"
-    )
+    coverage_trace_literal = "None"
+    if coverage_trace_path is not None:
+        coverage_relative = PurePosixPath(coverage_trace_path)
+        if (
+            coverage_relative.is_absolute()
+            or coverage_relative.as_posix() != coverage_trace_path
+            or len(coverage_relative.parts) != 2
+            or coverage_relative.parts[0] != "unai_generated_tests"
+            or coverage_relative.suffix != ".json"
+            or not coverage_relative.name.endswith(".coverage.json")
+            or any(part in {"", ".", ".."} for part in coverage_relative.parts)
+        ):
+            raise GroundedVerificationError(
+                "Coverage trace path must be a generated workspace JSON file."
+            )
+        coverage_trace_literal = repr(coverage_trace_path)
+    if is_async:
+        invocation = (
+            "_coverage_async_invoke(case)"
+            if coverage_trace_path is not None
+            else "asyncio.run(_invoke_case(case))"
+        )
+        replay_invocation = (
+            "_coverage_async_invoke(case, copy.deepcopy(case['arguments']))"
+            if coverage_trace_path is not None
+            else "asyncio.run(_invoke_case(case, copy.deepcopy(case['arguments'])))"
+        )
+    else:
+        invocation = (
+            "_coverage_invoke(case)"
+            if coverage_trace_path is not None
+            else "_invoke_case(case)"
+        )
+        replay_invocation = (
+            "_coverage_invoke(case, copy.deepcopy(case['arguments']))"
+            if coverage_trace_path is not None
+            else "_invoke_case(case, copy.deepcopy(case['arguments']))"
+        )
     # Embed a JSON string as a Python string literal; never interpolate caller text
     # as executable Python source.
     payload_literal = repr(payload)
@@ -1138,6 +1178,32 @@ if _REPLAY_TRACE_PATH is not None:
     except OSError:
         _REPLAY_TRACE_DIRECTORY_FD = None
 _REPLAY_TRACE_RECORDS = []
+_COVERAGE_TRACE_RELATIVE_PATH = {coverage_trace_literal}
+_COVERAGE_TRACE_PATH = (
+    (_ROOT / _COVERAGE_TRACE_RELATIVE_PATH).resolve()
+    if _COVERAGE_TRACE_RELATIVE_PATH is not None
+    else None
+)
+if _COVERAGE_TRACE_PATH is not None and not _COVERAGE_TRACE_PATH.is_relative_to(
+    (_ROOT / "unai_generated_tests").resolve()
+):
+    raise RuntimeError("Coverage trace path escaped the generated-test directory.")
+_COVERAGE_TRACE_DIRECTORY_FD = None
+if _COVERAGE_TRACE_PATH is not None:
+    _COVERAGE_TRACE_DIRECTORY = _ROOT / "unai_generated_tests"
+    try:
+        if not _COVERAGE_TRACE_DIRECTORY.is_symlink():
+            _COVERAGE_TRACE_DIRECTORY_FD = os.open(
+                _COVERAGE_TRACE_DIRECTORY,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+    except OSError:
+        _COVERAGE_TRACE_DIRECTORY_FD = None
+_COVERAGE_LINES = set()
+_COVERAGE_CASE_LINES = {{}}
+_COVERAGE_CURRENT_LINES = None
 _ALLOWED_EXCEPTIONS = {{
     "ValueError": ValueError,
     "TypeError": TypeError,
@@ -1157,6 +1223,7 @@ if not _TARGET.is_relative_to(_ROOT) or not _TARGET.is_file():
     raise RuntimeError("Grounded test target is missing or outside the staged workspace.")
 if hashlib.sha256(_TARGET.read_bytes()).hexdigest() != _EXPECTED_TARGET_SHA256:
     raise RuntimeError("Grounded test target changed after its verified source snapshot.")
+_TARGET_SOURCE_PATH = str(_TARGET)
 for _case in _CASES:
     _oracle_path = _case.get("oracle_artifact_path")
     if not _oracle_path:
@@ -1177,6 +1244,9 @@ _SPEC.loader.exec_module(_MODULE)
 {target_resolution}
 if not callable(_FUNCTION):
     raise RuntimeError("Grounded test target is not callable.")
+_TARGET_CODE = getattr(getattr(_FUNCTION, "__func__", _FUNCTION), "__code__", None)
+if _TARGET_CODE is None:
+    raise RuntimeError("Grounded test target has no executable code object.")
 
 
 def _invoke_with_signature(function, values, plan, bound=None):
@@ -1220,6 +1290,51 @@ def _invoke_case(case, arguments=None):
             _FUNCTION, values, case["_unai_signature"], bound=instance
         )
     return _invoke_with_signature(_FUNCTION, values, case["_unai_signature"])
+
+
+def _coverage_trace(frame, event, arg):
+    if event == "line" and frame.f_code is _TARGET_CODE:
+        if _COVERAGE_CURRENT_LINES is not None:
+            _COVERAGE_CURRENT_LINES.add(frame.f_lineno)
+            _COVERAGE_LINES.add(frame.f_lineno)
+    return _coverage_trace
+
+
+def _record_case_coverage(case, lines):
+    existing = set(_COVERAGE_CASE_LINES.get(case["case_id"], []))
+    _COVERAGE_CASE_LINES[case["case_id"]] = sorted(existing | lines)
+
+
+def _coverage_invoke(case, arguments=None):
+    global _COVERAGE_CURRENT_LINES
+    if _COVERAGE_TRACE_PATH is None:
+        return _invoke_case(case, arguments)
+    _COVERAGE_CURRENT_LINES = set()
+    previous = sys.gettrace()
+    sys.settrace(_coverage_trace)
+    try:
+        return _invoke_case(case, arguments)
+    finally:
+        sys.settrace(previous)
+        current = _COVERAGE_CURRENT_LINES or set()
+        _COVERAGE_CURRENT_LINES = None
+        _record_case_coverage(case, current)
+
+
+def _coverage_async_invoke(case, arguments=None):
+    global _COVERAGE_CURRENT_LINES
+    if _COVERAGE_TRACE_PATH is None:
+        return asyncio.run(_invoke_case(case, arguments))
+    _COVERAGE_CURRENT_LINES = set()
+    previous = sys.gettrace()
+    sys.settrace(_coverage_trace)
+    try:
+        return asyncio.run(_invoke_case(case, arguments))
+    finally:
+        sys.settrace(previous)
+        current = _COVERAGE_CURRENT_LINES or set()
+        _COVERAGE_CURRENT_LINES = None
+        _record_case_coverage(case, current)
 
 
 _CASE_INVOCATION_KIND = {invocation_kind!r}
@@ -1496,8 +1611,49 @@ def _write_replay_trace_file():
             os.close(descriptor)
 
 
+def _write_coverage_trace_file():
+    if _COVERAGE_TRACE_PATH is None:
+        return
+    payload = {{
+        "schema": "unai.coverage-trace.v1",
+        "target_file": _FILE_PATH,
+        "target_sha256": _EXPECTED_TARGET_SHA256,
+        "executed_lines": sorted(_COVERAGE_LINES),
+        "case_lines": _COVERAGE_CASE_LINES,
+    }}
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    if len(encoded.encode("utf-8")) > 262_144:
+        return
+    if _COVERAGE_TRACE_DIRECTORY_FD is None:
+        return
+    descriptor = None
+    try:
+        descriptor = os.open(
+            _COVERAGE_TRACE_PATH.name,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=_COVERAGE_TRACE_DIRECTORY_FD,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            descriptor = None
+            handle.write(encoded)
+    except OSError:
+        # Coverage failure must not change the oracle result.
+        return
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 if _REPLAY_TRACE_PATH is not None:
     atexit.register(_write_replay_trace_file)
+if _COVERAGE_TRACE_PATH is not None:
+    atexit.register(_write_coverage_trace_file)
 
 
 def _property_holds(actual, arguments, property_spec):
@@ -2435,6 +2591,14 @@ class GroundedTestVerifier:
         function = target["function"]
         target_invocation_kind = target["invocation_kind"]
         normalized = _validate_cases(snapshot, request, target)
+        coverage_plan = None
+        if request.measure_coverage:
+            try:
+                coverage_plan = build_coverage_plan(source_snapshot.content, function)
+            except CoveragePlanningError as exc:
+                raise GroundedVerificationError(
+                    f"Coverage analysis could not represent the target: {exc}"
+                ) from exc
 
         # A supplied workspace document hash pins the exact bytes used as the
         # specification reference. It does not authenticate the document author.
@@ -2689,6 +2853,11 @@ class GroundedTestVerifier:
         replay_trace_relative_path = (
             generated_path[:-3] + ".replay.json" if trace_case_ids else None
         )
+        coverage_trace_relative_path = (
+            generated_path[:-3] + ".coverage.json"
+            if coverage_plan is not None
+            else None
+        )
         # Transparency and reviewer signatures are durable evidence, never test input.
         execution_cases = [
             {
@@ -2709,6 +2878,7 @@ class GroundedTestVerifier:
             is_async=is_async,
             invocation_kind=target_invocation_kind,
             replay_trace_path=replay_trace_relative_path,
+            coverage_trace_path=coverage_trace_relative_path,
         )
         run_metadata = {
             "target_file": request.file_path,
@@ -2724,6 +2894,9 @@ class GroundedTestVerifier:
             "filesystem_case_ids": filesystem_case_ids,
             "external_fixture_case_ids": external_fixture_case_ids,
             "replay_trace_relative_path": replay_trace_relative_path,
+            "coverage_requested": coverage_plan is not None,
+            "coverage_trace_relative_path": coverage_trace_relative_path,
+            "coverage_case_ids": [case["case_id"] for case in normalized],
             "oracle_references": [
                 {
                     "case_id": case["case_id"],
@@ -3084,6 +3257,12 @@ class GroundedTestVerifier:
             "stderr_preview": execution.stderr_preview,
             "replay_trace_records": execution.evidence.metadata.get("replay_trace_records", []),
             "replay_trace_status": execution.evidence.metadata.get("replay_trace_status"),
+            "coverage_trace_status": execution.evidence.metadata.get("coverage_trace_status"),
+            "coverage_trace_sha256": (
+                execution.evidence.metadata.get("coverage_trace", {}).get("trace_sha256")
+                if isinstance(execution.evidence.metadata.get("coverage_trace"), dict)
+                else None
+            ),
             "target_sha256": source_snapshot.sha256,
             "generated_test_sha256": run_metadata["generated_test_sha256"],
             "case_ids": [case["case_id"] for case in normalized],
@@ -3105,6 +3284,70 @@ class GroundedTestVerifier:
         )
         self.ledger.append_evidence(trace_evidence)
 
+        coverage_result = None
+        coverage_evidence = None
+        if coverage_plan is not None:
+            coverage_trace_status = execution.evidence.metadata.get(
+                "coverage_trace_status"
+            )
+            coverage_trace = execution.evidence.metadata.get("coverage_trace")
+            trace_sha256 = (
+                coverage_trace.get("trace_sha256")
+                if isinstance(coverage_trace, dict)
+                else None
+            )
+            if (
+                coverage_trace_status == "complete"
+                and isinstance(coverage_trace, dict)
+                and coverage_trace.get("target_file") == request.file_path
+                and str(coverage_trace.get("target_sha256", "")).lower()
+                == source_snapshot.sha256.lower()
+                and isinstance(trace_sha256, str)
+                and re.fullmatch(r"[a-fA-F0-9]{64}", trace_sha256) is not None
+            ):
+                coverage_result = analyze_coverage(
+                    coverage_plan,
+                    coverage_trace.get("executed_lines", []),
+                    coverage_trace.get("case_lines"),
+                    target_file=request.file_path,
+                    symbol_name=request.symbol_name,
+                    source_sha256=source_snapshot.sha256,
+                    trace_sha256=trace_sha256.lower(),
+                )
+            else:
+                coverage_result = unavailable_coverage(
+                    target_file=request.file_path,
+                    symbol_name=request.symbol_name,
+                    source_sha256=source_snapshot.sha256,
+                    reason=(
+                        "Coverage trace was not available "
+                        f"({coverage_trace_status or 'missing'})."
+                    ),
+                )
+            coverage_evidence = EvidenceRecord(
+                evidence_id=uuid4().hex,
+                task_id=task_id,
+                kind="coverage",
+                source="grounded-coverage",
+                claim=(
+                    f"Coverage measurement {coverage_result.status}: "
+                    f"{coverage_result.executed_line_count}/"
+                    f"{coverage_result.coverable_line_count} target line(s), "
+                    f"{coverage_result.observed_branch_arms}/"
+                    f"{coverage_result.supported_branch_arms} supported branch arm(s)."
+                ),
+                passed=None,
+                artifact_ref=f"coverage:{task_id}:{execution.evidence.evidence_id}",
+                metadata={
+                    "schema": "unai.coverage.v1",
+                    "execution_evidence_id": execution.evidence.evidence_id,
+                    "generated_test_sha256": run_metadata["generated_test_sha256"],
+                    **coverage_result.model_dump(mode="json"),
+                },
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.ledger.append_evidence(coverage_evidence)
+
         passed_cases: int | None = None
         if execution.status == "passed":
             passed_cases = len(normalized)
@@ -3124,6 +3367,8 @@ class GroundedTestVerifier:
             execution_evidence=execution.evidence,
             trace_evidence=trace_evidence,
             oracle_evidence=oracle_events,
+            coverage=coverage_result,
+            coverage_evidence=coverage_evidence,
             limitations=list(_LIMITATIONS),
         )
 
@@ -3159,6 +3404,10 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
     mutation_runs = [
         item for item in events
         if item.kind == "execution" and item.source == _MUTATION_EVIDENCE_SOURCE
+    ]
+    coverage_summaries = [
+        item for item in events
+        if item.kind == "coverage" and item.source == "grounded-coverage"
     ]
     probes = [
         item for item in events
@@ -3289,6 +3538,32 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
         risks.append(
             "No mutation-based test-strength run is recorded; passing oracle cases may not distinguish small source changes."
         )
+    if coverage_summaries:
+        latest_coverage = coverage_summaries[-1]
+        if latest_coverage.metadata.get("status") == "unavailable":
+            risks.append(
+                "The latest coverage measurement was unavailable, so line and branch coverage of the supplied oracle cases remains unknown."
+            )
+        else:
+            missing_lines = int(
+                latest_coverage.metadata.get("missing_line_count", 0) or 0
+            )
+            supported_arms = int(
+                latest_coverage.metadata.get("supported_branch_arms", 0) or 0
+            )
+            observed_arms = int(
+                latest_coverage.metadata.get("observed_branch_arms", 0) or 0
+            )
+            if missing_lines or supported_arms > observed_arms:
+                risks.append(
+                    f"The latest coverage run left {missing_lines} target line(s) and "
+                    f"{max(0, supported_arms - observed_arms)} supported branch arm(s) "
+                    "unobserved by the supplied oracle cases."
+                )
+    else:
+        risks.append(
+            "No coverage measurement is recorded; line and branch coverage of the supplied oracle cases remains unknown."
+        )
     if not any(item.passed is True for item in grounded_runs):
         risks.append("No passing grounded-oracle execution is currently recorded.")
     risks.extend(
@@ -3320,6 +3595,11 @@ def build_proof_bundle(snapshot: TaskEvidenceSnapshot) -> TaskProofBundleRespons
             mutation_runs + mutation_summaries,
             key=lambda item: (item.created_at, item.evidence_id),
         )[-60:],
+        coverage_run_count=len(coverage_summaries),
+        latest_coverage_summary=(
+            coverage_summaries[-1] if coverage_summaries else None
+        ),
+        coverage_evidence=coverage_summaries[-60:],
         counterexamples=counterexamples,
         oracle_evidence=oracle_events[-100:],
         shrink_evidence=shrink_events[-100:],
