@@ -165,7 +165,7 @@ def _safe_expression(node: ast.AST, values: dict[str, Any], depth: int = 0) -> A
             right = _safe_expression(comparator, values, depth + 1)
             try:
                 if isinstance(operator, ast.Eq):
-                    passed = type(left) is type(right) and left == right
+                    passed = left == right
                 elif isinstance(operator, ast.NotEq):
                     passed = not (type(left) is type(right) and left == right)
                 elif isinstance(operator, ast.Lt):
