@@ -255,13 +255,27 @@ Statuses are distinct:
 
 A response reports a counterexample only when the generated marker is found in the captured preview. A failed test run without a marker is a failed/inconclusive execution, not a fabricated counterexample.
 
+## 3A. Bounded coverage measurement
+
+Coverage is an opt-in audit of the supplied grounded-oracle cases. Add `"measure_coverage": true` to the existing `POST /api/tasks/{task_id}/grounded-tests` request; no second execution endpoint or separate oracle is introduced. The ordinary grounded run remains the source of the verdict, and every expected output/property and oracle reference must still be supplied explicitly.
+
+Before execution, the verifier builds a deterministic plan from the exact selected function or method AST. The plan counts executable statement lines in that target body (excluding docstrings and nested function/class bodies) and supports bounded branch-arm descriptions for `if`, `while`, `for` and `async for` nodes. A `then` arm is observed when at least one planned body line executes; an explicit `else`/loop-`else` arm is reported only when that suite exists. This is line-derived evidence, not direct decision instrumentation.
+
+The generated harness uses `sys.settrace` only while invoking the selected target's exact code object. It records target source line numbers by supplied case ID, never argument or result values. The trace carries the target path and source SHA-256, is written incrementally after each measured invocation with an exit-time fallback, and is loaded only from the disposable Docker staging copy. The runner validates the fixed generated-test path, schema, source hash, case IDs, line-number types and trace size before the verifier uses it.
+
+Hard bounds are 50,000 AST nodes traversed, 5,000 coverable statement lines, 200 branch descriptions, 300 characters per rendered condition, 500 returned missing-line entries, 20 oracle cases, 5,000 trace line numbers per list and 256 KiB for the trace file. The existing Docker sandbox remains network-disabled with a read-only container root, dropped capabilities, no-new-privileges, one CPU, a 1 GiB memory limit and the fixed pytest command. The container runs as the staging process UID/GID so artifacts on the bind-mounted temporary workspace remain owned by the process that validates and removes them.
+
+The response includes `coverage` with status, source/trace hashes, executed and missing statement counts, line ratio, supported/observed branch-arm counts, per-branch observations, measured-case count and a truncation flag. An append-only `kind=coverage`, `source=grounded-coverage` evidence record is linked to the execution evidence. Proof bundles expose `coverage_run_count`, `latest_coverage_summary` and `coverage_evidence`; unavailable measurements add an unresolved risk.
+
+A missing, malformed or unavailable trace does not change a passing or failing oracle verdict. Coverage then reports `status="unavailable"` and does not claim a zero-percent score. This increment measures only what the supplied oracle cases exercised: it does not generate candidate inputs, infer expected outputs, fuzz the target, or prove correctness. It is not a substitute for mutation testing; the fixed-mutant check remains a separate evidence type.
+
 ## 4. Proof bundle
 
 Retrieve the structured bundle with:
 
     GET /api/tasks/{task_id}/proof-bundle
 
-The bundle combines the existing patch/test freshness summary with the grounded oracle records, counterexamples, bounded shrink evidence, execution traces, unverified probe counts, unresolved risks and limitations. A grounded test run is also included in the existing /proof test-event sequence.
+The bundle combines the existing patch/test freshness summary with the grounded oracle records, counterexamples, bounded shrink and coverage evidence, mutation summaries, execution traces, unverified probe counts, unresolved risks and limitations. A grounded test run is also included in the existing /proof test-event sequence.
 
 The local read-only task MCP server exposes task_get_proof_bundle for model-side inspection. It does not expose grounded-test execution, patch application, arbitrary commands or permission grants. An MCP host can read evidence, but an explicit caller must invoke the HTTP execution endpoint.
 
@@ -272,7 +286,7 @@ The local read-only task MCP server exposes task_get_proof_bundle for model-side
 - The test process executes the selected project's Python module. Docker isolation limits its access; it is not a formal sandbox certification.
 - The filtered workspace may omit dependencies, assets or environment state. These conditions can make a run unavailable or inconclusive.
 - Captured trace hashes/previews and workspace manifests are bounded diagnostic evidence, not a deterministic replay or a complete snapshot of external process state.
-- Counterexample shrinking is opt-in, heuristic and resource-bounded; it does not prove global minimality. Symbolic execution, coverage-guided fuzzing, independent model review and multi-language oracle execution are not implemented yet. Bounded mutation-based test-strength verification is implemented separately below; it is evidence about a fixed mutant set, not coverage or a correctness proof.
+- Counterexample shrinking is opt-in, heuristic and resource-bounded; it does not prove global minimality. Symbolic execution, automatic coverage-guided case generation/fuzzing, independent model review and multi-language oracle execution are not implemented yet. The bounded coverage report audits only the supplied oracle cases; it does not generate tests. Bounded mutation-based test-strength verification is a separate evidence type about a fixed mutant set, not coverage or a correctness proof.
 
 The intended progression is evidence first: retain the source hash, oracle provenance, execution trace and unresolved assumptions rather than replacing them with a confidence score.
 
