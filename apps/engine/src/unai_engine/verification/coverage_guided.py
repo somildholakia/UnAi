@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import math
+import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -167,7 +168,7 @@ def _safe_expression(node: ast.AST, values: dict[str, Any], depth: int = 0) -> A
                 if isinstance(operator, ast.Eq):
                     passed = left == right
                 elif isinstance(operator, ast.NotEq):
-                    passed = not (type(left) is type(right) and left == right)
+                    passed = not (left == right)
                 elif isinstance(operator, ast.Lt):
                     passed = left < right
                 elif isinstance(operator, ast.LtE):
@@ -382,24 +383,35 @@ class CoverageGuidedProbePlanner:
             if str(metadata.get("source_sha256", "")).lower() != request.source_sha256.lower():
                 raise CoverageGuidanceError("Probe/coverage evidence is bound to a different source SHA-256.")
         if (
-            coverage_metadata.get("status") != "complete"
+            coverage_metadata.get("schema") != "unai.coverage.v1"
+            or coverage_metadata.get("status") != "complete"
             or coverage_metadata.get("target_file") != request.file_path
             or coverage_metadata.get("symbol_name") != request.symbol_name
             or not isinstance(coverage_metadata.get("trace_sha256"), str)
-            or len(coverage_metadata["trace_sha256"]) != 64
+            or re.fullmatch(r"[a-fA-F0-9]{64}", coverage_metadata["trace_sha256"]) is None
         ):
             raise CoverageGuidanceError("Coverage evidence is incomplete or targets a different symbol.")
         execution_id = coverage_metadata.get("execution_evidence_id")
         execution_evidence = by_id.get(execution_id) if isinstance(execution_id, str) else None
-        if execution_evidence is None or execution_evidence.kind != "execution":
-            raise CoverageGuidanceError("Coverage evidence is not linked to a known execution event.")
+        if (
+            execution_evidence is None
+            or execution_evidence.kind != "execution"
+            or execution_evidence.source != "grounded-oracle-sandbox"
+            or execution_evidence.metadata.get("target_file") != request.file_path
+            or execution_evidence.metadata.get("target_function") != request.symbol_name
+            or str(execution_evidence.metadata.get("target_sha256", "")).lower()
+            != request.source_sha256.lower()
+        ):
+            raise CoverageGuidanceError("Coverage evidence is not linked to the matching grounded execution.")
         candidates = probe_metadata.get("candidates")
         branches = coverage_metadata.get("branches")
         if (
             probe_metadata.get("executed") is not False
             or probe_metadata.get("expected_outputs_inferred") is not False
             or not isinstance(candidates, list)
+            or len(candidates) > MAX_CANDIDATES
             or not isinstance(branches, list)
+            or len(branches) > 200
         ):
             raise CoverageGuidanceError("Probe/coverage evidence shape is invalid.")
         ranked, status = rank_coverage_guided_probes(
