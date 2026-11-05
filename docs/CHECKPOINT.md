@@ -2,7 +2,7 @@
 
 ## Current active specialist-training checkpoint (2026-11-05)
 
-**Branch HEAD at start:** ` + "`6caa5ff7313c5c1e3c1f9c52b5576146243fce42`" + ` (verified against PR #28). PR #28 remains open/unmerged and ` + "`main`" + ` is unchanged.
+**Branch HEAD at start:** `6caa5ff7313c5c1e3c1f9c52b5576146243fce42` (verified against PR #28). PR #28 remains open/unmerged and `main` is unchanged.
 
 **CI at starting HEAD:** Engine/Web run #421 passed; Brain Worker run #104 passed. Engine job included the test suite, Python compileall, Docker sandbox build, six Termux shell syntax checks and Web production build. Worker job included typecheck, D1 migration validation and browser JavaScript syntax.
 
