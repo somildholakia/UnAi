@@ -551,6 +551,13 @@ def test_mutation_verifier_executes_through_disposable_docker_sandbox(
                 oracle_reference="user acceptance case negative",
             ),
             GroundedOracleCase(
+                case_id="boundary",
+                arguments={"value": 0},
+                expected_output="non-negative",
+                oracle_kind="user",
+                oracle_reference="user acceptance case zero boundary",
+            ),
+            GroundedOracleCase(
                 case_id="positive",
                 arguments={"value": 1},
                 expected_output="non-negative",
@@ -563,10 +570,15 @@ def test_mutation_verifier_executes_through_disposable_docker_sandbox(
 
     result = verifier.run(task_id, request, root)
 
+    # The first two plan candidates flip `<` to `<=` and `0` to `1`; both
+    # change the result at value 0, so the boundary case must kill both.
     assert result.baseline_status == "passed"
     assert result.mutants_total == 2
-    assert result.mutants_killed >= 1
+    assert result.mutants_killed == 2
+    assert result.mutants_survived == 0
     assert result.mutants_killed + result.mutants_survived == 2
+    assert result.status == "passed"
+    assert result.mutation_score == 1.0
     assert all(item.sandboxed for item in result.mutants)
     assert result.summary_evidence.metadata["schema"] == "unai.mutation-run.v1"
 
